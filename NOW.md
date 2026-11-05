@@ -111,17 +111,17 @@ Filled as workers return. Status: TODO / IN PROGRESS / GREEN / MANUAL-OK / BLOCK
 
 | Scope | Rows | Status |
 |---|---|---|
-| E1xx Platform | E101–E105 | E101 manual: dev seat verified above. Rest TODO |
+| E1xx Platform | E101–E105 | E101 manual: dev seat verified; E105 GREEN (C2); E102–E104 TODO |
 | E2xx Geometry | E201–E219 | TODO (C1) |
 | E3xx Segments | E301–E312 | TODO (C1) |
-| E4xx Volumes | E401–E421 | TODO (C2, A1) |
-| E5xx Tables | E501–E508 | TODO (C2, A2, A3) |
+| E4xx Volumes | E401–E421 | U rows GREEN (C2: E405c, E408c, E409, E410c, E411c, E413, E414, E418, E420, E421c; c = Core half); H rows TODO (A1, A4) |
+| E5xx Tables | E501–E508 | E508 GREEN (C2); E505 Core half GREEN; H rows TODO (A2, A3) |
 | E6xx Layouts | E601–E615 | U rows GREEN (C3: E603, E606, E607, E610; E309, E310 too); H/M rows TODO (A3) |
 | E7xx Frames | E701–E713 | TODO (L1) |
 | E8xx Regen | E801–E812 | Logic-level GREEN (C3: E804–E806, E811); H/M rows TODO (A4, L2) |
 | E9xx Dialog | E901–E917 | TODO (C4, U2) |
 | E10xx OHWM | E1001–E1021 | TODO (C5, A1, A2) |
-| T1–T31 | | T15, T16, T17 GREEN; T14 fingerprint part and T19 logic part GREEN (C3); rest TODO |
+| T1–T31 | | T15, T16, T17 GREEN; T14 fingerprint part and T19 logic part GREEN (C3); T11, T23 GREEN (C2); rest TODO |
 | P1–P24 | | P16 PASSED both hosts; P11, P12, P13, P17, P20, P24 ANSWERED headless (S2, docs/api-findings.md §B); P1–P10, P18, P19, P22, P23 TODO (S1); P14, P15, P21 TODO (S3) |
 
 ## Open items for Dan (HANDOFF.md section 13)
@@ -144,6 +144,8 @@ Filled as workers return. Status: TODO / IN PROGRESS / GREEN / MANUAL-OK / BLOCK
 |---|---|---|---|
 | 2026-11-05 | wp/c3 (C3 views + tracking) | 83d5ec5 | build 0 errors; `dotnet test` 109/109 on main; diff confined to Views/, Tracking/ and their tests |
 | 2026-11-05 | wp/s2 (S2 probes B) | eba01b0 | build 0 errors; probeB.scr re-run by orchestrator in the s2 worktree, exit 0, P20 undo evidence seen in the log (18 → 15 layouts); commit confined to ProbeB*.cs, probeB.scr, api-findings.md |
+| 2026-11-05 | wp/c2 (C2 volumes + output) | 23990f6 | build 0 errors; `dotnet test` 152/152 in the c2 worktree and on main; commit confined to Volumes/, Output/ and their tests; no TODO/FIXME/MUTATION residue |
+| 2026-11-05 | wp/fx (FX fixtures) | 6c69e2b | build 0 errors; fixtureA.scr re-run by orchestrator in the fx worktree: EG 2 tri, FG_A 52 tri, volume surface 68 tri, UnadjustedCut 5400.000000000002 UnadjustedFill 5400; commit confined to SelfTest/Fixture*.cs and tools/scripts/fixture*.scr. fixtureA.dwg left untracked (SVFIXTURE A rebuilds it in 6 s) |
 
 ## Decisions pending Dan (raised by workers, not yet ruled)
 
@@ -170,3 +172,28 @@ Filled as workers return. Status: TODO / IN PROGRESS / GREEN / MANUAL-OK / BLOCK
 - P24: find rows by `Cell.GetTextString(FormatOption.IgnoreMtextFormat)` (raw `TextString` carries MTEXT codes); labels still found after the user deletes a row; works in model space, a layout, and after reopen.
 - Open from S2: `SV-E190` chosen as the probe failure code; Dan's real DWT and HCFCD table untested (P11, P24 used code-built stand-ins); E614 and the `On` behaviour unchecked in full Civil 3D (one manual open of `%TEMP%\sheetvol\probeB-out.dwg` closes it); `CVPORT` cannot be set from .NET in Core Console, scripts use `_.MSPACE`; `_.PSPACE` on the Model tab aborts a script; `(layoutlist)` does not exist in Core Console.
 - Runner fix after S2's finding: `tools/test-headless.ps1` now asks MSBuild for `OutDir`, so a worktree stages its own in-tree DLL (MEASURED: main → `C:\LAN-DT-build\...`, worktree → `bin\Debug\...`).
+
+### From C2
+
+- Error rows carry NaN in every number with `Status = Error`; C4 must not display numbers for them. Any negative raw value from `IVolumeSource`, even −1e-13, is SV-E432: A1 cleans sign noise. Band polygons passed to the reconciler exclude skip gaps so a gap's volume lands in outside-limits (E303). Text height in config is paper units; model-space writers scale it. `ReconcileResult` carries outside-limits per analysis while `RegenResult.OutsideLimits` is one `RawVolume?`: A4 decides what goes in `RegenResult` or the contract changes before Wave 1 closes (candidate for stop condition 12.6 review at G1).
+- **csproj line owed by the orchestrator (done at this merge if it builds):** `Output/Templates/hcfcd-segment-table.json` must be copied to the output; U1's bundle must ship `Templates\`. Config default `hcfcd.templatePath` resolves against the plugin directory.
+- Assumed settings listed in `ReportConfig.AssumedSettings`: `TotalIncludesOutsideLimits=false` (A6), `ImpactVolumesUseCutFactor=true`, `VolumeZeroTolerance=0.01` CY or m³, coverage flag below 1 − 1e-6 and error above 1 + 1e-4, acre decimals 2 (A12 open), a net that rounds to 0 shows `0 CY` with no tag, HCFCD rows 6 and 7 take the first material's length and area (SV-E538 when others differ), HCFCD JSON is a placeholder layout (SV-E532 Info on load).
+- Not built: the 6.5 cross-check that the datum-method area agrees with the integrator's area (no tolerance given; sits between C5 and A4).
+
+### From FX
+
+- `Fixtures.CreateA/B/D/H(db)`, `CreateAlignmentS/C/K/SP(db)`, `CreateTemplate(db)`, `WriteTemplateDrawing(path)`, `CreateVolume(db, base, comp)`, `CreateFixtureVolumes(db)`; expected values in `FixtureSpec.Expected`; commands `SVFIXTURE <A|B|D|H|S|C|K|SP|TEMPLATE|ALL|VOLUMES|TEMPLATEDWG path>` and `SVFIXTUREREPORT`. Scripts `tools/scripts/fixtureA.scr`, `fixtureAll.scr`, `fixtureReport.scr`, `fixtureTemplate.scr`, `fixtureTemplateCheck.scr`.
+- **Whole-surface sign (MEASURED on Fixture D):** `UnadjustedFillVolume` = comparison above base; Net = Fill − Cut; cubic drawing units (feet). Bounded-volume sign (P1) is still S1's.
+- Choices where section 8 left room: K = 30° deflection turning right, tangents (0,0)→(500,0)→(759.81,−150); SP = PI (500,0), left 30°, R 500, clothoids 100 each, out-tangent 300; C = tangents meeting at a PI with a free curve. Fixture B's whole-surface fill is 88,000 ft³ for its triangulation (prism 66,000 plus ridge-end fans): T5's per-500-ft 555.556 CY still holds inside ±100 bands away from the ends.
+- API behaviour measured (inputs to P9, P12, P23): adding the EG corners with `AddVertices` as an edit left FG_A non-convex (42 triangles, "Point Outside Surface"); as perimeter breaklines it is right. Civil 3D hid 2 of FG_H's 36 triangles on its own (177–178° slivers, +y side only); collinear vertices removed them (E1013, P23). `Viewport.On = true` throws `eNotInPaperspace` unless the layout is current. AutoCAD adopts the first viewport as the overall viewport on first activation (S2's `Layout.Initialize()` finding is the fix; FX worked around it by activating first). Side-database layouts: activation does nothing until the previous layout is restored, then AutoCAD adds a default floating viewport; the written file's plan viewport scale drifted 0.02 → 0.014712 on first activation after reopen (cause not investigated; for T18 use TEMPLATE in an open drawing then SAVEAS). `PointLocation` negative offset = left (+y on S). `blank-c3d.dwg` has no `_No Labels` label set; first label set used.
+
+## Problem-code registry
+
+| Range | Owner | Meaning |
+|---|---|---|
+| SV-E1xx | FX, probes | SV-E190 probe step failed (S2); SV-E191–E193 fixture build failures (FX) |
+| SV-E2xx, E3xx | C1 | planning and geometry rows (E201, E202, E205, …, E304, E305 …) |
+| SV-E4xx | C2, A1 | E401, E405, E410, E411, E419 as rows; E430–E441 volumes without a row (E430 partition fail, E431 partition skipped, E432 negative raw, E438 area above boundary, E439 negative outside-limits) |
+| SV-E5xx | C2, A2, A3 | E530–E538 output without a row (E532 placeholder template, E538 material length/area differ) |
+| SV-E6xx | C3, A3 | E601, E603 (Info), E606, E309 (does not fit) |
+| SV-E10xx | C5, A2 | E1015 row binding |
