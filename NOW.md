@@ -5,8 +5,10 @@ what is true; HANDOFF.md wins on method. Every figure is MEASURED unless marked 
 
 ## Position
 
-**Wave 0 done, Gate G0 passed (evidence below). Next: dispatch Wave 1 (S1, S2, C1, C2,
-C3, C4, C5, FX) per HANDOFF.md section 10.**
+**Wave 0 done, Gate G0 passed, P16 closed in both hosts (evidence below). Wave 1 in
+progress since 2026-11-05: FX, S2, C1, C2, C3, C4, C5 dispatched in parallel, each in a
+worktree under `C:\LAN-DT-build\sheetvol-wt\<wp>` on branch `wp/<wp>`; S1 follows the FX
+merge because it needs Fixture A.**
 
 ## Corrections to HANDOFF.md (Dan or measurement overrides the plan)
 
@@ -66,15 +68,18 @@ The AECC modules (Base Core, Pipe Network, Roadway, Plan Production, ...) loaded
 `accoreconsole` part of P16 and the "can AeccDbMgd types be used headless" premise of P9;
 S1 still owns the rest of P9 and P10.
 
-**P16, acad.exe half — OPEN, Dan.** Not run: the orchestrator does not drive Dan's
-interactive Civil 3D (seat rule: no window foreground). Step for Dan, in full Civil 3D 2026:
+**P16, acad.exe half — PASSED (Dan, 2026-11-05).** In full Civil 3D 2026 Dan NETLOADed
+the staged DLL and ran `SVHELLO`:
 
 ```text
-NETLOAD  %APPDATA%\Autodesk\ApplicationPlugins\SheetVol-dev.bundle\Contents\SheetVol.Civil3D.dll
-SVHELLO
+SVHELLO ok. SheetVol.Civil3D 0.1.0.0 tfm=.NETCoreApp,Version=v10.0
+Runtime: .NET 10.0.14  Process: C:\Program Files\Autodesk\AutoCAD 2026\acad.exe
+AcDbMgd: 25.1.0.0  AeccDbMgd: 13.8.0.1873
+Core Console: False
+CivilApplication.ActiveDocument: ok
 ```
 
-Pass looks like the five lines above with `Core Console: False` and `acad.exe` as the process.
+P16 is closed: the net10.0-windows assembly loads in both hosts.
 
 `tools\check-contracts.ps1`: `contracts.md matches Contracts.cs`.
 
@@ -117,14 +122,14 @@ Filled as workers return. Status: TODO / IN PROGRESS / GREEN / MANUAL-OK / BLOCK
 | E9xx Dialog | E901–E917 | TODO (C4, U2) |
 | E10xx OHWM | E1001–E1021 | TODO (C5, A1, A2) |
 | T1–T31 | | TODO |
-| P1–P24 | | P16 headless PASSED; P16 acad.exe OPEN (Dan); rest TODO (S1, S2, S3) |
+| P1–P24 | | P16 PASSED in both hosts; rest TODO (S1, S2, S3) |
 
 ## Open items for Dan (HANDOFF.md section 13)
 
 | Item | Status |
 |---|---|
 | Confirm dev seat at 2026.2.2+ | DONE: 2026.2.3 |
-| P16 in full Civil 3D (`SVHELLO`) | OPEN, steps above |
+| P16 in full Civil 3D (`SVHELLO`) | DONE 2026-11-05 |
 | Four dialog artboards as PNG in `docs/ui/` | OPEN, before Wave 2 |
 | HCFCD table as it should look in CAD, plus a sample drawing with real surfaces and an OHWM elevation | OPEN, before Wave 2 |
 | Confirm A10 (what "below OHWM" means) and A12 (acre decimals) | OPEN, before Wave 2 |

@@ -25,8 +25,8 @@
   falling back to C:\Program Files\Autodesk\AutoCAD 2026.
 .PARAMETER TimeoutSec
   Kill the worker after this many seconds. Default 600.
-.PARAMETER Product
-  Pass /product C3D. Default on. -Product:$false drops it.
+.PARAMETER NoProduct
+  Omit /product C3D (passed by default).
 .PARAMETER LogPath
   Where the decoded console output is written. Default: $env:TEMP\sheetvol\<script>.log.
 
@@ -39,7 +39,7 @@ param(
     [string]$Drawing,
     [string]$HostExe,
     [int]$TimeoutSec = 600,
-    [switch]$Product = $true,
+    [switch]$NoProduct,
     [string]$LogPath,
     [string]$BuildDir,
     [string]$Configuration = 'Debug'
@@ -82,22 +82,25 @@ if (-not $BuildDir) {
     }
 }
 if (-not (Test-Path (Join-Path $BuildDir 'SheetVol.Civil3D.dll'))) { throw "no SheetVol.Civil3D.dll in $BuildDir (build first)" }
-$stage = Join-Path $env:APPDATA 'Autodesk\ApplicationPlugins\SheetVol-dev.bundle\Contents'
+# One staging folder per checkout (leaf folder name), so parallel worktrees never
+# overwrite each other's DLL mid-run.
+$leaf = Split-Path (Split-Path $PSScriptRoot -Parent) -Leaf
+$stage = Join-Path $env:APPDATA "Autodesk\ApplicationPlugins\SheetVol-dev-$leaf.bundle\Contents"
 New-Item -ItemType Directory -Force $stage | Out-Null
 Get-ChildItem $BuildDir -File | Where-Object { $_.Extension -in '.dll', '.pdb', '.json' } |
     ForEach-Object { Copy-Item $_.FullName (Join-Path $stage $_.Name) -Force }
 $dllPath = (Join-Path $stage 'SheetVol.Civil3D.dll') -replace '\\', '/'
 Write-Host "staged:        $stage"
 
-$args = @()
-if ($Drawing) { $args += '/i'; $args += "`"$Drawing`"" }
-$args += '/s'; $args += "`"$Script`""
-if ($Product) { $args += '/product'; $args += 'C3D' }
-$args += '/l'; $args += 'en-US'
+$argList = @()
+if ($Drawing) { $argList += '/i'; $argList += "`"$Drawing`"" }
+$argList += '/s'; $argList += "`"$Script`""
+if (-not $NoProduct) { $argList += '/product'; $argList += 'C3D' }
+$argList += '/l'; $argList += 'en-US'
 
 $psi = New-Object System.Diagnostics.ProcessStartInfo
 $psi.FileName = $HostExe
-$psi.Arguments = ($args -join ' ')
+$psi.Arguments = ($argList -join ' ')
 $psi.UseShellExecute = $false
 # The LAN Framework's acad.lsp writes a <drawing>_<id>.log into the process's
 # working directory. Keep those out of the repo (MEASURED 2026-11-05: nine of
