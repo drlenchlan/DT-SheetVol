@@ -122,7 +122,7 @@ Filled as workers return. Status: TODO / IN PROGRESS / GREEN / MANUAL-OK / BLOCK
 | E9xx Dialog | E901–E917 | TODO (C4, U2) |
 | E10xx OHWM | E1001–E1021 | TODO (C5, A1, A2) |
 | T1–T31 | | T15, T16, T17 GREEN; T14 fingerprint part and T19 logic part GREEN (C3); rest TODO |
-| P1–P24 | | P16 PASSED in both hosts; rest TODO (S1, S2, S3) |
+| P1–P24 | | P16 PASSED both hosts; P11, P12, P13, P17, P20, P24 ANSWERED headless (S2, docs/api-findings.md §B); P1–P10, P18, P19, P22, P23 TODO (S1); P14, P15, P21 TODO (S3) |
 
 ## Open items for Dan (HANDOFF.md section 13)
 
@@ -156,3 +156,15 @@ Filled as workers return. Status: TODO / IN PROGRESS / GREEN / MANUAL-OK / BLOCK
 ## Facts for later workers (from merged packages)
 
 - C3: twist sign convention is paper = Rotate(model − center, twist) / scale; P12 (S2) must confirm AutoCAD's `TwistAngle` sign and A3 absorbs any difference. `ViewSpec.PaperWidth/Height` is the template viewport size fitted to, not the required size (`ViewResult.RequiredPaperWidth/Height`); A3 never resizes the viewport. Display polygon enters through `IDisplayPolygonSource`; A4 adapts C1's boundary builder. Auto-update wiring (L2) must raise `ToolCommandRunning` for dialog-started regens and pass CommandCancelled/CommandFailed as `CommandEnded`. Codes used: SV-E309, E606, E601, E304, E202, E603(Info). Test fakes `C3Alignment`/`C3BandSource` to consolidate with C1's `Fakes/` after C1 merges.
+| 2026-11-05 | wp/s2 (S2 probes B) | eba01b0 | build 0 errors; probeB.scr re-run by orchestrator in the s2 worktree, exit 0, P20 undo evidence seen in the log (18 → 15 layouts); commit confined to ProbeB*.cs, probeB.scr, api-findings.md |
+
+### Facts from S2 (full detail with verbatim output in `docs/api-findings.md` §B)
+
+- P11: clone a layout as `CreateLayout` → `CopyFrom` → `Layout.Initialize()` → `WblockCloneObjects` of the paper-space entities, skipping the source's overall viewport; plot settings survive save and reopen. Do not clone the whole `Layout` object (keeps the source tab order and name).
+- P12: `paper = vp.CenterPoint + CustomScale · (R(+TwistAngle)(w − ViewTarget) − ViewCenter)`; matches `acedTrans` in 8 of 8 checks. 5.2's claim confirmed: `ViewCenter` is in display coordinates; section 6.6's `Twist = −bearing` reads the chord left to right. **`Layout.Initialize()` before adding viewports** prevents AutoCAD from converting the plan viewport into the overall viewport on first activation (E614 resolved headless). `On` cannot be set in the creating transaction and is not saved; first activation turns viewports on. A non-rectangular clip resizes the viewport to the clip's bounding box and moves `ViewCenter`, so a regen must not re-apply `ViewCenter = (0,0)` to a clipped viewport (E608). `Locked` does not block API edits (E604).
+- P13: table in a non-current layout, cell updated in a second transaction, survives reopen. `Cell.IsMerged` is true only on the merge's top-left cell; text written to a covered cell is stored hidden without error.
+- P17: `AddContext` adds a scale; `Viewport.AnnotationScale` assigns it; annotation scale and `CustomScale` are independent, so writers set both; look scales up by ratio, not name.
+- P20: aborted transaction rolls back layout creation on all three paths; one `_.UNDO 1` removes all layouts one command made. 6.10's two-transaction fallback is not needed.
+- P24: find rows by `Cell.GetTextString(FormatOption.IgnoreMtextFormat)` (raw `TextString` carries MTEXT codes); labels still found after the user deletes a row; works in model space, a layout, and after reopen.
+- Open from S2: `SV-E190` chosen as the probe failure code; Dan's real DWT and HCFCD table untested (P11, P24 used code-built stand-ins); E614 and the `On` behaviour unchecked in full Civil 3D (one manual open of `%TEMP%\sheetvol\probeB-out.dwg` closes it); `CVPORT` cannot be set from .NET in Core Console, scripts use `_.MSPACE`; `_.PSPACE` on the Model tab aborts a script; `(layoutlist)` does not exist in Core Console.
+- Runner fix after S2's finding: `tools/test-headless.ps1` now asks MSBuild for `OutDir`, so a worktree stages its own in-tree DLL (MEASURED: main → `C:\LAN-DT-build\...`, worktree → `bin\Debug\...`).

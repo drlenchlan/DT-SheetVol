@@ -75,10 +75,14 @@ if (-not $LogPath) {
 # dev bundle folder there (no PackageContents.xml, so the autoloader ignores it)
 # and scripts NETLOAD it through the SHEETVOL_DLL environment variable:
 #   (command "_.NETLOAD" (getenv "SHEETVOL_DLL"))
+# Ask MSBuild where THIS checkout builds to. A worktree builds in-tree while the
+# main checkout under the LAN workspace redirects to C:\LAN-DT-build; guessing
+# picked the wrong DLL for worktrees (S2 finding, 2026-11-05).
 if (-not $BuildDir) {
-    $BuildDir = Join-Path 'C:\LAN-DT-build\SheetVol.Civil3D\bin' "$Configuration\net10.0-windows"
-    if (-not (Test-Path $BuildDir)) {
-        $BuildDir = Join-Path (Split-Path $PSScriptRoot -Parent) "src\SheetVol.Civil3D\bin\$Configuration\net10.0-windows"
+    $proj = Join-Path (Split-Path $PSScriptRoot -Parent) 'src\SheetVol.Civil3D\SheetVol.Civil3D.csproj'
+    $BuildDir = (& dotnet msbuild $proj -getProperty:OutDir -p:Configuration=$Configuration -nologo 2>$null | Select-Object -Last 1).Trim()
+    if (-not $BuildDir -or -not [IO.Path]::IsPathRooted($BuildDir)) {
+        $BuildDir = Join-Path (Split-Path $proj -Parent) $BuildDir
     }
 }
 if (-not (Test-Path (Join-Path $BuildDir 'SheetVol.Civil3D.dll'))) { throw "no SheetVol.Civil3D.dll in $BuildDir (build first)" }
