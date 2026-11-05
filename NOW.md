@@ -122,7 +122,7 @@ Filled as workers return. Status: TODO / IN PROGRESS / GREEN / MANUAL-OK / BLOCK
 | E9xx Dialog | E901–E917 | U rows GREEN (C4: E902, E903, E904, E907, E912u, E914, E916, E917; logic for E901, E905, E906, E911 too); M rows TODO (U2, Dan) |
 | E10xx OHWM | E1001–E1021 | U rows GREEN (C5: E1001–E1011, E1019, E1020); H rows TODO (A1, A2, A4: E1012–E1018, E1021) |
 | T1–T31 | | T15, T16, T17 GREEN; T14 fingerprint part and T19 logic part GREEN (C3); T11, T23 GREEN (C2); T22 GREEN (C4); T25–T30 GREEN on generated triangles (C5); T7, T8, T9, T10 Core half GREEN (C1); rest TODO |
-| P1–P24 | | P16 PASSED both hosts; P11, P12, P13, P17, P20, P24 ANSWERED headless (S2, docs/api-findings.md §B); P1–P10, P18, P19, P22, P23 TODO (S1); P14, P15, P21 TODO (S3) |
+| P1–P24 | | ANSWERED with evidence: P1–P5, P7–P13, P16–P20, P22 (docs/api-findings.md §A, §B). PARTLY: P6 (data-shortcut reference needs Dan's fixture pair; steps in §A.9), P23 (reference and corridor surfaces not measurable headless). TODO: P14, P15, P21 (S3, Wave 2) |
 
 ## Open items for Dan (HANDOFF.md section 13)
 
@@ -149,6 +149,7 @@ Filled as workers return. Status: TODO / IN PROGRESS / GREEN / MANUAL-OK / BLOCK
 | 2026-11-05 | wp/c4 (C4 presentation) | b2857c3 | build 0 errors; `dotnet test` 71/71 in the c4 worktree, 328/328 on main after merge; commit confined to Presentation/ and its tests; no WPF or Autodesk types (ICommand is BCL) |
 | 2026-11-05 | wp/c5 (C5 integrator) | a410702 | build 0 errors; `dotnet test` 94/94 in the c5 worktree, 420/420 on main after merge; commit confined to Volumes/Integrator/ and its tests; no Autodesk references, no residue |
 | 2026-11-05 | wp/c1 (C1 planning + geometry) | d601c47 | build 0 errors; `dotnet test` 130/130 in the c1 worktree, 548/548 on main after merge; diff confined to Planning/, Geometry/, tests and Fakes/; no residue |
+| 2026-11-05 | wp/s1 (S1 probes A) | 7541b16 | build 0 errors; probeA.scr re-run by orchestrator in the s1 worktree, exit 0, 38 s: T1 and T2 PASS on all 8 segments, partition diff 0, band 200/200 CY, outside-limits 0; diff confined to ProbeA*.cs, probeA*.scr, api-findings.md §A, test-headless.ps1 (header + opt-in -ExtraArgs) |
 
 ## Decisions pending Dan (raised by workers, not yet ruled)
 
@@ -229,3 +230,32 @@ Filled as workers return. Status: TODO / IN PROGRESS / GREEN / MANUAL-OK / BLOCK
 - Settings for A4's config file: unit scale, MidOrdinate 0.01 ft, MitreLimitDeg 150, MinSegmentLength 0, SegmentLabelFormat `{0}`, MaxBreaks 10,000. New code SV-E300 (spec syntax, break limit, no segments, ViewFrames driver, repeated known ID) added to the registry below.
 - Fixture readings differ from FX: C1 read K as a 30° LEFT deflection and chose SP = tangent 200, spiral 150, arc R 500 L 200, spiral 150, tangent 200 turning right; FX built K turning RIGHT and SP as PI (500,0) left 30°, R 500, spirals 100. Core tests use C1's fakes, headless tests use FX's drawings, so nothing is wrong yet, but T10 compares the API volume with the Core polygon area on K and SP: A4's self-test must build the Core fake from the FX alignment's actual `AlignSeg`s through A1's adapter, not from the hand-written fake.
 - Measured: 464 segments and 3,305 stations planned in 54 ms. Independent Opus review found and C1 fixed: `START..END/2147483647` overflow loop, per-entry break limit, lopsided identity on a trimmed start, throws on repeated known ID.
+
+### From S1 (full detail with verbatim output in `docs/api-findings.md` §A)
+
+- **P1 sign (MEASURED):** `SurfaceVolumeInfo.Cut` is real cut (P1 polygon Cut=2700 Fill=0; P2 polygon Cut=0 Fill=1350). API `Net` = Fill − Cut (P1 Net=−2700); the handoff's A5 displays Net = Cut − Fill, so A1 flips the sign once, in the adapter. On a plain `TinSurface` (not a volume surface) `GetBoundedVolumes` measures against datum 0.
+- **P2:** cubic drawing units. Civil drawing unit is Feet while `INSUNITS` is Inches in `blank-c3d.dwg`: A1 reads the Civil 3D drawing-settings unit, never `INSUNITS`.
+- **P3:** bounded results are raw; `CutFactor`/`FillFactor` (both settable) only affect `GetVolumeProperties().Adjusted*`. C2's "apply factors once in Core" stands.
+- **P4:** partly outside → only data inside counts; wholly outside → 0/0/0, no exception; hide-boundary hole matches analytic to 4e-12; unclosed or 3-point polygon throws `ArgumentException`. **P5:** winding and start vertex do not matter.
+- **P7:** sub-entities via `SubEntityCount` and `[j]`; SCS is one entity with 3 sub-entities; two fixed compound arcs are 2 entities; `Clockwise = true` means right turn; directions are azimuths (A1 converts to radians CCW from +X per the contract). Analytic vs `PointLocation` max difference 4.6e-13 across S, C, K, SP. `EntityBefore`/`EntityAfter` throw at the ends; `ReverseCurve` throws; `GreaterThan180` throws on fixed arcs.
+- **P8:** `GetStationStringWithEquations` raw → displayed only; no displayed → raw method (C1's `TryParseStation` does it in Core via the equation list). Ambiguity is real: displayed 9+00 maps to raw 900 and raw 1100 with identical strings; a displayed station can fall in a gap (E208 rejection path).
+- **P9:** TIN, volume surface and alignment all create headless with the runner's switches; `/product C3D`, prior `NETLOAD AeccDbMgd.dll` and `/ld AecBase.dbx` all unnecessary on this seat (assumed risk: demand-load registration may differ on another seat; rerun `probeA-p9*.scr` there if `CivilDocument` is ever null).
+- **P10:** `CivilDocument.GetCivilDocument(db)` and `CivilApplication.ActiveDocument` both work in Core Console; `GetCivilDocument` also works on `ReadDwgFile` side databases without switching `WorkingDatabase`.
+- **P18 (important for 6.10 step 3):** `IsOutOfDate` stayed False through every edit; TIN edits apply at once; **the owned volume surface keeps stale totals until `Rebuild()`** (88,000 → 121,000); with `AutoRebuild` it updates only after the command ends. Rule: rebuild the owned volume surface on every regen, never trust `IsOutOfDate` on it. Sign noise of 5.4e-11 appeared in Fill after a hole (C2's SV-E432 threshold must tolerate it: A1 clamps |x| < 1e-6 to 0).
+- **P19:** `Autodesk.Civil.PointNotOnEntityException`, "Point Outside Surface.", same outside the hull and inside hidden areas.
+- **P22:** `|Net(0) − Net(1)|` equals the polygon area to 5.8e-16 relative (62,829.8115 ft² on C1's tessellation); the datum method for 2D area is confirmed. Off-edge band matches the analytic clipped area to 4e-16. Volumes Dashboard comparison remains Dan's.
+- **P23:** `GetTriangles(false)` / `Triangles` = visible; `GetTriangles(true)` adds hidden ones flagged `IsVisible = false`; hide and outer boundaries hide triangles, masks do not; about 1M triangles read in 1.05–1.48 s, about 110 MB. Reference and corridor surfaces: not measurable headless (Dan's fixture pair; stop condition 12.9 not triggered, open).
+- `blank-c3d.dwg` has no surface styles. `SVPROBEA_P6` consults the seat's active data-shortcut project read-only and prints only whether one is set.
+
+### G1 — PASSED 2026-11-05, with two carries
+
+Criteria from HANDOFF.md section 10 and what proved them:
+
+1. T21 green: `dotnet test` 548/548 on main (C1 130 + C2 150 + C3 107 + C4 69 + C5 94 − shared smoke tests, re-run by the orchestrator after every merge).
+2. T25–T28 green on generated triangles: C5, re-run on main.
+3. `docs/api-findings.md` answers P1–P13 and P16–P20 with evidence: all answered except P6, which is as far as headless can go (data-shortcut references need Dan's fixture pair; §A.9 lists the steps). **Carry 1: P6.** Stop condition 12.2 is not triggered: nothing has shown a volume surface cannot be built from references.
+4. Fixture A totals 200 CY cut and 200 CY fill after the documented mapping: S1's T1/T2 table, re-run by the orchestrator (band 200.000 / 200.000, outside-limits 0).
+
+**Carry 2: Fixture H reconciliation** (FX whole-surface cut 67,860 ft³ vs C5 integrator 67,880 ft³ over the band; FX reported two sliver triangles hidden by Civil 3D). Resolved at the A1 merge when the integrator runs against `ITriangleSource` from the real surface (T29, E1012, E1013).
+
+Contract review at G1 (stop condition 12.6 applies from here on): see "Contract revision 2" below.
