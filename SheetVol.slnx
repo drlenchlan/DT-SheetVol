@@ -1,0 +1,10 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/SheetVol.Civil3D/SheetVol.Civil3D.csproj" />
+    <Project Path="src/SheetVol.Core/SheetVol.Core.csproj" />
+    <Project Path="src/SheetVol.UI/SheetVol.UI.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/SheetVol.Core.Tests/SheetVol.Core.Tests.csproj" />
+  </Folder>
+</Solution>

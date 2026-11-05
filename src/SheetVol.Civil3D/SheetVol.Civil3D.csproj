@@ -1,0 +1,38 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- The engine. Loads in acad.exe AND accoreconsole.exe, so it references
+       AcCoreMgd, AcDbMgd, AecBaseMgd and AeccDbMgd only. Never AcMgd, never
+       AdWindows, never WPF (HANDOFF.md 6.1, 6.13). Use
+       Autodesk.AutoCAD.ApplicationServices.Core.Application. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <PlatformTarget>x64</PlatformTarget>
+    <EnableDynamicLoading>true</EnableDynamicLoading>
+    <AssemblyName>SheetVol.Civil3D</AssemblyName>
+    <RootNamespace>SheetVol.Civil3D</RootNamespace>
+    <Description>SheetVol engine for Civil 3D: adapters, writers, commands, session, auto-update and self-test. Core Console safe.</Description>
+    <Configurations>Debug;Release;C3D2027</Configurations>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\SheetVol.Core\SheetVol.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="AcCoreMgd">
+      <HintPath>$(AutoCADInstall)\AcCoreMgd.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="AcDbMgd">
+      <HintPath>$(AutoCADInstall)\AcDbMgd.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="AecBaseMgd">
+      <HintPath>$(AcaInstall)\AecBaseMgd.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="AeccDbMgd">
+      <HintPath>$(C3DInstall)\AeccDbMgd.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+</Project>

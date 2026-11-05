@@ -1,0 +1,65 @@
+[ AutoCAD - Thu Nov 05 09:47:16 2026  ]----------------------------------------
+Regenerating layout.
+Drawing created using _NTX-CIVIL3D-STB.dwt from AutoCAD profile: <<C3D_Imperial>>
+
+
+===============================================================================
+  DT FRAMEWORK v2.3.1
+  Civil 3D Standards & Automation Platform
+===============================================================================
+
+  Initializing Core Systems...
+    [+] Core Engine................. GO
+    [+] Framework Path.............. GO   (C:\LAN-DT\Autodesk)
+    [+] Stock AutoLISP.............. GO   (loaded by AutoCAD)
+    [+] Version Manifest............ GO   (v2.3.1 - pilot channel)
+    [+] Environment................. GO   (C3D 2026 content)
+    [+] Temp Directory.............. GO   (C:\LAN-DT_TEMP)
+    [+] SSMAUTOOPEN................. GO   (SSMAUTOOPEN=1 (your setting - DTFRAMEWORK))
+    [+] SAVETIME.................... GO   (SAVETIME=15 (your setting - DTFRAMEWORK))
+    [+] Startup Mode................ GO   (STARTUP=3 STARTMODE=1 (want STARTUP=3: Start tab, no Drawing1))
+    [+] Registry Sysvars............ GO   (PDFSHX IMAGEFRAME REFPATHTYPE SSMPOLLTIME)
+    [+] SSM Detect Mode............. GO   (n/a (sysvar retired in 2026.1.1+))
+    [+] C3D Viewport Opt............ GO   (AECCVIEWPORTOPT=0 (clipped profile-band viewports render))
+    [+] Group AppInit............... GO   (NTX: 8 registry sysvars)
+
+  Loading Environment...
+    [+] Tool Palettes............... GO   (core + SUB;OOTB)
+    [+] Pipe Catalog................ GO   (auto: LAN pair (NTX.ini))
+    [+] ColorFix Utility............ GO   (type COLORFIX or CFRESULTS)
+
+  Pre-Launch Sequence: 16 of 16 systems GO
+
+  >>> READY FOR BLAST OFF <<<
+===============================================================================
+AutoCAD menu utilities loaded.
+
+  Loading Document Modules...
+    [+] Stock AutoLISP.............. GO   (loaded by AutoCAD)
+    [+] System Defaults............. GO
+    [+] Status Line................. GO
+    [+] Keyboard Shortcuts.......... GO
+    [+] Linetypes................... GO   (type LANLINETYPES (or LANLT) to load)_.-LAYER _ON Defpoints _T Defpoints _C 249 Defpoints _.-LAYER _ON 0 _T 0 _C 7 0 _S 0 
+    [+] Group DocInit............... GO   (NTX: FACETDEV=n/a)
+    [+] Geolocation Check........... GO   (off - firm policy)
+    [+] DS Working Folder........... GO   (verified per drawing; LANDSFIX to inspect)
+    [+] User Shortcuts.............. GO
+    [+] Explode Guard............... GO   (mode 2 (strict))
+    [+] HINT Command................ GO   (type HINT for shortcuts)
+    [+] Manual Links................ GO   (LAN CAD Manual, LANMANUAL, LANSEARCH)
+
+  Document Launch: 12 of 12 systems GO
+
+  >>> READY FOR BLAST OFF <<<
+===============================================================================
+AutoCAD menu utilities loaded.*Cancel*
+
+Command: 
+Command: 
+
+Command: 
+Command: 
+Command: 
+Command: 
+Command: 
+Command: _mtedit 

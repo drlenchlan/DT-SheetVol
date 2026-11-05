@@ -1,0 +1,53 @@
+<Project>
+  <!-- Chain to the LAN workspace-root Directory.Build.props when this repo sits
+       inside the workspace (bin/obj redirect off OneDrive, shared metadata).
+       A clean clone elsewhere has no ancestor file and uses the defaults below. -->
+  <PropertyGroup>
+    <_LanRootProps>$([MSBuild]::GetPathOfFileAbove('Directory.Build.props', '$(MSBuildThisFileDirectory)../'))</_LanRootProps>
+  </PropertyGroup>
+  <Import Project="$(_LanRootProps)" Condition="'$(_LanRootProps)' != '' and Exists('$(_LanRootProps)')" />
+
+  <PropertyGroup>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <Authors>LAN</Authors>
+    <Company>LAN (https://www.lan-inc.com)</Company>
+    <Copyright>© 2026 LAN</Copyright>
+    <Version>0.1.0</Version>
+    <AssemblyVersion>0.1.0.0</AssemblyVersion>
+    <FileVersion>0.1.0.0</FileVersion>
+    <Platforms>x64</Platforms>
+  </PropertyGroup>
+
+  <!-- Civil 3D install directories. Host floor for the plugin is Civil 3D
+       2025.2.7 / 2026.2.2 or later: both run the .NET 10 runtime (Dan, 2026-11-05;
+       HANDOFF.md section 2 said 2026.2.2 only and is corrected in NOW.md).
+       The plugin compiles against the LOWEST supported host (AutoCAD 2025,
+       managed assembly version 25.0) so the references bind on 2025, 2026 and
+       2027 hosts. Civil 3D 2027 (R26.0) is a binary break and gets its own
+       build configuration (C3D2027) only if HANDOFF.md section 2 is invoked.
+       Each path: MSBuild property first, registry fallback, then the default. -->
+  <PropertyGroup>
+    <AutoCAD2025Install Condition="'$(AutoCAD2025Install)' == ''">$([MSBuild]::GetRegistryValueFromView('HKEY_LOCAL_MACHINE\SOFTWARE\Autodesk\AutoCAD\R25.0\ACAD-8100:409', 'AcadLocation', null, RegistryView.Registry64))</AutoCAD2025Install>
+    <AutoCAD2025Install Condition="'$(AutoCAD2025Install)' == ''">C:\Program Files\Autodesk\AutoCAD 2025</AutoCAD2025Install>
+    <AutoCAD2026Install Condition="'$(AutoCAD2026Install)' == ''">$([MSBuild]::GetRegistryValueFromView('HKEY_LOCAL_MACHINE\SOFTWARE\Autodesk\AutoCAD\R25.1\ACAD-9100:409', 'AcadLocation', null, RegistryView.Registry64))</AutoCAD2026Install>
+    <AutoCAD2026Install Condition="'$(AutoCAD2026Install)' == ''">C:\Program Files\Autodesk\AutoCAD 2026</AutoCAD2026Install>
+    <AutoCAD2027Install Condition="'$(AutoCAD2027Install)' == ''">$([MSBuild]::GetRegistryValueFromView('HKEY_LOCAL_MACHINE\SOFTWARE\Autodesk\AutoCAD\R26.0\ACAD-A100:409', 'AcadLocation', null, RegistryView.Registry64))</AutoCAD2027Install>
+    <AutoCAD2027Install Condition="'$(AutoCAD2027Install)' == ''">C:\Program Files\Autodesk\AutoCAD 2027</AutoCAD2027Install>
+
+    <AutoCAD2025Install>$(AutoCAD2025Install.TrimEnd('\'))</AutoCAD2025Install>
+    <AutoCAD2026Install>$(AutoCAD2026Install.TrimEnd('\'))</AutoCAD2026Install>
+    <AutoCAD2027Install>$(AutoCAD2027Install.TrimEnd('\'))</AutoCAD2027Install>
+
+    <!-- The reference set every Autodesk-facing project compiles against. -->
+    <AutoCADInstall Condition="'$(AutoCADInstall)' == ''">$(AutoCAD2025Install)</AutoCADInstall>
+    <AutoCADInstall Condition="'$(Configuration)' == 'C3D2027'">$(AutoCAD2027Install)</AutoCADInstall>
+    <C3DInstall>$(AutoCADInstall)\C3D</C3DInstall>
+    <AcaInstall>$(AutoCADInstall)\ACA</AcaInstall>
+
+    <!-- The host used for headless probes and the self-test on this machine. -->
+    <C3DHostInstall Condition="'$(C3DHostInstall)' == ''">$(AutoCAD2026Install)</C3DHostInstall>
+  </PropertyGroup>
+</Project>

@@ -1,0 +1,43 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Dialog, ribbon and editor-side session members. Full AutoCAD only; never
+       loaded in Core Console. May reference AcMgd and AdWindows (HANDOFF.md 6.1).
+       No engine logic lives here (6.12). -->
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <PlatformTarget>x64</PlatformTarget>
+    <EnableDynamicLoading>true</EnableDynamicLoading>
+    <UseWPF>true</UseWPF>
+    <AssemblyName>SheetVol.UI</AssemblyName>
+    <RootNamespace>SheetVol.UI</RootNamespace>
+    <Description>SheetVol UI for Civil 3D: modeless SVDIALOG, ribbon, and the editor side of ISheetVolSession.</Description>
+    <Configurations>Debug;Release;C3D2027</Configurations>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\SheetVol.Core\SheetVol.Core.csproj" />
+    <ProjectReference Include="..\SheetVol.Civil3D\SheetVol.Civil3D.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="AcCoreMgd">
+      <HintPath>$(AutoCADInstall)\AcCoreMgd.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="AcDbMgd">
+      <HintPath>$(AutoCADInstall)\AcDbMgd.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="AcMgd">
+      <HintPath>$(AutoCADInstall)\AcMgd.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="AdWindows">
+      <HintPath>$(AutoCADInstall)\AdWindows.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="AeccDbMgd">
+      <HintPath>$(C3DInstall)\AeccDbMgd.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+</Project>

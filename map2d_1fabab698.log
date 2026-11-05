@@ -1,0 +1,93 @@
+[ AutoCAD - Thu Nov 05 09:47:11 2026  ]----------------------------------------
+
+
+
+===============================================================================
+  DT FRAMEWORK v2.3.1
+  Civil 3D Standards & Automation Platform
+===============================================================================
+
+  Initializing Core Systems...
+    [+] Core Engine................. GO
+    [+] Framework Path.............. GO   (C:\LAN-DT\Autodesk)
+    [+] Stock AutoLISP.............. GO   (loaded by AutoCAD)
+    [+] Version Manifest............ GO   (v2.3.1 - pilot channel)
+    [+] Environment................. GO   (C3D 2026 content)
+    [+] Temp Directory.............. GO   (C:\LAN-DT_TEMP)
+    [+] SSMAUTOOPEN................. GO   (SSMAUTOOPEN=1 (your setting - DTFRAMEWORK))
+    [+] SAVETIME.................... GO   (SAVETIME=15 (your setting - DTFRAMEWORK))
+    [+] Startup Mode................ GO   (STARTUP=3 STARTMODE=1 (want STARTUP=3: Start tab, no Drawing1))
+    [+] Registry Sysvars............ GO   (PDFSHX IMAGEFRAME REFPATHTYPE SSMPOLLTIME)
+    [+] SSM Detect Mode............. GO   (n/a (sysvar retired in 2026.1.1+))
+    [+] C3D Viewport Opt............ GO   (AECCVIEWPORTOPT=0 (clipped profile-band viewports render))
+    [+] Group AppInit............... GO   (NTX: 8 registry sysvars)
+
+  Loading Environment...
+    [+] Tool Palettes............... GO   (core + SUB;OOTB)
+Error: Could not set LAN pipe catalogs. Profile not accessible.
+    [+] Pipe Catalog................ GO   (auto: LAN pair (NTX.ini))
+    [+] ColorFix Utility............ GO   (type COLORFIX or CFRESULTS)
+
+  Pre-Launch Sequence: 16 of 16 systems GO
+
+  >>> READY FOR BLAST OFF <<<
+===============================================================================
+AutoCAD menu utilities loaded.
+
+  Loading Document Modules...
+    [+] Stock AutoLISP.............. GO   (loaded by AutoCAD)
+    [+] System Defaults............. GO
+    [+] Status Line................. GO
+    [+] Keyboard Shortcuts.......... GO
+    [+] Linetypes................... GO   (type LANLINETYPES (or LANLT) to load)_.-LAYER _ON Defpoints _T Defpoints _C 249 Defpoints _.-LAYER _ON 0 _T 0 _C 7 0 _S 0 
+    [+] Group DocInit............... GO   (NTX: FACETDEV=n/a)
+    [+] Geolocation Check........... GO   (off - firm policy)
+    [+] DS Working Folder........... GO   (verified per drawing; LANDSFIX to inspect)
+    [+] User Shortcuts.............. GO
+    [+] Explode Guard............... GO   (mode 2 (strict))
+    [+] HINT Command................ GO   (type HINT for shortcuts)
+    [+] Manual Links................ GO   (LAN CAD Manual, LANMANUAL, LANSEARCH)
+
+  Document Launch: 12 of 12 systems GO
+
+  >>> READY FOR BLAST OFF <<<
+===============================================================================
+Command: 
+Command: 
+
+Command: 
+Command: (command "_.NETLOAD" (getenv "SHEETVOL_DLL"))
+_.NETLOAD Assembly file name: C:/Users/DRLench/AppData/Roaming/Autodesk/ApplicationPlugins/SheetVol-dev.bundle/Contents/SheetVol.Civil3D.dll 
+Command: nil
+
+Command: SVHELLO
+Loading AEC Base...
+Loading AECC Base...
+Loading AECC Land...
+Loading AEC Base Extended...
+Loading AEC Core...
+Loading AECC Base Core...
+Loading AECC Pipe Part...
+Loading AECC QTO......
+Loading AECC Pipe Network...
+Loading AECC Pressure Pipes...
+Loading AECC Building Site...
+Loading AECC DwgIndxExtractor...
+Loading AECC Survey...
+Loading AECC Roadway...
+Loading AECC Plan Production...
+Loading AECC Hydrology...
+Loading AECC Point Cloud...
+Loading AECC Bridge...
+Loading AECC Rail...
+Loading AECC Mapcheck...
+
+SVHELLO ok. SheetVol.Civil3D 0.1.0.0 tfm=.NETCoreApp,Version=v10.0
+Runtime: .NET 10.0.14  Process: C:\Program Files\Autodesk\AutoCAD 2026\accoreconsole.exe
+AcDbMgd: 25.1.0.0  AeccDbMgd: 13.8.0.1873
+Core Console: False
+CivilApplication.ActiveDocument: ok
+Command: (command "_.SAVEAS" "2018" (strcat (getenv "SHEETVOL_REPO") "/tools/fixtures/blank-c3d.dwg"))
+_.SAVEAS 
+Current file format: AutoCAD Drawing Template (*.dwt)
+Enter file format [R14(LT98&LT97)/2000(LT2000)/2004(LT2004)/2007(LT2007)/2010(LT2010)/2013(LT2013)/2018(LT2018)/Standards/DXF/Template] <Template>: 2018 Save drawing as <C:\Program Files\Autodesk\AutoCAD 2026\UserDataCache\Template\map2d.dwg>: C:/Users/DRLench/OneDrive - LEO A DALY/LAN Design Technology/DT/SheetVol/tools/fixtures/blank-c3d.dwg 

@@ -1,0 +1,134 @@
+# NOW — SheetVol state of record
+
+Rev 1, 2026-11-05. Newer revs supersede older ones. Facts here win over HANDOFF.md on
+what is true; HANDOFF.md wins on method. Every figure is MEASURED unless marked otherwise.
+
+## Position
+
+**Wave 0 done, Gate G0 passed (evidence below). Next: dispatch Wave 1 (S1, S2, C1, C2,
+C3, C4, C5, FX) per HANDOFF.md section 10.**
+
+## Corrections to HANDOFF.md (Dan or measurement overrides the plan)
+
+| # | Handoff said | Now | Source |
+|---|---|---|---|
+| X1 | Section 2: host requirement Civil 3D 2026.2.2 or later only | Host floor is Civil 3D **2025.2.7 or 2026.2.2 and later**; both run the .NET 10 runtime. The plugin compiles against the AutoCAD 2025 managed DLLs (assembly version 25.0) so one DLL binds on 2025, 2026 and 2027 hosts. Measured: the DLL compiled against 25.0 loaded in the 2026 host and reported `AcDbMgd: 25.1.0.0` | Dan 2026-11-05 ("2025.2.7 updated to .net 10"); P16 run |
+| X2 | Section 11: `SheetVol.sln` | The solution is `SheetVol.slnx`; the .NET 10 SDK's `dotnet new sln` emits the XML format | Wave 0 |
+| X3 | Section 11: `accoreconsole ... /isolate svtest ...` | `/isolate` dropped; the run with it hung before reading the script. Working form is in `tools/test-headless.ps1`: `/i /s /product C3D /l en-US`, stdin closed, `LAN_DT_BATCH=1` | Wave 0 |
+| X4 | Section 5.1: "Custom code must be in a trusted location" | Confirmed the hard way: `NETLOAD` from `C:\LAN-DT-build` fails with "Unable to load ... assembly" under `SECURELOAD=1`. The runner stages the build into `%APPDATA%\Autodesk\ApplicationPlugins\SheetVol-dev.bundle\Contents\` and scripts load it via `(getenv "SHEETVOL_DLL")` | Wave 0 |
+
+## Platform on this seat (MEASURED 2026-11-05)
+
+| Item | Value |
+|---|---|
+| Civil 3D 2026 | 2026.2.3 Update, 13.8.1873.0, installed 2026-10-30. AcDbMgd/AcCoreMgd/AcMgd 25.1.179.0, AeccDbMgd 13.8.0.1873 |
+| Civil 3D 2025 | AcDbMgd 25.0.189.0 (.NET 10 since 2025.2.7). Reference set for the build |
+| Civil 3D 2027 | Installed at `C:\Program Files\Autodesk\AutoCAD 2027` (R26.0). Not built against; `C3D2027` configuration exists in the csproj files, untested |
+| .NET SDK | 10.0.204; runtime in the 2026 host reports .NET 10.0.14 |
+| AecBaseMgd | Lives in `<install>\ACA\`, not `<install>\C3D\` (handoff listed it without a folder) |
+| Registry keys | 2025 `R25.0\ACAD-8100:409`, 2026 `R25.1\ACAD-9100:409`, 2027 `R26.0\ACAD-A100:409`; `Directory.Build.props` reads `AcadLocation` from them |
+| Stock templates | No Civil 3D NCS `.dwt` on this seat. `tools/fixtures/blank-c3d.dwg` was saved by the 2026 Core Console from `UserDataCache\Template\map2d.dwt` (Autodesk stock, 148 KB). S1 may replace it |
+
+## Gates
+
+### G0 — PASSED 2026-11-05
+
+`dotnet build .\SheetVol.slnx -c Debug`:
+
+```text
+    5 Warning(s)
+    0 Error(s)
+```
+
+The five warnings are one MSB3277: the Autodesk DLLs reference Microsoft.VisualBasic
+10.1.0.0 and the SDK ships 10.0.0.0. Benign, left visible on purpose so a real
+reference conflict is not hidden later.
+
+`dotnet test .\tests\SheetVol.Core.Tests\SheetVol.Core.Tests.csproj`:
+
+```text
+Passed!  - Failed:     0, Passed:     2, Skipped:     0, Total:     2
+```
+
+**P16, headless half — PASSED.** `tools\test-headless.ps1 -Script tools\scripts\p16.scr`
+against the 2026 Core Console printed:
+
+```text
+SVHELLO ok. SheetVol.Civil3D 0.1.0.0 tfm=.NETCoreApp,Version=v10.0
+Runtime: .NET 10.0.14  Process: C:\Program Files\Autodesk\AutoCAD 2026\accoreconsole.exe
+AcDbMgd: 25.1.0.0  AeccDbMgd: 13.8.0.1873
+Core Console: True
+CivilApplication.ActiveDocument: ok
+```
+
+The AECC modules (Base Core, Pipe Network, Roadway, Plan Production, ...) loaded with
+`/product C3D`, and `CivilApplication.ActiveDocument` resolved. This answers the
+`accoreconsole` part of P16 and the "can AeccDbMgd types be used headless" premise of P9;
+S1 still owns the rest of P9 and P10.
+
+**P16, acad.exe half — OPEN, Dan.** Not run: the orchestrator does not drive Dan's
+interactive Civil 3D (seat rule: no window foreground). Step for Dan, in full Civil 3D 2026:
+
+```text
+NETLOAD  %APPDATA%\Autodesk\ApplicationPlugins\SheetVol-dev.bundle\Contents\SheetVol.Civil3D.dll
+SVHELLO
+```
+
+Pass looks like the five lines above with `Core Console: False` and `acad.exe` as the process.
+
+`tools\check-contracts.ps1`: `contracts.md matches Contracts.cs`.
+
+### G1, G2, G3 — not started
+
+## Decisions made in Wave 0
+
+- **Contracts** (`src/SheetVol.Core/Contracts.cs`, twin `docs/contracts.md`): section 6.2
+  verbatim; `ISheetVolSession` from 6.14; new in Wave 0: `RunDefinition` (holds
+  `KnownSegments` so the planner can carry GUIDs forward by the 6.3 identity rules, plus
+  per-segment `SegmentOverrides` for A14 target layout, scale override and E608 LockView),
+  `ValidationResult` (segments plus boundaries plus problems, so the dialog can show every row
+  with its own error), `RegenResult` (per segment-and-analysis rows, outside-limits row,
+  partition flag, export paths), `AnalysisDef`, `ManualSegmentDef`, `ViewOptions`, `Problem`
+  with the `SV-Exxx` code and a plain-words `Fix`. Enum defaults carry A2, A3, A4 and the
+  6.5 area-unit default.
+- **Headless runner** `tools/test-headless.ps1` follows the Sheet Set Editor's proven
+  `AccoreConsole.RunScript` form. Environment handed to scripts: `SHEETVOL_DLL` (staged DLL,
+  forward slashes), `SHEETVOL_REPO` (repo root, forward slashes). A path with spaces cannot
+  sit on a script line, so scripts build paths in LISP with `strcat`.
+- **Folder ownership** is written into a `README.md` in every `src/` folder.
+- **Rejected:** suppressing MSB3277 (hides future real conflicts); seeding
+  `blank-c3d.dwg` from a LAN NTX template (firm content into a public repo, and stop
+  condition 12.8 territory).
+
+## Coverage table
+
+Filled as workers return. Status: TODO / IN PROGRESS / GREEN / MANUAL-OK / BLOCKED.
+
+| Scope | Rows | Status |
+|---|---|---|
+| E1xx Platform | E101–E105 | E101 manual: dev seat verified above. Rest TODO |
+| E2xx Geometry | E201–E219 | TODO (C1) |
+| E3xx Segments | E301–E312 | TODO (C1) |
+| E4xx Volumes | E401–E421 | TODO (C2, A1) |
+| E5xx Tables | E501–E508 | TODO (C2, A2, A3) |
+| E6xx Layouts | E601–E615 | TODO (C3, A3) |
+| E7xx Frames | E701–E713 | TODO (L1) |
+| E8xx Regen | E801–E812 | TODO (C3, A4, L2) |
+| E9xx Dialog | E901–E917 | TODO (C4, U2) |
+| E10xx OHWM | E1001–E1021 | TODO (C5, A1, A2) |
+| T1–T31 | | TODO |
+| P1–P24 | | P16 headless PASSED; P16 acad.exe OPEN (Dan); rest TODO (S1, S2, S3) |
+
+## Open items for Dan (HANDOFF.md section 13)
+
+| Item | Status |
+|---|---|
+| Confirm dev seat at 2026.2.2+ | DONE: 2026.2.3 |
+| P16 in full Civil 3D (`SVHELLO`) | OPEN, steps above |
+| Four dialog artboards as PNG in `docs/ui/` | OPEN, before Wave 2 |
+| HCFCD table as it should look in CAD, plus a sample drawing with real surfaces and an OHWM elevation | OPEN, before Wave 2 |
+| Confirm A10 (what "below OHWM" means) and A12 (acre decimals) | OPEN, before Wave 2 |
+| View-frame fixture drawing plus a data-referencing second drawing | OPEN, during Wave 2 |
+| Run `SVPROBEUI` once | OPEN, during Wave 2 |
+| LAN sheet template with `SV-VPORT` viewport and table anchor block; table style and layer names | OPEN, before G3 |
+| Corrections to section 3 assumptions | none yet |

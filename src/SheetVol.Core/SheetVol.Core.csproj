@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Pure library: planning, geometry, volumes, views, tracking, presentation.
+       Zero Autodesk references by rule (HANDOFF.md 6.1). Everything in here is
+       unit-tested with dotnet test and never needs Civil 3D. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <AssemblyName>SheetVol.Core</AssemblyName>
+    <RootNamespace>SheetVol.Core</RootNamespace>
+    <Description>SheetVol core: segment planning, boundary geometry, volume reconciliation, view math, change tracking and dialog view models. No Autodesk references.</Description>
+  </PropertyGroup>
+</Project>

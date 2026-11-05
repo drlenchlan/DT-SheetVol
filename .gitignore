@@ -1,0 +1,15 @@
+bin/
+obj/
+*.user
+*.suo
+.vs/
+*.exe
+*.dll
+*.pdb
+*.cache
+TestResults/
+Thumbs.db
+*.bak
+*.dwl
+*.dwl2
+selftest-result.json

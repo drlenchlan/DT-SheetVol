@@ -1,0 +1,5 @@
+(command "_.NETLOAD" (getenv "SHEETVOL_DLL"))
+SVHELLO
+(command "_.SAVEAS" "2018" (strcat (getenv "SHEETVOL_REPO") "/tools/fixtures/blank-c3d.dwg"))
+_.QUIT
+_Y
