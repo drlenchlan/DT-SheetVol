@@ -119,9 +119,9 @@ Filled as workers return. Status: TODO / IN PROGRESS / GREEN / MANUAL-OK / BLOCK
 | E6xx Layouts | E601–E615 | U rows GREEN (C3: E603, E606, E607, E610; E309, E310 too); H/M rows TODO (A3) |
 | E7xx Frames | E701–E713 | TODO (L1) |
 | E8xx Regen | E801–E812 | Logic-level GREEN (C3: E804–E806, E811); H/M rows TODO (A4, L2) |
-| E9xx Dialog | E901–E917 | TODO (C4, U2) |
+| E9xx Dialog | E901–E917 | U rows GREEN (C4: E902, E903, E904, E907, E912u, E914, E916, E917; logic for E901, E905, E906, E911 too); M rows TODO (U2, Dan) |
 | E10xx OHWM | E1001–E1021 | TODO (C5, A1, A2) |
-| T1–T31 | | T15, T16, T17 GREEN; T14 fingerprint part and T19 logic part GREEN (C3); T11, T23 GREEN (C2); rest TODO |
+| T1–T31 | | T15, T16, T17 GREEN; T14 fingerprint part and T19 logic part GREEN (C3); T11, T23 GREEN (C2); T22 GREEN (C4); rest TODO |
 | P1–P24 | | P16 PASSED both hosts; P11, P12, P13, P17, P20, P24 ANSWERED headless (S2, docs/api-findings.md §B); P1–P10, P18, P19, P22, P23 TODO (S1); P14, P15, P21 TODO (S3) |
 
 ## Open items for Dan (HANDOFF.md section 13)
@@ -146,6 +146,7 @@ Filled as workers return. Status: TODO / IN PROGRESS / GREEN / MANUAL-OK / BLOCK
 | 2026-11-05 | wp/s2 (S2 probes B) | eba01b0 | build 0 errors; probeB.scr re-run by orchestrator in the s2 worktree, exit 0, P20 undo evidence seen in the log (18 → 15 layouts); commit confined to ProbeB*.cs, probeB.scr, api-findings.md |
 | 2026-11-05 | wp/c2 (C2 volumes + output) | 23990f6 | build 0 errors; `dotnet test` 152/152 in the c2 worktree and on main; commit confined to Volumes/, Output/ and their tests; no TODO/FIXME/MUTATION residue |
 | 2026-11-05 | wp/fx (FX fixtures) | 6c69e2b | build 0 errors; fixtureA.scr re-run by orchestrator in the fx worktree: EG 2 tri, FG_A 52 tri, volume surface 68 tri, UnadjustedCut 5400.000000000002 UnadjustedFill 5400; commit confined to SelfTest/Fixture*.cs and tools/scripts/fixture*.scr. fixtureA.dwg left untracked (SVFIXTURE A rebuilds it in 6 s) |
+| 2026-11-05 | wp/c4 (C4 presentation) | b2857c3 | build 0 errors; `dotnet test` 71/71 in the c4 worktree, 328/328 on main after merge; commit confined to Presentation/ and its tests; no WPF or Autodesk types (ICommand is BCL) |
 
 ## Decisions pending Dan (raised by workers, not yet ruled)
 
@@ -155,6 +156,10 @@ Filled as workers return. Status: TODO / IN PROGRESS / GREEN / MANUAL-OK / BLOCK
 | D2 | C3 | "Largest scale that fits" in FitStandard: read as the most detailed scale (smallest model units per paper unit). T16 passes either way | most detailed |
 | D3 | C3 | Problem message wording lives in code; only number formats are in config. Does the settings-file rule cover message text? | wording in code |
 | D4 | C3 | Fingerprint covers more than 6.11 lists (analyses, view options, overrides, preset, area unit, OHWM, displayed end stations, manual polyline geometry); excludes `KnownSegments` and `AutoMode` | as described |
+| D5 | C4 | `IDialogHost` (in Presentation/) holds what `ISheetVolSession` lacks: drawing name and unit system, `FormatStation`, alignment station range, `GetRunStatus` (tracker staleness + last `RegenResult`), `IsCommandActive`, `RequestExport`. Either U2 implements it in UI/Host or these move into the contract at the G1 contract review | U2 implements `IDialogHost` |
+| D6 | C4 | Draw options (boundary polylines, table at each segment, summary table) have no home in `RunDefinition`; they never reach the engine | dialog-only until the contract review |
+| D7 | C4 | Does the cut factor apply to HCFCD row 9? Dialog shows unfactored `ImpactResult.CutVolume`; C2 defaulted `ImpactVolumesUseCutFactor = true`. The two disagree | needs one answer at G1 |
+| D8 | C4 | Per-segment offset fix beside a failing row (6.14) has no target: `SegmentOverrides` has no offset field | text only |
 
 ## Facts for later workers (from merged packages)
 
@@ -197,3 +202,7 @@ Filled as workers return. Status: TODO / IN PROGRESS / GREEN / MANUAL-OK / BLOCK
 | SV-E5xx | C2, A2, A3 | E530–E538 output without a row (E532 placeholder template, E538 material length/area differ) |
 | SV-E6xx | C3, A3 | E601, E603 (Info), E606, E309 (does not fit) |
 | SV-E10xx | C5, A2 | E1015 row binding |
+
+### From C4
+
+- Labels in `DialogText` constants for `{x:Static}`; formats, unit factors, defaults in `PresentationConfig`. Rows show numbers only while GUID, station range, offsets, analysis and OHWM still match the last regen; totals hidden until every row has a result. Grid edits rewrite the break list and go through `Validate`; a run-level error with no `SegmentId` becomes an inline cell error and the last valid break list is kept. **C1 must confirm:** unedited breaks are written back as raw station numbers (ambiguous when station equations exist), and an unparseable or out-of-range station must come back as an Error with no `SegmentId`. Checkbox "Regenerate when..." = `AutoMode != Off`; Add station splits at the midpoint; Remove merges into the left neighbour; offsets shown as distances (left positive means `OffsetLeft = −value`); pending edits keyed by drawing, restored only when the run name matches; edits refused and Close disabled during a regen.
