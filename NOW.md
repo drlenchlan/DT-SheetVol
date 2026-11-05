@@ -5,10 +5,7 @@ what is true; HANDOFF.md wins on method. Every figure is MEASURED unless marked 
 
 ## Position
 
-**Wave 0 done, Gate G0 passed, P16 closed in both hosts (evidence below). Wave 1 in
-progress since 2026-11-05: FX, S2, C1, C2, C3, C4, C5 dispatched in parallel, each in a
-worktree under `C:\LAN-DT-build\sheetvol-wt\<wp>` on branch `wp/<wp>`; S1 follows the FX
-merge because it needs Fixture A.**
+**G0 and G1 passed 2026-11-05 (evidence under Gates). Contract revision 2 is on branch `contract/rev2` with adoption running on `wp/rev2-adopt`; main stays at revision 1 until that merges green. Wave 2 in progress since 2026-11-05: A1, A2, A3, S3 dispatched from main in worktrees `C:LAN-DT-buildsheetvol-wt<wp>`; A4 and U2 wait for the revision 2 merge because they implement `ISheetVolSession` and build `RegenResult`.**
 
 ## Corrections to HANDOFF.md (Dan or measurement overrides the plan)
 
