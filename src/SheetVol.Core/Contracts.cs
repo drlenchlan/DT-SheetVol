@@ -111,7 +111,15 @@ public sealed record ManualSegmentDef(Guid Id, string Label, string PolylineHand
 public sealed record SegmentOverrides(
     string? TargetLayout = null,                   // A14
     double? ModelUnitsPerPaperUnit = null,         // 6.6 per-segment scale override
-    bool LockView = false);                        // E608
+    bool LockView = false,                         // E608
+    double? OffsetLeft = null,                     // rev 2 (D8): the 6.14 per-segment offset fix beside a failing row
+    double? OffsetRight = null);
+
+/// <summary>What the regen draws (rev 2, D6: the three checkboxes in 6.14's left panel). Tables in layouts are driven by the template, not by these.</summary>
+public sealed record DrawOptions(
+    bool BoundaryPolylines = true,
+    bool TableAtEachSegment = true,
+    bool SummaryTable = true);
 
 public sealed record ViewOptions(
     ViewOrientation Orientation = ViewOrientation.AlongAlignment,
@@ -143,7 +151,8 @@ public sealed record RunDefinition(
     AreaUnit AreaUnit = AreaUnit.SquareFeet,
     OhwmSpec? Ohwm = null,                         // required when Preset == HcfcdSegment
     AutoMode AutoMode = AutoMode.Views,
-    int SchemaVersion = 1);
+    int SchemaVersion = 2,                         // rev 2: DrawOptions and offset overrides added
+    DrawOptions? Draw = null);                     // null = all on
 
 // ----------------------------------------------------------------------------
 // Results
@@ -180,16 +189,35 @@ public sealed record SegmentResult(
     SegmentStatus Status,
     IReadOnlyList<Problem> Problems);
 
+/// <summary>SurfaceTotals − band for one analysis (6.5). Present only when above tolerance.</summary>
+public sealed record OutsideLimits(Guid AnalysisId, RawVolume Raw);
+
 /// <summary>Output of ISheetVolSession.RegenerateAsync. Succeeded == false means the drawing is untouched for this run (6.10).</summary>
 public sealed record RegenResult(
     bool Succeeded,
     string RunName,
     IReadOnlyList<SegmentResult> Segments,
     IReadOnlyList<Problem> Problems,
-    RawVolume? OutsideLimits,                      // SurfaceTotals - band, per 6.5, null when within tolerance
+    IReadOnlyList<OutsideLimits> OutsideLimits,    // rev 2: one per analysis above tolerance (C2's ReconcileResult is per analysis); empty when none
     bool PartitionCheckPassed,
     TimeSpan Elapsed,
     string? CsvPath, string? JsonPath);            // null when export was skipped (E506, E507)
+
+// ----------------------------------------------------------------------------
+// Rev 2 (G1 contract review, 2026-11-05): what the dialog needs from the host.
+// C4 parked these behind IDialogHost in Presentation/; they belong in the one
+// door between UI and engine (6.14), so they move here. Database-side members
+// are implemented in Civil3D/Session, editor-side ones in UI/Host.
+// ----------------------------------------------------------------------------
+
+/// <summary>Unit system of the active drawing. Drives labels, offered area units and volume units (E914, E917, E1020).</summary>
+public enum UnitSystem { Imperial, Metric }
+
+/// <summary>The drawing the dialog is bound to. Name is the drawing's identity, normally its full path; pending edits are keyed by it (E907).</summary>
+public sealed record DrawingInfo(string Name, UnitSystem Units);
+
+/// <summary>What the change tracker knows about a run (6.11, E912). IsStale is true when the fingerprint differs from the current sources, or the host cannot tell. LastResult is the last successful regen in this session, from the dialog or a typed SVREGEN; null when none.</summary>
+public sealed record RunStatus(bool IsStale, RegenResult? LastResult);
 
 // ----------------------------------------------------------------------------
 // Section 6.14: the only door between the UI and the engine
@@ -207,4 +235,12 @@ public interface ISheetVolSession
     Task<string?> PickAlignmentAsync();
     Task<double?> PickStationAsync(string alignmentName);
     event EventHandler SourcesChanged;                // active document, object lists, staleness
+
+    // Rev 2 (from C4's IDialogHost)
+    DrawingInfo? ActiveDrawing { get; }                                   // null when no drawing is open (E901); re-read on SourcesChanged
+    string FormatStation(string alignmentName, double rawStation);        // honors station equations (E208)
+    (double Start, double End)? StationRange(string alignmentName);       // raw; null when the alignment is not found
+    RunStatus GetRunStatus(string runName);                               // called on open and after every SourcesChanged (E912)
+    bool IsCommandActive { get; }                                         // Regenerate disabled while true (E905)
+    Task<RegenResult?> ExportAsync(RunDefinition run, CancellationToken ct);   // SVEXPORT: CSV and JSON only, no drawing writes; null when the run has no result yet
 }
