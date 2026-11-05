@@ -112,8 +112,8 @@ Filled as workers return. Status: TODO / IN PROGRESS / GREEN / MANUAL-OK / BLOCK
 | Scope | Rows | Status |
 |---|---|---|
 | E1xx Platform | E101–E105 | E101 manual: dev seat verified; E105 GREEN (C2); E102–E104 TODO |
-| E2xx Geometry | E201–E219 | TODO (C1) |
-| E3xx Segments | E301–E312 | TODO (C1) |
+| E2xx Geometry | E201–E219 | U rows GREEN (C1: E201–E211, E214c, E215, E216, E218); H rows TODO (A1, A4: E212, E213, E217); E219 M |
+| E3xx Segments | E301–E312 | U rows GREEN (C1: E301–E308 planning level, E311c, E312; E309, E310 by C3); H halves TODO (A2, A3, A4) |
 | E4xx Volumes | E401–E421 | U rows GREEN (C2: E405c, E408c, E409, E410c, E411c, E413, E414, E418, E420, E421c; c = Core half); H rows TODO (A1, A4) |
 | E5xx Tables | E501–E508 | E508 GREEN (C2); E505 Core half GREEN; H rows TODO (A2, A3) |
 | E6xx Layouts | E601–E615 | U rows GREEN (C3: E603, E606, E607, E610; E309, E310 too); H/M rows TODO (A3) |
@@ -121,7 +121,7 @@ Filled as workers return. Status: TODO / IN PROGRESS / GREEN / MANUAL-OK / BLOCK
 | E8xx Regen | E801–E812 | Logic-level GREEN (C3: E804–E806, E811); H/M rows TODO (A4, L2) |
 | E9xx Dialog | E901–E917 | U rows GREEN (C4: E902, E903, E904, E907, E912u, E914, E916, E917; logic for E901, E905, E906, E911 too); M rows TODO (U2, Dan) |
 | E10xx OHWM | E1001–E1021 | U rows GREEN (C5: E1001–E1011, E1019, E1020); H rows TODO (A1, A2, A4: E1012–E1018, E1021) |
-| T1–T31 | | T15, T16, T17 GREEN; T14 fingerprint part and T19 logic part GREEN (C3); T11, T23 GREEN (C2); T22 GREEN (C4); T25–T30 GREEN on generated triangles (C5); rest TODO |
+| T1–T31 | | T15, T16, T17 GREEN; T14 fingerprint part and T19 logic part GREEN (C3); T11, T23 GREEN (C2); T22 GREEN (C4); T25–T30 GREEN on generated triangles (C5); T7, T8, T9, T10 Core half GREEN (C1); rest TODO |
 | P1–P24 | | P16 PASSED both hosts; P11, P12, P13, P17, P20, P24 ANSWERED headless (S2, docs/api-findings.md §B); P1–P10, P18, P19, P22, P23 TODO (S1); P14, P15, P21 TODO (S3) |
 
 ## Open items for Dan (HANDOFF.md section 13)
@@ -148,6 +148,7 @@ Filled as workers return. Status: TODO / IN PROGRESS / GREEN / MANUAL-OK / BLOCK
 | 2026-11-05 | wp/fx (FX fixtures) | 6c69e2b | build 0 errors; fixtureA.scr re-run by orchestrator in the fx worktree: EG 2 tri, FG_A 52 tri, volume surface 68 tri, UnadjustedCut 5400.000000000002 UnadjustedFill 5400; commit confined to SelfTest/Fixture*.cs and tools/scripts/fixture*.scr. fixtureA.dwg left untracked (SVFIXTURE A rebuilds it in 6 s) |
 | 2026-11-05 | wp/c4 (C4 presentation) | b2857c3 | build 0 errors; `dotnet test` 71/71 in the c4 worktree, 328/328 on main after merge; commit confined to Presentation/ and its tests; no WPF or Autodesk types (ICommand is BCL) |
 | 2026-11-05 | wp/c5 (C5 integrator) | a410702 | build 0 errors; `dotnet test` 94/94 in the c5 worktree, 420/420 on main after merge; commit confined to Volumes/Integrator/ and its tests; no Autodesk references, no residue |
+| 2026-11-05 | wp/c1 (C1 planning + geometry) | d601c47 | build 0 errors; `dotnet test` 130/130 in the c1 worktree, 548/548 on main after merge; diff confined to Planning/, Geometry/, tests and Fakes/; no residue |
 
 ## Decisions pending Dan (raised by workers, not yet ruled)
 
@@ -163,6 +164,8 @@ Filled as workers return. Status: TODO / IN PROGRESS / GREEN / MANUAL-OK / BLOCK
 | D8 | C4 | Per-segment offset fix beside a failing row (6.14) has no target: `SegmentOverrides` has no offset field | text only |
 | D9 | C5 | Noise snapping on the impact path only: a depth within a per-triangle forward error bound τ = 64·ε·(|z| + κ·|∇z|·(L + W)) of zero is treated as 0, and a base elevation within τ of OHWM as OHWM. Without it, rotated or differently-gridded surfaces counted 1e-13 noise as cut (T25 area 19,094 instead of 16,000). Band totals never adjusted. Goes beyond the literal 6.15 text; Dan should accept or reject | snapping on |
 | D10 | C5 | A triangle source with nothing in the window is SV-E403 Error (no numbers); two surfaces that do not overlap inside the boundary is SV-E405 Warning with zeros. A4 decides whether one E403 fails the whole run: a design surface covering part of the alignment raises it on every segment it does not reach | per-segment error, run continues |
+| D11 | C1 | `MinSegmentLength` has no default in the handoff; C1 used 0 (every remainder kept and reported) | 0 |
+| D12 | C1 | A break inside the inside-mitre setback of an angle point, and a non-tangent join at a curve, are E205 errors rather than mitres. Overlap test includes adjacent pairs | errors |
 
 ## Facts for later workers (from merged packages)
 
@@ -200,7 +203,7 @@ Filled as workers return. Status: TODO / IN PROGRESS / GREEN / MANUAL-OK / BLOCK
 | Range | Owner | Meaning |
 |---|---|---|
 | SV-E1xx | FX, probes | SV-E190 probe step failed (S2); SV-E191–E193 fixture build failures (FX) |
-| SV-E2xx, E3xx | C1 | planning and geometry rows (E201, E202, E205, …, E304, E305 …) |
+| SV-E2xx, E3xx | C1 | planning and geometry rows (E201, E202, E205, …, E304, E305 …); SV-E300 = spec syntax, break limit, no segments, ViewFrames driver not planned, repeated known ID |
 | SV-E4xx | C2, A1 | E401, E405, E410, E411, E419 as rows; E430–E441 volumes without a row (E430 partition fail, E431 partition skipped, E432 negative raw, E438 area above boundary, E439 negative outside-limits) |
 | SV-E5xx | C2, A2, A3 | E530–E538 output without a row (E532 placeholder template, E538 material length/area differ) |
 | SV-E6xx | C3, A3 | E601, E603 (Info), E606, E309 (does not fit) |
@@ -216,3 +219,13 @@ Filled as workers return. Status: TODO / IN PROGRESS / GREEN / MANUAL-OK / BLOCK
 - Fixture generators are public `ITriangleSource`s (`Integrator/Fixtures/FixtureSurfaces.cs`) with the exact triangulation in XML docs. **FX and C5 must agree on triangulation:** EG_H on FG_H's grid, transition diagonal from (1300, ±10) to (1310, ±16) gives T28 = 588.148 CY; the other diagonal gives 586.667 CY (both inside the handoff band). FX built H independently (12 / 48 triangles, cut 67,860 ft³ whole surface) while C5's whole-band cut is 67,880 ft³ over [0, 2000] ±100: the 20 ft³ difference is to be reconciled at G1 (likely the hidden sliver triangles FX reported, E1013).
 - Measured: Fixture H full extent in 1.6 ms (48 + 48 triangles); 1-ft cells (31,856 + 31,856) in 379 ms, same results. T7 on the arc gives the polygon area 62,831.393 (analytic 62,831.853 differs by 7e-6 from tessellation at 0.01 mid-ordinate).
 - Search-limit edge detection unverified for a break exactly on a mitred angle point (E205); raises a Warning that the check did not run rather than skipping silently. Fakes `C5Alignment`/`C5Boundaries` to consolidate with C1's.
+
+### From C1
+
+- Entry: `new Planner(PlanningOptions.ForUnitScale(unitsPerFoot)).Validate(run, alignment, manualOutlines?)` → frozen `ValidationResult`; `Plan()` → `PlanResult` (band pieces, overlaps, dropped GUIDs, station list, partition-check applicability and skip reason). Manual segments are not in `ValidationResult.Segments` (a `SegmentDef` needs stations); their boundaries are in `Boundaries` keyed by the manual segment's ID, so consumers match by `SegmentId`, never by position. A1/A4 read the manual polyline and pass it as `manualOutlines`; missing = E311 "erased".
+- **ViewFrames runs are not planned in Core** (E300 error). Frame station ranges must be added to `Core/Planning` in Wave 3 (L1 owns only `Civil3D/Frames`): orchestrator to assign.
+- `KnownSegments` must be the last successfully applied plan; persist only after a successful regen (an invalid E211 plan saved then restored loses identities).
+- Tessellated polygon area is systematically low by about 3e-5 on curves (vertices on the curve); Fixture D through the API will show the same shortfall; T7 came out at 62,829.758 ft² (C5's integrator got 62,831.393 on its own tessellation; both inside 2e-4).
+- Settings for A4's config file: unit scale, MidOrdinate 0.01 ft, MitreLimitDeg 150, MinSegmentLength 0, SegmentLabelFormat `{0}`, MaxBreaks 10,000. New code SV-E300 (spec syntax, break limit, no segments, ViewFrames driver, repeated known ID) added to the registry below.
+- Fixture readings differ from FX: C1 read K as a 30° LEFT deflection and chose SP = tangent 200, spiral 150, arc R 500 L 200, spiral 150, tangent 200 turning right; FX built K turning RIGHT and SP as PI (500,0) left 30°, R 500, spirals 100. Core tests use C1's fakes, headless tests use FX's drawings, so nothing is wrong yet, but T10 compares the API volume with the Core polygon area on K and SP: A4's self-test must build the Core fake from the FX alignment's actual `AlignSeg`s through A1's adapter, not from the hand-written fake.
+- Measured: 464 segments and 3,305 stations planned in 54 ms. Independent Opus review found and C1 fixed: `START..END/2147483647` overflow loop, per-entry break limit, lopsided identity on a trimmed start, throws on repeated known ID.
