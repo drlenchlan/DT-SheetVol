@@ -80,7 +80,7 @@ P16 is closed: the net10.0-windows assembly loads in both hosts.
 
 `tools\check-contracts.ps1`: `contracts.md matches Contracts.cs`.
 
-### G1, G2, G3 — not started
+### G1 — see below. G2 — headless half PASSED, Dan's half OPEN (see below). G3 — not started
 
 ## Decisions made in Wave 0
 
@@ -155,6 +155,7 @@ Filled as workers return. Status: TODO / IN PROGRESS / GREEN / MANUAL-OK / BLOCK
 | 2026-11-05 | wp/a3 (A3 paper writers) | 1d5068a | build 0 errors (gated on the literal line); writersPaper.scr re-run by orchestrator in the a3 worktree and again on main after the merge, exit 0, 75 PASS, every phase "no FAIL lines"; diff confined to WritersPaper/ and writersPaper*.scr |
 | 2026-11-05 | wp/u2 (U2 dialog) | 43215c9 | build 0 errors (gated); off-screen smoke outside AutoCAD 28/28 per U2, renders kept in docs/ui/smoke/ and read by the orchestrator against 6.14; diff confined to UI/Dialog and UI/Host; no assembly-level CommandClass in SheetVol.UI |
 | 2026-11-05 | wp/a4 (A4 commands + pipeline) | 453ae3a | build 0 errors (gated); selftest.scr re-run by orchestrator in the a4 worktree and on main after the merge: 37 passed, 0 failed on fake bindings; diff confined to Commands/, Session/, SelfTest/SelfTest*.cs, selftest*.scr |
+| 2026-11-05 | wp/int (integration) | dab7245 | build 0 errors (gated); selftest-installed 74/0/3, selftest 45/0, selftest-commands clean, probeA and probeB clean, all re-run by the orchestrator on the final commit; Core 586/586 |
 
 ## Decisions pending Dan (raised by workers, not yet ruled)
 
@@ -334,3 +335,17 @@ Changes to `Contracts.cs`, each tied to a decision above: `ISheetVolSession` gai
 - Settings file `sheetvol.settings.json` beside the DLL (`SVCONFIG Show/Write/Reload`); built-in defaults used when absent; placeholders reported once per session; unknown keys and bad values refused (SV-E534, SV-E820).
 - Spec tension: P18 says always `Rebuild()` the owned volume surface; E811 says no writes except the timestamp. T19 counts writer writes only (the surface rebuild is not a write of an owned drawing object).
 - Manual segments are reconciled in a second pass outside the partition check (SV-E826 warning) and get no layout or view. Orphan layouts keep their names, so renumbering after a merge gives the next sheet an E603 "(2)" suffix. Codes SV-E820–E829 (E822 unwired bindings, E823 unexpected exception guard, E826 manual segments, E827 integrator E403 downgraded per D10, E828 area cross-check mismatch), SV-E504 relock note, SV-E199 self-test failure. `SVSELFTEST BindFakes` is test-only and refused when real bindings are wired (drop before release).
+
+### G2 — headless half PASSED 2026-11-05; Dan's half OPEN
+
+Installed bindings (`tools/scripts/selftest-installed.scr`, re-run by the orchestrator on the final integration commit): **74 passed, 0 failed, 3 not run** with reasons in `selftest-result.json` (E807 read-only drawing not possible headless; E812 is L2's batch runner, Wave 3; E415 data-shortcut and corridor surfaces need Dan's fixture pair). Green on installed bindings: T1–T20, T23–T31 (T29 worst 5.8e-15 relative over 28 regens), plus E213, E217, E308, E401–E404, E411, E412, E421, E501, E503–E507, E601, E612, E801–E803, E808, E809, D10. Same commit: `selftest.scr` (fakes) 45/0, `selftest-commands.scr` no SV-E8xx errors, `probeA.scr` T1+T2 0 segments outside ±0.01 CY, `probeB.scr` no SV-E190; earlier on the integration branch: `adapters.scr` 85+2 PASS, `writersModel.scr` 55/0, `writersPaper.scr` 77 PASS. Core suite 586/586. **Open for Dan:** open `SVDIALOG` once in Civil 3D, run T2's breaks through it, compare with `docs/ui/smoke/` or the artboards (section 10 G2 last clause).
+
+### From the integration pass (`src/SheetVol.Civil3D/Integration/README.md`, `Ownership/README.md`)
+
+- `EngineStartup` (`IExtensionApplication`, no AcMgd) sets `EngineBindings.Current` and `SelfTestWorlds.Installed` at load. `CivilAdapterFactory` over A1 with a `TransactionLifetime` guard; `CivilWriterFactory` over A2 and A3. **Port reshape (A4's `Ports.cs`, not the contract):** `IModelWriter`/`IPaperWriter` take one whole-run `WriteRequest` per regen because A2 and A3 compare live objects themselves. Step 5 order: model writer, then paper writer last (A3 erases template clones it creates, so nothing that can fail runs after it), then the store. Owner tags unified in `Ownership/OwnerTag.cs` (A3's `SV-OWNER-1` layout plus `RunIds.For(runName)`); A2's record and A3's class deleted. NoUndoMarker on SVSTATUS, SVEXPORT, SVCONFIG and the read-only probes. E1012 and the 6.5 area check: fixtures 1e-9 relative over a 1e-6 ft³ floor, project max(0.5 ft³, 1e-4 × total) / 1e-4 relative or 1 ft². `DisplayPolygonSource` uses C1's per-segment `Build`. Settings file embeds `adapters`, `modelWriters`, `paper`; A4's duplicate keys dropped. Dialog host: `CreateInner` order = fake session env var, registered factory, A4's `SheetVolSession` wrapped by `EditorSession`; `CivilReads` typed.
+- **Orchestrator deviation from section 9 "write no feature code after Wave 0":** three fixes applied by the orchestrator after the integration worker was stopped at 853k tokens, each one specified exactly in its report: `ExportFiles.Prepare` formats only finite stations (manual segments carry NaN), `ExportWriters` writes non-finite doubles as JSON null (new `NonFiniteAsNull` converter in Core), the empty test surface renamed `T-EMPTY` (the `SV-` prefix is the owned-surface prefix). Verified by the 74/0/3 run above.
+- Follow-ups: collapse `modelWriters.ownerTagKey` and `paper.ownerTagKey` into one setting; `paper.tablePaperPoint` and `modelWriters.tables.tablePaperPoint` are one 6.7 fallback point; E906 needs `RegenerateAsync` to yield between steps (progress and Cancel will not repaint); the status fingerprint reads owned-surface totals without a rebuild and can lag a source edit until the next regen (L2, P18); `SVSELFTEST BindFakes` is test-only. Do not run `p16.scr` from a worktree (it saves over `tools/fixtures/blank-c3d.dwg`).
+
+## Orchestration cost and process (2026-11-05)
+
+Subagent tokens through the integration pass: 7,992,120 across 17 Opus workers (C3 275k, S2 384k, C2 333k, FX 341k, C4 368k, C5 384k, C1 409k, S1 389k, rev2 adopt 367k, rev2b 402k, A2 495k, S3 501k, A1 596k, A3 697k, U2 523k, A4 676k, integration 854k). The integration brief was too wide (six items plus a six-script sweep) and was stopped by the orchestrator at 854k. Standing rules from here, written into `.claude/agents/c3d-dev.md`: one deliverable per worker; point at the two READMEs the task touches and the named NOW.md sections, not "NOW.md in full"; no narration between tool calls; return only the requested fields, tables over paragraphs, about 300 words plus evidence lines.
