@@ -36,7 +36,7 @@
       <Private>false</Private>
     </Reference>
     <Reference Include="AecBaseMgd">
-      <HintPath>$(AcaInstall)AecBaseMgd.dll</HintPath>
+      <HintPath>$(AcaInstall)\AecBaseMgd.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="AeccDbMgd">
