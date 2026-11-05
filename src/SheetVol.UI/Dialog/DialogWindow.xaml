@@ -1,0 +1,698 @@
+<!-- SVDIALOG (HANDOFF.md 6.14): left panel 328 wide, main area with the strip chart over the
+     segments grid, footer. Bound to C4's DialogViewModel; labels from DialogText through
+     x:Static; no engine logic here. Theme and style dictionaries are merged by the code-behind
+     before InitializeComponent, so every brush below is a DynamicResource (E908). -->
+<Window x:Class="SheetVol.UI.Dialog.DialogWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:pres="clr-namespace:SheetVol.Core.Presentation;assembly=SheetVol.Core"
+        xmlns:dlg="clr-namespace:SheetVol.UI.Dialog"
+        Title="{x:Static pres:DialogText.WindowTitle}"
+        Width="1280" Height="820" MinWidth="980" MinHeight="640"
+        ResizeMode="CanResize" ShowInTaskbar="False"
+        UseLayoutRounding="True" SnapsToDevicePixels="True" FontSize="12"
+        Background="{DynamicResource SV.Brush.WindowBackground}"
+        Foreground="{DynamicResource SV.Brush.Text}"
+        KeyboardNavigation.TabNavigation="Cycle">
+
+    <Grid x:Name="Root" Background="{DynamicResource SV.Brush.WindowBackground}">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- ===== Strips: design-fixture note, no drawing open (E901) ===================== -->
+        <StackPanel Grid.Row="0">
+            <Border x:Name="ModeNoteStrip" Style="{DynamicResource SV.InfoStripStyle}" Visibility="Collapsed">
+                <TextBlock x:Name="ModeNoteText" TextWrapping="Wrap"/>
+            </Border>
+            <Border Style="{DynamicResource SV.ErrorStripStyle}"
+                    Visibility="{Binding DisabledReason, Converter={x:Static dlg:Converters.NotEmptyToVisible}}">
+                <TextBlock Text="{Binding DisabledReason}" TextWrapping="Wrap" FontWeight="SemiBold"/>
+            </Border>
+        </StackPanel>
+
+        <Grid Grid.Row="1">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="328"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+
+            <!-- ===== Left panel, 328 wide ============================================== -->
+            <Border Grid.Column="0" Background="{DynamicResource SV.Brush.PanelBackground}"
+                    BorderBrush="{DynamicResource SV.Brush.Separator}" BorderThickness="0,0,1,0">
+                <ScrollViewer x:Name="LeftPanel" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
+                              Focusable="False" IsEnabled="{Binding CanEdit}"
+                              AutomationProperties.Name="{x:Static dlg:ViewText.LeftPanel}">
+                    <StackPanel Margin="0,0,0,8">
+
+                        <!-- Report preset (6.16) -->
+                        <Border Style="{DynamicResource SV.CardStyle}">
+                            <StackPanel>
+                                <TextBlock Text="{x:Static pres:DialogText.ReportHeader}" Style="{DynamicResource SV.CardHeaderStyle}"/>
+                                <ComboBox ItemsSource="{Binding Presets}" SelectedItem="{Binding SelectedPreset}"
+                                          AutomationProperties.Name="{x:Static pres:DialogText.ReportHeader}"/>
+                            </StackPanel>
+                        </Border>
+
+                        <!-- Alignment -->
+                        <Border Style="{DynamicResource SV.CardStyle}">
+                            <StackPanel>
+                                <TextBlock Text="{x:Static pres:DialogText.AlignmentHeader}" Style="{DynamicResource SV.CardHeaderStyle}"/>
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <ComboBox Grid.Column="0" ItemsSource="{Binding Alignments}" SelectedItem="{Binding SelectedAlignment}"
+                                              AutomationProperties.Name="{x:Static pres:DialogText.AlignmentHeader}"/>
+                                    <Button Grid.Column="1" Margin="6,0,0,0" Content="{x:Static pres:DialogText.PickInDrawing}"
+                                            Command="{Binding PickAlignmentCommand}"
+                                            AutomationProperties.Name="{x:Static pres:DialogText.PickInDrawing}"/>
+                                </Grid>
+                                <TextBlock Text="{Binding StationRangeText}" Style="{DynamicResource SV.MutedTextStyle}" Margin="0,6,0,0"
+                                           Visibility="{Binding StationRangeText, Converter={x:Static dlg:Converters.NotEmptyToVisible}}"/>
+                            </StackPanel>
+                        </Border>
+
+                        <!-- Boundary offsets; OHWM beside them with the HCFCD preset -->
+                        <Border Style="{DynamicResource SV.CardStyle}">
+                            <StackPanel>
+                                <TextBlock Text="{Binding OffsetsHeader}" Style="{DynamicResource SV.CardHeaderStyle}"/>
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="10"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <ContentControl Grid.Column="0" Content="{Binding OffsetLeft}" Style="{DynamicResource SV.FieldHostStyle}"
+                                                    ContentTemplate="{DynamicResource SV.LabelledFieldTemplate}"/>
+                                    <ContentControl Grid.Column="2" Content="{Binding OffsetRight}" Style="{DynamicResource SV.FieldHostStyle}"
+                                                    ContentTemplate="{DynamicResource SV.LabelledFieldTemplate}"/>
+                                </Grid>
+                                <CheckBox IsChecked="{Binding SameOnBothSides}" Margin="0,8,0,0"
+                                          AutomationProperties.Name="{x:Static pres:DialogText.SameOnBothSides}">
+                                    <TextBlock Text="{x:Static pres:DialogText.SameOnBothSides}" TextWrapping="Wrap"/>
+                                </CheckBox>
+                                <StackPanel Margin="0,10,0,0" Visibility="{Binding IsHcfcd, Converter={x:Static dlg:Converters.TrueToVisible}}">
+                                    <TextBlock Text="{Binding OhwmLabel}" Style="{DynamicResource SV.FieldLabelStyle}"/>
+                                    <ContentControl Content="{Binding Ohwm}" Style="{DynamicResource SV.FieldHostStyle}"
+                                                    ContentTemplate="{DynamicResource SV.FieldTemplate}"/>
+                                </StackPanel>
+                            </StackPanel>
+                        </Border>
+
+                        <!-- Surfaces to compare (HCFCD: table row, existing, design) -->
+                        <Border Style="{DynamicResource SV.CardStyle}">
+                            <StackPanel>
+                                <TextBlock Text="{Binding SurfacesHeader}" Style="{DynamicResource SV.CardHeaderStyle}"/>
+                                <ItemsControl ItemsSource="{Binding Analyses}" Focusable="False">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Border Style="{DynamicResource SV.SubCardStyle}"
+                                                    AutomationProperties.Name="{x:Static dlg:ViewText.ComparisonCard}">
+                                                <Grid>
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="*"/>
+                                                        <ColumnDefinition Width="10"/>
+                                                        <ColumnDefinition Width="*"/>
+                                                    </Grid.ColumnDefinitions>
+                                                    <Grid.RowDefinitions>
+                                                        <RowDefinition Height="Auto"/>
+                                                        <RowDefinition Height="Auto"/>
+                                                        <RowDefinition Height="Auto"/>
+                                                        <RowDefinition Height="Auto"/>
+                                                        <RowDefinition Height="Auto"/>
+                                                    </Grid.RowDefinitions>
+
+                                                    <TextBlock Grid.Row="0" Grid.ColumnSpan="3" Style="{DynamicResource SV.FieldLabelStyle}"
+                                                               Text="{Binding DataContext.AnalysisNameLabel, RelativeSource={RelativeSource AncestorType=Window}}"/>
+                                                    <Grid Grid.Row="1" Grid.ColumnSpan="3">
+                                                        <Grid.ColumnDefinitions>
+                                                            <ColumnDefinition Width="*"/>
+                                                            <ColumnDefinition Width="Auto"/>
+                                                        </Grid.ColumnDefinitions>
+                                                        <ContentControl Grid.Column="0" Content="{Binding Name}" Style="{DynamicResource SV.FieldHostStyle}"
+                                                                        ContentTemplate="{DynamicResource SV.FieldTemplate}"/>
+                                                        <Button Grid.Column="1" Margin="6,0,0,0" VerticalAlignment="Top" MinWidth="0"
+                                                                Content="{x:Static pres:DialogText.RemoveComparison}" Command="{Binding RemoveCommand}"
+                                                                AutomationProperties.Name="{x:Static pres:DialogText.RemoveComparison}"/>
+                                                    </Grid>
+
+                                                    <StackPanel Grid.Row="2" Grid.Column="0" Margin="0,8,0,0">
+                                                        <TextBlock Style="{DynamicResource SV.FieldLabelStyle}"
+                                                                   Text="{Binding DataContext.BaseSurfaceLabel, RelativeSource={RelativeSource AncestorType=Window}}"/>
+                                                        <ComboBox ItemsSource="{Binding Surfaces}" SelectedItem="{Binding BaseSurface}"
+                                                                  AutomationProperties.Name="{Binding DataContext.BaseSurfaceLabel, RelativeSource={RelativeSource AncestorType=Window}}"/>
+                                                    </StackPanel>
+                                                    <StackPanel Grid.Row="2" Grid.Column="2" Margin="0,8,0,0">
+                                                        <TextBlock Style="{DynamicResource SV.FieldLabelStyle}"
+                                                                   Text="{Binding DataContext.ComparisonSurfaceLabel, RelativeSource={RelativeSource AncestorType=Window}}"/>
+                                                        <ComboBox ItemsSource="{Binding Surfaces}" SelectedItem="{Binding ComparisonSurface}"
+                                                                  AutomationProperties.Name="{Binding DataContext.ComparisonSurfaceLabel, RelativeSource={RelativeSource AncestorType=Window}}"/>
+                                                    </StackPanel>
+
+                                                    <ContentControl Grid.Row="3" Grid.Column="0" Margin="0,8,0,0" Content="{Binding CutFactor}"
+                                                                    Style="{DynamicResource SV.FieldHostStyle}" ContentTemplate="{DynamicResource SV.LabelledFieldTemplate}"/>
+                                                    <ContentControl Grid.Row="3" Grid.Column="2" Margin="0,8,0,0" Content="{Binding FillFactor}"
+                                                                    Style="{DynamicResource SV.FieldHostStyle}" ContentTemplate="{DynamicResource SV.LabelledFieldTemplate}"/>
+                                                </Grid>
+                                            </Border>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                                <Button HorizontalAlignment="Left" Content="{x:Static pres:DialogText.AddComparison}"
+                                        Command="{Binding AddAnalysisCommand}"
+                                        AutomationProperties.Name="{x:Static pres:DialogText.AddComparison}"/>
+                            </StackPanel>
+                        </Border>
+
+                        <!-- Fill stations by interval -->
+                        <Border Style="{DynamicResource SV.CardStyle}">
+                            <StackPanel>
+                                <TextBlock Text="{x:Static pres:DialogText.IntervalHeader}" Style="{DynamicResource SV.CardHeaderStyle}"/>
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="8"/>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="8"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <ContentControl Grid.Column="0" Content="{Binding IntervalEvery}" Style="{DynamicResource SV.FieldHostStyle}"
+                                                    ContentTemplate="{DynamicResource SV.LabelledFieldTemplate}"/>
+                                    <ContentControl Grid.Column="2" Content="{Binding IntervalFrom}" Style="{DynamicResource SV.FieldHostStyle}"
+                                                    ContentTemplate="{DynamicResource SV.LabelledFieldTemplate}"/>
+                                    <ContentControl Grid.Column="4" Content="{Binding IntervalTo}" Style="{DynamicResource SV.FieldHostStyle}"
+                                                    ContentTemplate="{DynamicResource SV.LabelledFieldTemplate}"/>
+                                </Grid>
+                                <Button HorizontalAlignment="Left" Margin="0,8,0,0" Content="{x:Static pres:DialogText.FillTable}"
+                                        Command="{Binding FillTableCommand}"
+                                        AutomationProperties.Name="{x:Static pres:DialogText.FillTable}"/>
+                                <TextBlock Text="{Binding IntervalError}" Style="{DynamicResource SV.ErrorTextStyle}"
+                                           Visibility="{Binding IntervalError, Converter={x:Static dlg:Converters.NotEmptyToVisible}}"/>
+                            </StackPanel>
+                        </Border>
+
+                        <!-- Draw in the drawing (RunDefinition.Draw) -->
+                        <Border Style="{DynamicResource SV.CardStyle}">
+                            <StackPanel>
+                                <TextBlock Text="{x:Static pres:DialogText.DrawHeader}" Style="{DynamicResource SV.CardHeaderStyle}"/>
+                                <CheckBox IsChecked="{Binding DrawBoundaryPolylines}"
+                                          AutomationProperties.Name="{x:Static pres:DialogText.DrawBoundaryPolylines}">
+                                    <TextBlock Text="{x:Static pres:DialogText.DrawBoundaryPolylines}" TextWrapping="Wrap"/>
+                                </CheckBox>
+                                <CheckBox IsChecked="{Binding DrawTableAtEachSegment}"
+                                          AutomationProperties.Name="{x:Static pres:DialogText.DrawTableAtEachSegment}">
+                                    <TextBlock Text="{x:Static pres:DialogText.DrawTableAtEachSegment}" TextWrapping="Wrap"/>
+                                </CheckBox>
+                                <CheckBox IsChecked="{Binding DrawSummaryTable}"
+                                          AutomationProperties.Name="{x:Static pres:DialogText.DrawSummaryTable}">
+                                    <TextBlock Text="{x:Static pres:DialogText.DrawSummaryTable}" TextWrapping="Wrap"/>
+                                </CheckBox>
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+                </ScrollViewer>
+            </Border>
+
+            <!-- ===== Main area ======================================================= -->
+            <Grid x:Name="MainArea" Grid.Column="1" Margin="12,8,12,8" IsEnabled="{Binding IsDrawingOpen}">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="2*" MinHeight="150"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="3*" MinHeight="200"/>
+                </Grid.RowDefinitions>
+
+                <!-- Stale banner above the chart (6.14, E912) -->
+                <Border Grid.Row="0" Style="{DynamicResource SV.WarningBannerStyle}" Margin="0,0,0,6"
+                        Visibility="{Binding ShowStaleBanner, Converter={x:Static dlg:Converters.TrueToVisible}}">
+                    <TextBlock Text="{Binding StaleBannerText}" TextWrapping="Wrap"/>
+                </Border>
+
+                <!-- Run-level problems -->
+                <ItemsControl Grid.Row="1" ItemsSource="{Binding RunProblems}" Focusable="False" Margin="0,0,0,4"
+                              AutomationProperties.Name="{x:Static dlg:ViewText.RunProblems}">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <Grid Margin="0,0,0,4">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock x:Name="Code" Grid.Column="0" Text="{Binding Code}" FontWeight="SemiBold" Margin="0,0,8,0"
+                                           Foreground="{DynamicResource SV.Brush.TextMuted}"/>
+                                <TextBlock x:Name="Message" Grid.Column="1" Text="{Binding Message}" TextWrapping="Wrap"
+                                           Foreground="{DynamicResource SV.Brush.TextMuted}"/>
+                                <TextBlock Grid.Column="2" Text="{Binding Fix}" TextWrapping="Wrap" Margin="12,0,0,0"/>
+                            </Grid>
+                            <DataTemplate.Triggers>
+                                <DataTrigger Binding="{Binding Severity}" Value="Error">
+                                    <Setter TargetName="Code" Property="Foreground" Value="{DynamicResource SV.Brush.Error}"/>
+                                    <Setter TargetName="Message" Property="Foreground" Value="{DynamicResource SV.Brush.Error}"/>
+                                </DataTrigger>
+                                <DataTrigger Binding="{Binding Severity}" Value="Warning">
+                                    <Setter TargetName="Code" Property="Foreground" Value="{DynamicResource SV.Brush.Warning}"/>
+                                    <Setter TargetName="Message" Property="Foreground" Value="{DynamicResource SV.Brush.Warning}"/>
+                                </DataTrigger>
+                            </DataTemplate.Triggers>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+
+                <!-- Strip chart -->
+                <Grid Grid.Row="2">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+                    <DockPanel Grid.Row="0" Margin="0,0,0,4">
+                        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                            <StackPanel Orientation="Horizontal" Margin="12,0,0,0"
+                                        Visibility="{Binding Chart.IsHcfcd, Converter={x:Static dlg:Converters.FalseToVisible}}">
+                                <Rectangle Width="10" Height="10" Fill="{DynamicResource SV.Brush.ChartFill}" Margin="0,0,5,0"/>
+                                <TextBlock Text="{x:Static pres:DialogText.ChartFill}" Style="{DynamicResource SV.MutedTextStyle}"/>
+                            </StackPanel>
+                            <StackPanel Orientation="Horizontal" Margin="12,0,0,0">
+                                <Rectangle Width="10" Height="10" Fill="{DynamicResource SV.Brush.ChartCut}" Margin="0,0,5,0"/>
+                                <TextBlock Text="{x:Static pres:DialogText.ChartCut}" Style="{DynamicResource SV.MutedTextStyle}"/>
+                            </StackPanel>
+                            <StackPanel Orientation="Horizontal" Margin="12,0,0,0"
+                                        Visibility="{Binding Chart.IsHcfcd, Converter={x:Static dlg:Converters.TrueToVisible}}">
+                                <Rectangle Width="16" Height="6" Fill="{DynamicResource SV.Brush.ChartCutMark}" Margin="0,0,5,0"/>
+                                <TextBlock Text="{x:Static pres:DialogText.ChartCutStrip}" Style="{DynamicResource SV.MutedTextStyle}"/>
+                            </StackPanel>
+                        </StackPanel>
+                        <TextBlock Text="{Binding Chart.Title}" Style="{DynamicResource SV.CardHeaderStyle}" Margin="0"/>
+                    </DockPanel>
+                    <Border Grid.Row="1" BorderBrush="{DynamicResource SV.Brush.CardBorder}" BorderThickness="1" CornerRadius="3">
+                        <ScrollViewer x:Name="ChartScroller" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled" Focusable="False">
+                            <dlg:StripChartPanel x:Name="ChartPanel" Chart="{Binding Chart}"
+                                                 PlotBackground="{DynamicResource SV.Brush.ChartPlotBackground}"
+                                                 FillBrush="{DynamicResource SV.Brush.ChartFill}"
+                                                 CutBrush="{DynamicResource SV.Brush.ChartCut}"
+                                                 AxisBrush="{DynamicResource SV.Brush.ChartAxis}"
+                                                 LabelBrush="{DynamicResource SV.Brush.ChartLabel}"
+                                                 SelectionBrush="{DynamicResource SV.Brush.ChartSelection}"
+                                                 CutMarkBrush="{DynamicResource SV.Brush.ChartCutMark}"
+                                                 HollowBrush="{DynamicResource SV.Brush.ChartHollow}"
+                                                 AutomationProperties.Name="{Binding Chart.Title}"/>
+                        </ScrollViewer>
+                    </Border>
+                </Grid>
+
+                <GridSplitter Grid.Row="3" Height="6" HorizontalAlignment="Stretch" ResizeDirection="Rows" ResizeBehavior="PreviousAndNext"
+                              Margin="0,4" Background="Transparent" AutomationProperties.Name="{x:Static dlg:ViewText.Splitter}"/>
+
+                <!-- Grid block: toolbar, grid, total row, reconciliation line -->
+                <DockPanel Grid.Row="4" LastChildFill="True">
+                    <DockPanel DockPanel.Dock="Top" Margin="0,0,0,6">
+                        <WrapPanel DockPanel.Dock="Right" Orientation="Horizontal" HorizontalAlignment="Right">
+                            <Button Margin="6,0,0,0" Content="{x:Static pres:DialogText.AddStation}" Command="{Binding Grid.AddStationCommand}"
+                                    AutomationProperties.Name="{x:Static pres:DialogText.AddStation}"/>
+                            <Button Margin="6,0,0,0" Content="{x:Static pres:DialogText.PickInDrawing}" Command="{Binding Grid.PickStationCommand}"
+                                    AutomationProperties.Name="{x:Static pres:DialogText.PickInDrawing}"/>
+                            <Button Margin="6,0,0,0" Content="{x:Static pres:DialogText.RemoveSegment}" Command="{Binding Grid.RemoveCommand}"
+                                    AutomationProperties.Name="{x:Static pres:DialogText.RemoveSegment}"/>
+                            <Button Margin="6,0,0,0" Content="{x:Static pres:DialogText.ZoomTo}" Command="{Binding Grid.ZoomToCommand}"
+                                    AutomationProperties.Name="{x:Static pres:DialogText.ZoomTo}"/>
+                        </WrapPanel>
+                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center"
+                                    Visibility="{Binding Grid.ShowComparisonSelector, Converter={x:Static dlg:Converters.TrueToVisible}}">
+                            <TextBlock Text="{x:Static pres:DialogText.ComparisonSelector}" VerticalAlignment="Center" Margin="0,0,6,0"
+                                       Style="{DynamicResource SV.MutedTextStyle}"/>
+                            <ComboBox MinWidth="200" ItemsSource="{Binding Grid.Comparisons}" SelectedItem="{Binding Grid.SelectedComparison}"
+                                      AutomationProperties.Name="{x:Static pres:DialogText.ComparisonSelector}"/>
+                        </StackPanel>
+                    </DockPanel>
+
+                    <TextBlock DockPanel.Dock="Bottom" Text="{Binding Grid.ReconciliationText}" Style="{DynamicResource SV.MutedTextStyle}"
+                               Margin="0,6,0,0"/>
+
+                    <!-- Total row: cells follow the grid's column widths and horizontal scroll (code-behind) -->
+                    <Border DockPanel.Dock="Bottom" ClipToBounds="True" Background="{DynamicResource SV.Brush.GridTotalBackground}"
+                            BorderBrush="{DynamicResource SV.Brush.CardBorder}" BorderThickness="1,0,1,1"
+                            Visibility="{Binding Grid.TotalsVisible, Converter={x:Static dlg:Converters.TrueToVisible}}">
+                        <StackPanel x:Name="TotalsRow" Orientation="Horizontal" TextElement.FontWeight="SemiBold">
+                            <StackPanel.RenderTransform>
+                                <TranslateTransform x:Name="TotalsShift"/>
+                            </StackPanel.RenderTransform>
+                            <Border Tag="0-1" Padding="7,4"><TextBlock Text="{Binding Grid.Total.Label}"/></Border>
+                            <Border Tag="2"/>
+                            <Border Tag="3" Padding="7,4"><TextBlock Text="{Binding Grid.Total.LengthText}" TextAlignment="Right"/></Border>
+                            <Border Tag="4" Padding="7,4"><TextBlock Text="{Binding Grid.Total.Area2DText}" TextAlignment="Right"/></Border>
+                            <Border Tag="5" Padding="7,4"><TextBlock Text="{Binding Grid.Total.CutText}" TextAlignment="Right"/></Border>
+                            <Border Tag="6" Padding="7,4"><TextBlock Text="{Binding Grid.Total.FillText}" TextAlignment="Right"/></Border>
+                            <Border Tag="7" Padding="7,4">
+                                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                                    <TextBlock Text="{Binding Grid.Total.NetText}"/>
+                                    <TextBlock Text="{Binding Grid.Total.NetTag}" Margin="5,0,0,0" Foreground="{DynamicResource SV.Brush.TextMuted}"/>
+                                </StackPanel>
+                            </Border>
+                            <Border Tag="8"/>
+                            <Border Tag="9"/>
+                            <Border Tag="10"/>
+                            <Border Tag="11" Padding="7,4"><TextBlock Text="{Binding Grid.Total.ImpactedLengthText}" TextAlignment="Right"/></Border>
+                            <Border Tag="12" Padding="7,4"><TextBlock Text="{Binding Grid.Total.ImpactedAreaText}" TextAlignment="Right"/></Border>
+                            <Border Tag="13" Padding="7,4"><TextBlock Text="{Binding Grid.Total.CutVolumeText}" TextAlignment="Right"/></Border>
+                            <Border Tag="14" Padding="7,4"><TextBlock Text="{Binding Grid.Total.AverageText}" TextAlignment="Right"/></Border>
+                            <Border Tag="15"/>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- Segments grid: virtualized rows (E913), cell editing with Enter/Esc (E910, E903) -->
+                    <DataGrid x:Name="SegmentsGrid"
+                              ItemsSource="{Binding Grid.Rows}" SelectedItem="{Binding Grid.SelectedRow, Mode=TwoWay}"
+                              AutoGenerateColumns="False" CanUserAddRows="False" CanUserDeleteRows="False"
+                              CanUserSortColumns="False" CanUserReorderColumns="False" CanUserResizeRows="False"
+                              SelectionMode="Single" SelectionUnit="FullRow"
+                              EnableRowVirtualization="True" EnableColumnVirtualization="False"
+                              VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling"
+                              RowDetailsVisibilityMode="Visible" AreRowDetailsFrozen="True"
+                              AutomationProperties.Name="{x:Static dlg:ViewText.SegmentsGrid}">
+                        <DataGrid.Resources>
+                            <dlg:BindingProxy x:Key="GridProxy" Data="{Binding}"/>
+                        </DataGrid.Resources>
+
+                        <DataGrid.Columns>
+                            <!-- 0 # -->
+                            <DataGridTemplateColumn Width="40" MinWidth="40" IsReadOnly="True" Header="{x:Static pres:DialogText.ColumnNumber}">
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <TextBlock Text="{Binding Number}" VerticalAlignment="Center"/>
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                            </DataGridTemplateColumn>
+
+                            <!-- 1 Begin (editable) -->
+                            <DataGridTemplateColumn Width="88" MinWidth="88" dlg:GridEdit.Field="Begin" Header="{x:Static pres:DialogText.ColumnBegin}">
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <ContentPresenter Content="{Binding BeginStation}" ContentTemplate="{DynamicResource SV.CellFieldTemplate}"/>
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                                <DataGridTemplateColumn.CellEditingTemplate>
+                                    <DataTemplate>
+                                        <TextBox Text="{Binding BeginStation.Text, UpdateSourceTrigger=Explicit, ValidatesOnNotifyDataErrors=False}"
+                                                 TextAlignment="Right" AutomationProperties.Name="{x:Static pres:DialogText.ColumnBegin}"/>
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellEditingTemplate>
+                            </DataGridTemplateColumn>
+
+                            <!-- 2 End (editable) -->
+                            <DataGridTemplateColumn Width="88" MinWidth="88" dlg:GridEdit.Field="End" Header="{x:Static pres:DialogText.ColumnEnd}">
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <ContentPresenter Content="{Binding EndStation}" ContentTemplate="{DynamicResource SV.CellFieldTemplate}"/>
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                                <DataGridTemplateColumn.CellEditingTemplate>
+                                    <DataTemplate>
+                                        <TextBox Text="{Binding EndStation.Text, UpdateSourceTrigger=Explicit, ValidatesOnNotifyDataErrors=False}"
+                                                 TextAlignment="Right" AutomationProperties.Name="{x:Static pres:DialogText.ColumnEnd}"/>
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellEditingTemplate>
+                            </DataGridTemplateColumn>
+
+                            <!-- 3 Length (Standard) -->
+                            <DataGridTemplateColumn Width="84" MinWidth="84" IsReadOnly="True"
+                                                    Header="{Binding Data.Grid.LengthHeader, Source={StaticResource GridProxy}}"
+                                                    Visibility="{Binding Data.Grid.IsStandard, Source={StaticResource GridProxy}, Converter={x:Static dlg:Converters.TrueToVisible}}">
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <TextBlock Text="{Binding LengthText}" Style="{DynamicResource SV.CellTextStyle}"/>
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                            </DataGridTemplateColumn>
+
+                            <!-- 4 2D area with the unit dropdown in its header (Standard, E917) -->
+                            <DataGridTemplateColumn Width="124" MinWidth="124" IsReadOnly="True"
+                                                    Visibility="{Binding Data.Grid.IsStandard, Source={StaticResource GridProxy}, Converter={x:Static dlg:Converters.TrueToVisible}}">
+                                <DataGridTemplateColumn.Header>
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Text="{Binding Data.Grid.Area2DHeader, Source={StaticResource GridProxy}}" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                                        <ComboBox MinWidth="56" MinHeight="22" Padding="5,1,22,1" FontWeight="Normal"
+                                                  ItemsSource="{Binding Data.Grid.AreaUnits, Source={StaticResource GridProxy}}"
+                                                  SelectedItem="{Binding Data.Grid.SelectedAreaUnit, Source={StaticResource GridProxy}}"
+                                                  AutomationProperties.Name="{x:Static dlg:ViewText.AreaUnit}"/>
+                                    </StackPanel>
+                                </DataGridTemplateColumn.Header>
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <TextBlock Text="{Binding Area2DText}" Style="{DynamicResource SV.CellTextStyle}"/>
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                            </DataGridTemplateColumn>
+
+                            <!-- 5 Cut (Standard) -->
+                            <DataGridTemplateColumn Width="76" MinWidth="76" IsReadOnly="True"
+                                                    Header="{Binding Data.Grid.CutHeader, Source={StaticResource GridProxy}}"
+                                                    Visibility="{Binding Data.Grid.IsStandard, Source={StaticResource GridProxy}, Converter={x:Static dlg:Converters.TrueToVisible}}">
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <TextBlock Text="{Binding CutText}" Style="{DynamicResource SV.CellTextStyle}"/>
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                            </DataGridTemplateColumn>
+
+                            <!-- 6 Fill (Standard) -->
+                            <DataGridTemplateColumn Width="76" MinWidth="76" IsReadOnly="True"
+                                                    Header="{Binding Data.Grid.FillHeader, Source={StaticResource GridProxy}}"
+                                                    Visibility="{Binding Data.Grid.IsStandard, Source={StaticResource GridProxy}, Converter={x:Static dlg:Converters.TrueToVisible}}">
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <TextBlock Text="{Binding FillText}" Style="{DynamicResource SV.CellTextStyle}"/>
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                            </DataGridTemplateColumn>
+
+                            <!-- 7 Net with CUT or FILL tag (Standard) -->
+                            <DataGridTemplateColumn Width="100" MinWidth="100" IsReadOnly="True"
+                                                    Header="{Binding Data.Grid.NetHeader, Source={StaticResource GridProxy}}"
+                                                    Visibility="{Binding Data.Grid.IsStandard, Source={StaticResource GridProxy}, Converter={x:Static dlg:Converters.TrueToVisible}}">
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
+                                            <TextBlock Text="{Binding NetText}"/>
+                                            <TextBlock Text="{Binding NetTag}" Margin="5,0,0,0" FontSize="11" FontWeight="SemiBold"
+                                                       Foreground="{DynamicResource SV.Brush.TextMuted}" VerticalAlignment="Center"/>
+                                        </StackPanel>
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                            </DataGridTemplateColumn>
+
+                            <!-- 8 Coverage (Standard) -->
+                            <DataGridTemplateColumn Width="80" MinWidth="80" IsReadOnly="True"
+                                                    Header="{Binding Data.Grid.CoverageHeader, Source={StaticResource GridProxy}}"
+                                                    Visibility="{Binding Data.Grid.IsStandard, Source={StaticResource GridProxy}, Converter={x:Static dlg:Converters.TrueToVisible}}">
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <TextBlock x:Name="Coverage" Text="{Binding CoverageText}" Style="{DynamicResource SV.CellTextStyle}"/>
+                                        <DataTemplate.Triggers>
+                                            <DataTrigger Binding="{Binding CoverageIsLow}" Value="True">
+                                                <Setter TargetName="Coverage" Property="Foreground" Value="{DynamicResource SV.Brush.Warning}"/>
+                                                <Setter TargetName="Coverage" Property="FontWeight" Value="SemiBold"/>
+                                            </DataTrigger>
+                                        </DataTemplate.Triggers>
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                            </DataGridTemplateColumn>
+
+                            <!-- 9 Sheet (HCFCD) -->
+                            <DataGridTemplateColumn Width="92" MinWidth="92" IsReadOnly="True"
+                                                    Header="{Binding Data.Grid.SheetHeader, Source={StaticResource GridProxy}}"
+                                                    Visibility="{Binding Data.Grid.IsHcfcd, Source={StaticResource GridProxy}, Converter={x:Static dlg:Converters.TrueToVisible}}">
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <TextBlock Text="{Binding SheetLayout}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
+                                                   ToolTip="{Binding SheetLayout}"/>
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                            </DataGridTemplateColumn>
+
+                            <!-- 10 OHWM elevation (HCFCD, editable per segment) -->
+                            <DataGridTemplateColumn Width="92" MinWidth="92" dlg:GridEdit.Field="Ohwm"
+                                                    Header="{Binding Data.Grid.OhwmHeader, Source={StaticResource GridProxy}}"
+                                                    Visibility="{Binding Data.Grid.IsHcfcd, Source={StaticResource GridProxy}, Converter={x:Static dlg:Converters.TrueToVisible}}">
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <ContentPresenter x:Name="Field" Content="{Binding Ohwm}" ContentTemplate="{DynamicResource SV.CellFieldTemplate}"/>
+                                        <DataTemplate.Triggers>
+                                            <DataTrigger Binding="{Binding OhwmIsOverride}" Value="True">
+                                                <Setter TargetName="Field" Property="TextElement.FontWeight" Value="SemiBold"/>
+                                            </DataTrigger>
+                                        </DataTemplate.Triggers>
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                                <DataGridTemplateColumn.CellEditingTemplate>
+                                    <DataTemplate>
+                                        <TextBox Text="{Binding Ohwm.Text, UpdateSourceTrigger=Explicit, ValidatesOnNotifyDataErrors=False}"
+                                                 TextAlignment="Right" AutomationProperties.Name="{x:Static pres:DialogText.ColumnOhwm}"/>
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellEditingTemplate>
+                            </DataGridTemplateColumn>
+
+                            <!-- 11 Impacted length (HCFCD) -->
+                            <DataGridTemplateColumn Width="92" MinWidth="92" IsReadOnly="True"
+                                                    Header="{Binding Data.Grid.ImpactedLengthHeader, Source={StaticResource GridProxy}}"
+                                                    Visibility="{Binding Data.Grid.IsHcfcd, Source={StaticResource GridProxy}, Converter={x:Static dlg:Converters.TrueToVisible}}">
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <TextBlock Text="{Binding ImpactedLengthText}" Style="{DynamicResource SV.CellTextStyle}"/>
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                            </DataGridTemplateColumn>
+
+                            <!-- 12 Impacted area with the unit dropdown (HCFCD, acres by default) -->
+                            <DataGridTemplateColumn Width="132" MinWidth="132" IsReadOnly="True"
+                                                    Visibility="{Binding Data.Grid.IsHcfcd, Source={StaticResource GridProxy}, Converter={x:Static dlg:Converters.TrueToVisible}}">
+                                <DataGridTemplateColumn.Header>
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Text="{Binding Data.Grid.ImpactedAreaHeader, Source={StaticResource GridProxy}}" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                                        <ComboBox MinWidth="56" MinHeight="22" Padding="5,1,22,1" FontWeight="Normal"
+                                                  ItemsSource="{Binding Data.Grid.AreaUnits, Source={StaticResource GridProxy}}"
+                                                  SelectedItem="{Binding Data.Grid.SelectedAreaUnit, Source={StaticResource GridProxy}}"
+                                                  AutomationProperties.Name="{x:Static dlg:ViewText.AreaUnit}"/>
+                                    </StackPanel>
+                                </DataGridTemplateColumn.Header>
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <TextBlock Text="{Binding ImpactedAreaText}" Style="{DynamicResource SV.CellTextStyle}"/>
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                            </DataGridTemplateColumn>
+
+                            <!-- 13 Cut volume (HCFCD) -->
+                            <DataGridTemplateColumn Width="84" MinWidth="84" IsReadOnly="True"
+                                                    Header="{Binding Data.Grid.CutVolumeHeader, Source={StaticResource GridProxy}}"
+                                                    Visibility="{Binding Data.Grid.IsHcfcd, Source={StaticResource GridProxy}, Converter={x:Static dlg:Converters.TrueToVisible}}">
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <TextBlock Text="{Binding CutVolumeText}" Style="{DynamicResource SV.CellTextStyle}"/>
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                            </DataGridTemplateColumn>
+
+                            <!-- 14 Average (HCFCD) -->
+                            <DataGridTemplateColumn Width="84" MinWidth="84" IsReadOnly="True"
+                                                    Header="{Binding Data.Grid.AverageHeader, Source={StaticResource GridProxy}}"
+                                                    Visibility="{Binding Data.Grid.IsHcfcd, Source={StaticResource GridProxy}, Converter={x:Static dlg:Converters.TrueToVisible}}">
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <TextBlock Text="{Binding AverageText}" Style="{DynamicResource SV.CellTextStyle}"/>
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                            </DataGridTemplateColumn>
+
+                            <!-- 15 Status chip -->
+                            <DataGridTemplateColumn Width="*" MinWidth="96" IsReadOnly="True"
+                                                    Header="{Binding Data.Grid.StatusHeader, Source={StaticResource GridProxy}}">
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <ContentPresenter Content="{Binding}" ContentTemplate="{DynamicResource SV.StatusChipTemplate}"/>
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                            </DataGridTemplateColumn>
+                        </DataGrid.Columns>
+
+                        <!-- Under each row: its problem with the fix beside it, the offset fix, field errors (6.14, D8) -->
+                        <DataGrid.RowDetailsTemplate>
+                            <DataTemplate>
+                                <!-- Width follows the grid's viewport so long messages wrap instead of running off the edge -->
+                                <Border HorizontalAlignment="Left"
+                                        Width="{Binding ViewportWidth, RelativeSource={RelativeSource AncestorType=ScrollViewer}}">
+                                <StackPanel Margin="40,0,8,0">
+                                    <Grid Margin="0,0,0,4" Visibility="{Binding HasMessage, Converter={x:Static dlg:Converters.TrueToVisible}}">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto"/>
+                                            <ColumnDefinition Width="3*"/>
+                                            <ColumnDefinition Width="2*"/>
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Grid.Column="0" Text="{Binding ProblemCode}" FontWeight="SemiBold" Margin="0,0,8,0"
+                                                   Foreground="{DynamicResource SV.Brush.Error}"/>
+                                        <TextBlock Grid.Column="1" Text="{Binding Message}" TextWrapping="Wrap"
+                                                   Foreground="{DynamicResource SV.Brush.Error}"/>
+                                        <TextBlock Grid.Column="2" Text="{Binding Fix}" TextWrapping="Wrap" Margin="12,0,0,0"/>
+                                    </Grid>
+                                    <TextBlock Text="{Binding ImpactNote}" TextWrapping="Wrap" Margin="0,0,0,4"
+                                               Foreground="{DynamicResource SV.Brush.Warning}"
+                                               Visibility="{Binding ImpactNote, Converter={x:Static dlg:Converters.NotEmptyToVisible}}"/>
+                                    <TextBlock Text="{Binding BeginStation.Error}" Style="{DynamicResource SV.ErrorTextStyle}" Margin="0,0,0,4"
+                                               Visibility="{Binding BeginStation.HasError, Converter={x:Static dlg:Converters.TrueToVisible}}"/>
+                                    <TextBlock Text="{Binding EndStation.Error}" Style="{DynamicResource SV.ErrorTextStyle}" Margin="0,0,0,4"
+                                               Visibility="{Binding EndStation.HasError, Converter={x:Static dlg:Converters.TrueToVisible}}"/>
+                                    <TextBlock Text="{Binding Ohwm.Error}" Style="{DynamicResource SV.ErrorTextStyle}" Margin="0,0,0,4"
+                                               Visibility="{Binding Ohwm.HasError, Converter={x:Static dlg:Converters.TrueToVisible}}"/>
+                                    <WrapPanel Margin="0,0,0,6" Orientation="Horizontal"
+                                               Visibility="{Binding ShowOffsetFix, Converter={x:Static dlg:Converters.TrueToVisible}}">
+                                        <TextBlock Text="{x:Static pres:DialogText.OffsetFixLeft}" VerticalAlignment="Center" Margin="0,0,6,0"
+                                                   Style="{DynamicResource SV.MutedTextStyle}"/>
+                                        <ContentControl Width="90" Margin="0,0,12,0" Content="{Binding OffsetFixLeft}"
+                                                        Style="{DynamicResource SV.FieldHostStyle}" ContentTemplate="{DynamicResource SV.FieldTemplate}"/>
+                                        <TextBlock Text="{x:Static pres:DialogText.OffsetFixRight}" VerticalAlignment="Center" Margin="0,0,6,0"
+                                                   Style="{DynamicResource SV.MutedTextStyle}"/>
+                                        <ContentControl Width="90" Margin="0,0,12,0" Content="{Binding OffsetFixRight}"
+                                                        Style="{DynamicResource SV.FieldHostStyle}" ContentTemplate="{DynamicResource SV.FieldTemplate}"/>
+                                        <Button VerticalAlignment="Top" Content="{x:Static pres:DialogText.ApplyOffsetFix}" Command="{Binding ApplyOffsetFixCommand}"
+                                                AutomationProperties.Name="{x:Static pres:DialogText.ApplyOffsetFix}"/>
+                                        <TextBlock Text="{Binding OffsetFixError}" Style="{DynamicResource SV.ErrorTextStyle}" Margin="12,4,0,0"
+                                                   Visibility="{Binding OffsetFixError, Converter={x:Static dlg:Converters.NotEmptyToVisible}}"/>
+                                    </WrapPanel>
+                                </StackPanel>
+                                </Border>
+                            </DataTemplate>
+                        </DataGrid.RowDetailsTemplate>
+                    </DataGrid>
+                </DockPanel>
+
+                <!-- Empty state (E902): names what is missing; covers chart and grid -->
+                <Border Grid.Row="0" Grid.RowSpan="5" Background="{DynamicResource SV.Brush.WindowBackground}"
+                        Visibility="{Binding IsEmptyState, Converter={x:Static dlg:Converters.TrueToVisible}}">
+                    <TextBlock Text="{Binding EmptyStateText}" TextWrapping="Wrap" TextAlignment="Center" MaxWidth="520"
+                               HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="14"
+                               Foreground="{DynamicResource SV.Brush.TextMuted}"/>
+                </Border>
+            </Grid>
+        </Grid>
+
+        <!-- ===== Footer ================================================================= -->
+        <Border Grid.Row="2" Background="{DynamicResource SV.Brush.PanelBackground}"
+                BorderBrush="{DynamicResource SV.Brush.Separator}" BorderThickness="0,1,0,0" Padding="12,8">
+            <DockPanel LastChildFill="True">
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,12,0"
+                                Visibility="{Binding IsBusy, Converter={x:Static dlg:Converters.TrueToVisible}}">
+                        <ProgressBar Width="160" Minimum="0" Maximum="1" Value="{Binding Progress, Mode=OneWay}" VerticalAlignment="Center"
+                                     AutomationProperties.Name="{x:Static dlg:ViewText.Progress}"/>
+                        <Button Margin="8,0,0,0" Content="{x:Static pres:DialogText.Cancel}" Command="{Binding CancelCommand}"
+                                AutomationProperties.Name="{x:Static pres:DialogText.Cancel}"/>
+                    </StackPanel>
+                    <Button Margin="6,0,0,0" Content="{x:Static pres:DialogText.ExportCsv}" Command="{Binding ExportCsvCommand}"
+                            AutomationProperties.Name="{x:Static pres:DialogText.ExportCsv}"/>
+                    <Button Margin="6,0,0,0" Content="{x:Static pres:DialogText.Close}" Command="{Binding CloseCommand}" IsCancel="False"
+                            AutomationProperties.Name="{x:Static pres:DialogText.Close}"/>
+                    <Button x:Name="RegenerateButton" Margin="6,0,0,0" MinWidth="104" Style="{DynamicResource SV.PrimaryButtonStyle}"
+                            Content="{x:Static pres:DialogText.Regenerate}" Command="{Binding RegenerateCommand}"
+                            ToolTip="{Binding RegenerateBlockedReason}" ToolTipService.ShowOnDisabled="True"
+                            AutomationProperties.Name="{x:Static pres:DialogText.Regenerate}"
+                            AutomationProperties.HelpText="{Binding RegenerateBlockedReason, TargetNullValue=''}"/>
+                </StackPanel>
+                <CheckBox DockPanel.Dock="Left" VerticalAlignment="Center" MaxWidth="300" Margin="0,0,16,0"
+                          IsChecked="{Binding RegenerateOnChange}" IsEnabled="{Binding CanEdit}"
+                          AutomationProperties.Name="{x:Static pres:DialogText.RegenerateOnChange}">
+                    <TextBlock Text="{x:Static pres:DialogText.RegenerateOnChange}" TextWrapping="Wrap"/>
+                </CheckBox>
+                <StackPanel VerticalAlignment="Center">
+                    <TextBlock Text="{Binding StatusMessage}" TextWrapping="Wrap"
+                               Visibility="{Binding StatusMessage, Converter={x:Static dlg:Converters.NotEmptyToVisible}}"/>
+                    <TextBlock Text="{Binding RegenerateBlockedReason}" Style="{DynamicResource SV.MutedTextStyle}"
+                               Visibility="{Binding RegenerateBlockedReason, Converter={x:Static dlg:Converters.NotEmptyToVisible}}"/>
+                </StackPanel>
+            </DockPanel>
+        </Border>
+    </Grid>
+</Window>
