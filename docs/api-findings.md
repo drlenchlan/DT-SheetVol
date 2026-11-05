@@ -760,6 +760,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\test-headless.ps1 -Scr
    (0.6 paper units in P12A). Use `ViewCenter = (A − vp.CenterPoint) / CustomScale`,
    where A is the paper point the model centre must land on (the centre the clip was
    built around).
+   **Correction (A3, 2026-11-05, measured against `acedTrans` and P12A's own numbers): the sign above is reversed. Correct is `ViewCenter = (vp.CenterPoint − A) / CustomScale`. `src/SheetVol.Civil3D/WritersPaper/ViewportWriter.cs` implements the corrected form.**
 5. `Viewport.Locked` does not block API edits (E604). Unlocking and relocking is
    harmless but not required.
 6. **Tables: write only merge anchors.** `Cell.IsMerged` is true only on the top-left
