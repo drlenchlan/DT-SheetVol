@@ -941,7 +941,7 @@ internal sealed class SelfTestRunner
         var vol = Regen(Def("E402", "0, 500", analyses: Pair("volume", FixtureSpec.Names.EG, volume)));
         Add("E402", !vol.Result.Succeeded && vol.FailedAtStep == 1 && vol.Result.Problems.Any(p => p.Code == "SV-E402"), $"succeeded {vol.Result.Succeeded}, failed at step {vol.FailedAtStep}, codes {Codes(vol)}",
             "refused at step 1 with SV-E402", $"the owned volume surface '{volume}' picked as comparison");
-        const string empty = "SV-T-EMPTY";
+        const string empty = "T-EMPTY";   // no SV- prefix: that is the owned-surface prefix SESSION.lists filters on
         WithTransaction(tr =>
         {
             var civ = Autodesk.Civil.ApplicationServices.CivilDocument.GetCivilDocument(_doc.Database);

@@ -619,7 +619,10 @@ public static class ExportFiles
                     Fix: "Save the drawing, then run SVEXPORT."),
             ]);
 
-        var doc = ExportBuilder.Build(run, rec, now, drawingPath, formatStation, settings.Report);
+        // Manual segments carry NaN stations (6.3); the real FormatStation throws on them
+        // (E311 self-test on installed bindings, 2026-11-05). Format only finite stations.
+        string FormatOrManual(double raw) => double.IsFinite(raw) ? formatStation(raw) : settings.ModelOutput.ManualStationText;
+        var doc = ExportBuilder.Build(run, rec, now, drawingPath, FormatOrManual, settings.Report);
         if (!doc.Succeeded)
             return new PreparedExport(run.Name, null, "", null, "", ef.CsvUtf8Bom, doc.Problems.Select(p => p with { Severity = Severity.Warning }).ToList());
 

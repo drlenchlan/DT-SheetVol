@@ -136,7 +136,26 @@ public static class JsonExport
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
         WriteIndented = true,
+        Converters = { new NonFiniteAsNull() },
     };
+
+    /// <summary>
+    /// Manual segments carry NaN stations (6.3, C1: a SegmentDef needs stations, a manual
+    /// polyline has none). JSON has no NaN, and System.Text.Json throws on it (E311 self-test
+    /// on installed bindings, 2026-11-05). A non-finite double is written as null; the CSV
+    /// writer is unaffected (its "R" format spells NaN). Exports are never read back by the tool.
+    /// </summary>
+    private sealed class NonFiniteAsNull : System.Text.Json.Serialization.JsonConverter<double>
+    {
+        public override double Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+            => reader.TokenType == JsonTokenType.Null ? double.NaN : reader.GetDouble();
+
+        public override void Write(Utf8JsonWriter writer, double value, JsonSerializerOptions options)
+        {
+            if (double.IsFinite(value)) writer.WriteNumberValue(value);
+            else writer.WriteNullValue();
+        }
+    }
 
     /// <summary>Writes the JSON text. JSON numbers are culture-free by definition (E508).</summary>
     public static string Write(ExportDocument doc) => JsonSerializer.Serialize(doc, Options);
