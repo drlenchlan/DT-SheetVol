@@ -1,0 +1,50 @@
+(command "_.NETLOAD" (getenv "SHEETVOL_DLL"))
+(command "_.-LAYER" "_M" "SV-VPORT" "")
+(setvar "CLAYER" "0")
+SVWRITERSPAPER
+S2REPLICA
+(setvar "CTAB" "R1")
+SVWRITERSPAPER
+VPSTATE
+_.MSPACE
+(princ (strcat "\nA3 NUMBERING R1 CVPORT after MSPACE=" (itoa (getvar "CVPORT"))))
+_.PSPACE
+(setvar "CTAB" "R2")
+SVWRITERSPAPER
+VPSTATE
+_.MSPACE
+(princ (strcat "\nA3 NUMBERING R2 CVPORT after MSPACE=" (itoa (getvar "CVPORT"))))
+_.PSPACE
+(setvar "CTAB" "R3")
+SVWRITERSPAPER
+VPSTATE
+_.MSPACE
+(princ (strcat "\nA3 NUMBERING R3 CVPORT after MSPACE=" (itoa (getvar "CVPORT"))))
+_.PSPACE
+(setvar "CTAB" "R4")
+SVWRITERSPAPER
+VPSTATE
+_.MSPACE
+(princ (strcat "\nA3 NUMBERING R4 CVPORT after MSPACE=" (itoa (getvar "CVPORT"))))
+_.PSPACE
+(setvar "CTAB" "R5")
+SVWRITERSPAPER
+VPSTATE
+_.MSPACE
+(princ (strcat "\nA3 NUMBERING R5 CVPORT after MSPACE=" (itoa (getvar "CVPORT"))))
+_.PSPACE
+(setvar "CTAB" "R6")
+SVWRITERSPAPER
+VPSTATE
+_.MSPACE
+(princ (strcat "\nA3 NUMBERING R6 CVPORT after MSPACE=" (itoa (getvar "CVPORT"))))
+_.PSPACE
+(setvar "CTAB" "R8")
+SVWRITERSPAPER
+VPSTATE
+_.MSPACE
+(princ (strcat "\nA3 NUMBERING R8 CVPORT after MSPACE=" (itoa (getvar "CVPORT"))))
+_.PSPACE
+(setvar "CTAB" "Model")
+_.QUIT
+_Y
