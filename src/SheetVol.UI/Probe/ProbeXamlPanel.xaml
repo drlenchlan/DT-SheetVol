@@ -1,0 +1,15 @@
+<UserControl x:Class="SheetVol.UI.Probe.ProbeXamlPanel"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <!-- S3 probe P21: compiled XAML loaded from a NETLOADed assembly (InitializeComponent
+         resolves /SheetVol.UI;component/probe/probexamlpanel.xaml), with brushes taken from
+         the host window by DynamicResource so a theme switch restyles it. Keys match
+         ProbeUiSettings. -->
+    <Border BorderThickness="1" Padding="8" Margin="0,6,0,6"
+            BorderBrush="{DynamicResource SV.Probe.Border}"
+            Background="{DynamicResource SV.Probe.Panel}">
+        <TextBlock TextWrapping="Wrap"
+                   Foreground="{DynamicResource SV.Probe.Foreground}"
+                   Text="XAML panel: this box is compiled XAML inside SheetVol.UI.dll. If you can read it, XAML loads from a NETLOADed assembly. It should change colour with the window when the theme changes." />
+    </Border>
+</UserControl>
