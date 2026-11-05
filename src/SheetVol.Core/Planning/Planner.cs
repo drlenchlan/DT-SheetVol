@@ -7,6 +7,11 @@ namespace SheetVol.Core.Planning;
 /// break list, plan station segments with identity carried over, build and validate
 /// boundaries, check manual polylines, detect overlaps, and build the whole-band pieces.
 /// Pure: no volumes, no writes. Construct with options from the drawing's unit scale.
+/// <para>Offsets: every station segment carries its own (the segment's
+/// <see cref="SegmentOverrides.OffsetLeft"/> and <see cref="SegmentOverrides.OffsetRight"/>
+/// where set, else the run's; see <see cref="SegmentPlanner"/>) and is built with them. Unusable
+/// run offsets are one run-level E210; an override that leaves a segment without a usable band
+/// is an E210 Error on that segment only, and its neighbours still build.</para>
 /// </summary>
 public sealed class Planner
 {
@@ -66,7 +71,7 @@ public sealed class Planner
         var runProblems = new List<Problem>();
         var segmentProblems = new List<Problem>();
 
-        bool offsetsOk = CheckOffsets(run, runProblems);
+        CheckOffsets(run, runProblems);
 
         var planned = new List<PlannedSegment>();
         IReadOnlyList<Guid> dropped = [];
@@ -91,18 +96,23 @@ public sealed class Planner
                     "The break list produces no segment.", null, "Give at least two breaks with a stretch between them that is not skipped."));
         }
 
-        var boundaries = new List<Boundary>();
-        IReadOnlyList<BandPiece> band = [];
-        IReadOnlyList<double> stations = [];
-        if (offsetsOk)
+        // Each segment builds with its own offsets (per-segment overrides, rev 2). A segment whose
+        // offsets are unusable gets no boundary: E210 on that segment when an override made them
+        // so; when they are the run's own, the run-level E210 above already says so.
+        var buildable = new List<SegmentDef>();
+        foreach (var def in planned.Where(p => p.InRange).Select(p => p.Def))
         {
-            var inRange = planned.Where(p => p.InRange).Select(p => p.Def).ToList();
-            var built = BoundaryBuilder.Build(alignment, inRange, run.OffsetLeft, run.OffsetRight, g);
-            boundaries.AddRange(built.Boundaries);
-            band = built.Band;
-            stations = built.Stations;
-            foreach (var p in built.Problems) (p.SegmentId is null ? runProblems : segmentProblems).Add(p);
+            if (OffsetsUsable(def.OffsetLeft, def.OffsetRight)) buildable.Add(def);
+            else if (!(def.OffsetLeft.Equals(run.OffsetLeft) && def.OffsetRight.Equals(run.OffsetRight)))
+                segmentProblems.Add(SegmentOffsetProblem(alignment, def, run));
         }
+
+        var boundaries = new List<Boundary>();
+        var built = BoundaryBuilder.Build(alignment, buildable, g);
+        boundaries.AddRange(built.Boundaries);
+        IReadOnlyList<BandPiece> band = built.Band;
+        IReadOnlyList<double> stations = built.Stations;
+        foreach (var p in built.Problems) (p.SegmentId is null ? runProblems : segmentProblems).Add(p);
 
         foreach (var m in run.ManualSegments)
         {
@@ -163,16 +173,32 @@ public sealed class Planner
     private static string Describe(Guid id, HashSet<Guid> manual, Dictionary<Guid, string> labels) =>
         (manual.Contains(id) ? "Manual segment " : "Segment ") + (labels.TryGetValue(id, out var l) ? l : id.ToString());
 
-    private bool CheckOffsets(RunDefinition run, List<Problem> problems)
+    /// <summary>Offsets are usable when both are numbers and the right exceeds the left by more than the station tolerance (E210).</summary>
+    private bool OffsetsUsable(double left, double right) =>
+        double.IsFinite(left) && double.IsFinite(right) && right - left > Options.Geometry.StationTolerance;
+
+    private void CheckOffsets(RunDefinition run, List<Problem> problems)
     {
         double l = run.OffsetLeft, r = run.OffsetRight;
-        if (double.IsFinite(l) && double.IsFinite(r) && r - l > Options.Geometry.StationTolerance) return true;
+        if (OffsetsUsable(l, r)) return;
         problems.Add(new Problem(ProblemCodes.E210, Severity.Error,
             !double.IsFinite(l) || !double.IsFinite(r)
                 ? "The offsets are not numbers."
                 : $"The left offset ({Fmt.Num(l)}) must be less than the right offset ({Fmt.Num(r)}); offsets are signed, negative to the left. The band has no width.",
             null, "Give a negative or smaller left offset and a larger right offset, for example -100 and 100."));
-        return false;
+    }
+
+    /// <summary>E210 on one segment whose offset override leaves it without a usable band (Error, that segment only).</summary>
+    private Problem SegmentOffsetProblem(IAlignmentGeometry alignment, SegmentDef def, RunDefinition run)
+    {
+        string segment = Fmt.Segment(alignment, def, Options.Geometry.StationTolerance);
+        string message = !double.IsFinite(def.OffsetLeft) || !double.IsFinite(def.OffsetRight)
+            ? $"{segment}: its offset override is not a number. It gets no boundary or volume."
+            : $"{segment}: with its offset override the left offset ({Fmt.Num(def.OffsetLeft)}) is not less than the right offset ({Fmt.Num(def.OffsetRight)}); offsets are signed, negative to the left. Its band has no width, so it gets no boundary or volume.";
+        string fix = OffsetsUsable(run.OffsetLeft, run.OffsetRight)
+            ? $"Change this segment's offsets so the left is less than the right, or clear its override to use the run's offsets ({Fmt.Num(run.OffsetLeft)} and {Fmt.Num(run.OffsetRight)})."
+            : "Change this segment's offsets so the left is less than the right; the run's own offsets are not usable either.";
+        return new Problem(ProblemCodes.E210, Severity.Error, message, def.Id, fix);
     }
 
     private static Boundary? ManualBoundary(ManualSegmentDef def, ManualOutline? outline, GeometryOptions g, List<Problem> problems)

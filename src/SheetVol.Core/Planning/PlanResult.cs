@@ -16,7 +16,13 @@ public sealed record ManualOutline(IReadOnlyList<PolyVertex> Vertices, bool Clos
 /// </summary>
 /// <param name="Segments">Station segments in station order, invalid ones included. Manual segments are not listed: they have no station range.</param>
 /// <param name="Boundaries">One per valid station segment in station order, then one per valid manual segment.</param>
-/// <param name="Band">Whole-band pieces over the valid station segments.</param>
+/// <param name="Band">
+/// Whole-band pieces over the valid station segments: one per maximal run of contiguous
+/// segments with equal offsets. When per-segment offset overrides make widths vary, the band
+/// is the union of the segment polygons and these pieces partition it without overlap, so the
+/// partition check compares the sum of the segments with the sum of the pieces and the
+/// outside-limits row subtracts the sum of the pieces (see <see cref="BandPiece"/>).
+/// </param>
 /// <param name="Overlaps">Pairs of overlapping boundaries (E215, E312).</param>
 /// <param name="DroppedSegmentIds">Known segments with no successor; their outputs become orphans.</param>
 /// <param name="Stations">The global station list, raw.</param>

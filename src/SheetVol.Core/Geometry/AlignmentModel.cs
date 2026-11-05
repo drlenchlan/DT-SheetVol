@@ -32,7 +32,7 @@ internal sealed class AlignmentModel
     private readonly double[] _ux, _uy, _phi0, _sgn;
     private readonly double[] _starts;
 
-    private AlignmentModel(IAlignmentGeometry source, AlignSeg[] segs, double maxAbsOffset, GeometryOptions opt)
+    private AlignmentModel(IAlignmentGeometry source, AlignSeg[] segs, Func<double, double> maxAbsOffsetAt, GeometryOptions opt)
     {
         Source = source;
         Segs = segs;
@@ -80,7 +80,7 @@ internal sealed class AlignmentModel
             if (segs[j].Kind == SegKind.Line && segs[j + 1].Kind == SegKind.Line)
                 Kinds[j] = JunctionKind.AnglePoint;
             else
-                Kinds[j] = Math.Abs(d) * maxAbsOffset <= opt.MidOrdinate ? JunctionKind.Tangent : JunctionKind.NonTangentCurve;
+                Kinds[j] = Math.Abs(d) * maxAbsOffsetAt(segs[j].EndStation) <= opt.MidOrdinate ? JunctionKind.Tangent : JunctionKind.NonTangentCurve;
         }
     }
 
@@ -88,7 +88,16 @@ internal sealed class AlignmentModel
     /// Builds the model, or returns null after adding E214 problems when the geometry has no
     /// elements, a zero-length element, an arc without center or radius, or a gap.
     /// </summary>
-    public static AlignmentModel? Create(IAlignmentGeometry a, double maxAbsOffset, GeometryOptions opt, List<Problem> problems)
+    /// <param name="a">The alignment.</param>
+    /// <param name="maxAbsOffsetAt">
+    /// Largest offset magnitude in use at a junction, given the junction's raw station: the
+    /// widest of the segments whose range contains it, 0 where none does. A curve join whose
+    /// kink times that offset stays within the mid-ordinate is treated as tangent; per-segment
+    /// offsets (rev 2) mean the answer differs from junction to junction.
+    /// </param>
+    /// <param name="opt">Tolerances.</param>
+    /// <param name="problems">Receives E214 problems.</param>
+    public static AlignmentModel? Create(IAlignmentGeometry a, Func<double, double> maxAbsOffsetAt, GeometryOptions opt, List<Problem> problems)
     {
         var segs = a.Segments.ToArray();
         int before = problems.Count;
@@ -122,7 +131,7 @@ internal sealed class AlignmentModel
         if (Math.Abs(segs[0].StartStation - a.StartStation) > gap || Math.Abs(segs[^1].EndStation - a.EndStation) > gap)
             problems.Add(Gap(a, $"its entities cover {Fmt.Num(segs[0].StartStation)} to {Fmt.Num(segs[^1].EndStation)} but the alignment runs {Fmt.Num(a.StartStation)} to {Fmt.Num(a.EndStation)}"));
 
-        return problems.Count > before ? null : new AlignmentModel(a, segs, maxAbsOffset, opt);
+        return problems.Count > before ? null : new AlignmentModel(a, segs, maxAbsOffsetAt, opt);
     }
 
     private static Problem Gap(IAlignmentGeometry a, string what) =>
