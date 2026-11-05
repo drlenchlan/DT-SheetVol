@@ -5,8 +5,8 @@ using Autodesk.Civil.ApplicationServices;
 using Autodesk.Civil.Settings;
 using SheetVol.Core;
 using SheetVol.Core.Volumes;
-using DialogUnitSystem = SheetVol.Core.Presentation.UnitSystem;
-using VolumeUnitSystem = SheetVol.Core.Volumes.UnitSystem;
+using DialogUnitSystem = SheetVol.Core.UnitSystem;   // contract revision 2: one UnitSystem in SheetVol.Core
+using VolumeUnitSystem = SheetVol.Core.UnitSystem;
 
 namespace SheetVol.Civil3D.Adapters;
 
