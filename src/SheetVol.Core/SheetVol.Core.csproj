@@ -8,4 +8,11 @@
     <RootNamespace>SheetVol.Core</RootNamespace>
     <Description>SheetVol core: segment planning, boundary geometry, volume reconciliation, view math, change tracking and dialog view models. No Autodesk references.</Description>
   </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Table templates ship beside the DLL as Templates\*.json (C2: config default
+         hcfcd.templatePath resolves against the plugin directory). U1's bundle must
+         carry the Templates folder too. -->
+    <None Update="Output\Templates\*.json" CopyToOutputDirectory="PreserveNewest" Link="Templates\%(Filename)%(Extension)" />
+  </ItemGroup>
 </Project>
