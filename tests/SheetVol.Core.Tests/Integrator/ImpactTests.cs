@@ -8,6 +8,7 @@
 // Units: ft, ft2, ft3. 1 CY = 27 ft3. HCFCD display: length whole ft, average to 2 decimals (A12).
 
 using System.Diagnostics;
+using SheetVol.Core.Tests.Fakes;
 using SheetVol.Core.Volumes.Integrator;
 using SheetVol.Core.Volumes.Integrator.Fixtures;
 using Xunit.Abstractions;
@@ -17,14 +18,14 @@ namespace SheetVol.Core.Tests.Integrator;
 public class ImpactTests(ITestOutputHelper output)
 {
     private const double Rel = 1e-9;
-    private static readonly C5Alignment S = C5Alignment.S();
+    private static readonly FakeAlignment S = FakeAlignments.S();
 
     private static SegmentImpactResult RunH(double s0, double s1, double ohwm, double offL = -100, double offR = 100,
                                             IntegratorSettings? settings = null)
     {
         var seg = C5.Seg(s0, s1, offL, offR);
         return OverlayIntegrator.IntegrateSegment(FixtureSurfaces.EgH(), FixtureSurfaces.FgH(), S, seg,
-            C5Boundaries.Band(S, s0, s1, offL, offR), C5.Ohwm(ohwm), "SEDIMENT", settings);
+            FakeBands.Band(S, s0, s1, offL, offR), C5.Ohwm(ohwm), "SEDIMENT", settings);
     }
 
     private static ImpactResult Ok(SegmentImpactResult r)
@@ -165,7 +166,7 @@ public class ImpactTests(ITestOutputHelper output)
     {
         var seg = C5.Seg(0, 500);
         var r = OverlayIntegrator.IntegrateSegment(FixtureSurfaces.FgH(), FixtureSurfaces.EgH(), S, seg,
-            C5Boundaries.Band(S, 0, 500, -100, 100), C5.Ohwm(100), "SEDIMENT");
+            FakeBands.Band(S, 0, 500, -100, 100), C5.Ohwm(100), "SEDIMENT");
         var i = Ok(r);
         Assert.Equal((0.0, 0.0, 0.0), (i.ImpactedLength, i.ImpactedArea, i.CutVolume));
         C5.Rel(26000, i.FillBelowOhwm, Rel);
@@ -185,7 +186,7 @@ public class ImpactTests(ITestOutputHelper output)
     {
         var (b, c) = C5Fixtures.TwoStretches();
         var seg = C5.Seg(0, 1000);
-        var bnd = C5Boundaries.Band(S, 0, 1000, -100, 100);
+        var bnd = FakeBands.Band(S, 0, 1000, -100, 100);
         var i = Ok(OverlayIntegrator.IntegrateSegment(b, c, S, seg, bnd, C5.Ohwm(100), "SEDIMENT"));
         Assert.Equal(2, i.Intervals.Count);
         C5.Rel(90, i.Intervals[0].From, Rel); C5.Rel(310, i.Intervals[0].To, Rel);
@@ -212,7 +213,7 @@ public class ImpactTests(ITestOutputHelper output)
     public void E1006_pond_away_from_the_channel_is_counted_with_its_interval()
     {
         var (b, c) = C5Fixtures.ChannelAndPond(1.0);
-        var i = Ok(OverlayIntegrator.IntegrateSegment(b, c, S, C5.Seg(0, 1000), C5Boundaries.Band(S, 0, 1000, -100, 100), C5.Ohwm(100), "SEDIMENT"));
+        var i = Ok(OverlayIntegrator.IntegrateSegment(b, c, S, C5.Seg(0, 1000), FakeBands.Band(S, 0, 1000, -100, 100), C5.Ohwm(100), "SEDIMENT"));
         Assert.Equal(2, i.Intervals.Count);
         C5.Rel(0, i.Intervals[0].From, Rel); C5.Rel(310, i.Intervals[0].To, Rel);
         C5.Rel(707.5, i.Intervals[1].From, Rel); C5.Rel(792.5, i.Intervals[1].To, Rel);
@@ -225,7 +226,7 @@ public class ImpactTests(ITestOutputHelper output)
     {
         var (b, c) = C5Fixtures.ChannelAndPond(0.001);
         var seg = C5.Seg(0, 1000);
-        var bnd = C5Boundaries.Band(S, 0, 1000, -100, 100);
+        var bnd = FakeBands.Band(S, 0, 1000, -100, 100);
         var all = Ok(OverlayIntegrator.IntegrateSegment(b, c, S, seg, bnd, C5.Ohwm(100), "SEDIMENT"));
         Assert.Equal(2, all.Intervals.Count);                       // the defaults count everything
         var trimmed = Ok(OverlayIntegrator.IntegrateSegment(b, c, S, seg, bnd, C5.Ohwm(100), "SEDIMENT", new IntegratorSettings(MinCutDepth: 0.01)));
@@ -251,15 +252,15 @@ public class ImpactTests(ITestOutputHelper output)
     [Fact]
     public void E1008_length_is_measured_along_the_alignment()
     {
-        var c = C5Alignment.C();
-        double s0 = 300, s1 = 300 + 100 * Math.PI;
-        var bnd = C5Boundaries.Band(c, s0, s1, 50, 100);
+        var c = FakeAlignments.C();
+        double s0 = 300, s1 = FakeAlignments.C_PT;
+        var bnd = FakeBands.Band(c, s0, s1, 50, 100);
         var r = OverlayIntegrator.IntegrateSegment(FixtureSurfaces.Eg(), FixtureSurfaces.Flat("FG99", 99, -200, -300, 2200, 300),
             c, new SegmentDef(Guid.NewGuid(), "arc", s0, s1, 50, 100), bnd, C5.Ohwm(101), "SEDIMENT");
         var i = Ok(r);
         C5.Rel(100 * Math.PI, i.ImpactedLength, Rel, what: "length along alignment");
         Assert.True(Math.Abs(i.ImpactedLength - 225 * Math.PI / 3) > 70);
-        double poly = C5Boundaries.Area(bnd);
+        double poly = FakeBands.Area(bnd);
         C5.Rel(poly, i.ImpactedArea, Rel, what: "area vs polygon");
         C5.Rel(poly, i.CutVolume, Rel, what: "volume = area * 1");
         C5.Rel(3750 * Math.PI, i.ImpactedArea, 2e-4, what: "area vs analytic");
@@ -276,11 +277,11 @@ public class ImpactTests(ITestOutputHelper output)
     [Fact]
     public void E1009_state_plane_H_T25_matches_origin()
     {
-        var sp = C5Alignment.S(Ox, Oy);
+        var sp = FakeAlignments.S(origin: new Pt(Ox, Oy));
         var seg = C5.Seg(0, 500);
         var far = Ok(OverlayIntegrator.IntegrateSegment(
             new C5ShiftedSource(FixtureSurfaces.EgH(), Ox, Oy), new C5ShiftedSource(FixtureSurfaces.FgH(), Ox, Oy),
-            sp, seg, C5Boundaries.Band(sp, 0, 500, -100, 100), C5.Ohwm(100), "SEDIMENT"));
+            sp, seg, FakeBands.Band(sp, 0, 500, -100, 100), C5.Ohwm(100), "SEDIMENT"));
         var near = Ok(RunH(0, 500, 100));
         C5.Rel(near.ImpactedLength, far.ImpactedLength, Rel, what: "length");
         C5.Rel(near.ImpactedArea, far.ImpactedArea, Rel, what: "area");
@@ -291,22 +292,22 @@ public class ImpactTests(ITestOutputHelper output)
     [Fact]
     public void E1009_state_plane_arc_matches_origin()
     {
-        double s0 = 300, s1 = 300 + 100 * Math.PI;
-        var c0 = C5Alignment.C();
-        var cf = C5Alignment.C(Ox, Oy);
+        double s0 = 300, s1 = FakeAlignments.C_PT;
+        var c0 = FakeAlignments.C();
+        var cf = FakeAlignments.C(new Pt(Ox, Oy));
 
-        var near = OverlayIntegrator.IntegrateBand(FixtureSurfaces.Eg(), FixtureSurfaces.FgD(), C5Boundaries.Band(c0, s0, s1, -100, 100)).Totals!;
+        var near = OverlayIntegrator.IntegrateBand(FixtureSurfaces.Eg(), FixtureSurfaces.FgD(), FakeBands.Band(c0, s0, s1, -100, 100)).Totals!;
         var far = OverlayIntegrator.IntegrateBand(new C5ShiftedSource(FixtureSurfaces.Eg(), Ox, Oy), new C5ShiftedSource(FixtureSurfaces.FgD(), Ox, Oy),
-                                                  C5Boundaries.Band(cf, s0, s1, -100, 100)).Totals!;
+                                                  FakeBands.Band(cf, s0, s1, -100, 100)).Totals!;
         C5.Rel(near.Fill, far.Fill, Rel, what: "fill");
         C5.Rel(near.PlanArea, far.PlanArea, Rel, what: "plan area");
 
         var seg = new SegmentDef(Guid.NewGuid(), "arc", s0, s1, 50, 100);
         var i0 = Ok(OverlayIntegrator.IntegrateSegment(FixtureSurfaces.Eg(), FixtureSurfaces.Flat("FG99", 99, -200, -300, 2200, 300),
-            c0, seg, C5Boundaries.Band(c0, s0, s1, 50, 100), C5.Ohwm(101), "SEDIMENT"));
+            c0, seg, FakeBands.Band(c0, s0, s1, 50, 100), C5.Ohwm(101), "SEDIMENT"));
         var i1 = Ok(OverlayIntegrator.IntegrateSegment(new C5ShiftedSource(FixtureSurfaces.Eg(), Ox, Oy),
             new C5ShiftedSource(FixtureSurfaces.Flat("FG99", 99, -200, -300, 2200, 300), Ox, Oy),
-            cf, seg, C5Boundaries.Band(cf, s0, s1, 50, 100), C5.Ohwm(101), "SEDIMENT"));
+            cf, seg, FakeBands.Band(cf, s0, s1, 50, 100), C5.Ohwm(101), "SEDIMENT"));
         C5.Rel(i0.ImpactedLength, i1.ImpactedLength, Rel, what: "impacted length");
         C5.Rel(i0.ImpactedArea, i1.ImpactedArea, Rel, what: "impacted area");
         C5.Rel(i0.CutVolume, i1.CutVolume, Rel, what: "cut volume");
@@ -323,13 +324,13 @@ public class ImpactTests(ITestOutputHelper output)
         var s1 = C5.Seg(0, 500);
         var s2 = C5.Seg(500, 1000);
         var ohwm = C5.Ohwm(100, new Dictionary<Guid, double> { [s2.Id] = 97.0 });
-        var r1 = OverlayIntegrator.IntegrateSegment(FixtureSurfaces.EgH(), FixtureSurfaces.FgH(), S, s1, C5Boundaries.Band(S, 0, 500, -100, 100), ohwm, "SEDIMENT");
-        var r2 = OverlayIntegrator.IntegrateSegment(FixtureSurfaces.EgH(), FixtureSurfaces.FgH(), S, s2, C5Boundaries.Band(S, 500, 1000, -100, 100), ohwm, "SEDIMENT");
+        var r1 = OverlayIntegrator.IntegrateSegment(FixtureSurfaces.EgH(), FixtureSurfaces.FgH(), S, s1, FakeBands.Band(S, 0, 500, -100, 100), ohwm, "SEDIMENT");
+        var r2 = OverlayIntegrator.IntegrateSegment(FixtureSurfaces.EgH(), FixtureSurfaces.FgH(), S, s2, FakeBands.Band(S, 500, 1000, -100, 100), ohwm, "SEDIMENT");
         Assert.Equal(100.0, r1.OhwmElevation);
         Assert.Equal(97.0, r2.OhwmElevation);
         C5.Rel(26000, Ok(r1).CutVolume, Rel);
         C5.Rel(24500, Ok(r2).CutVolume, Rel);
-        var whole = OverlayIntegrator.IntegrateBand(FixtureSurfaces.EgH(), FixtureSurfaces.FgH(), C5Boundaries.Band(S, 0, 1000, -100, 100)).Totals!;
+        var whole = OverlayIntegrator.IntegrateBand(FixtureSurfaces.EgH(), FixtureSurfaces.FgH(), FakeBands.Band(S, 0, 1000, -100, 100)).Totals!;
         C5.Rel(whole.Cut, r1.Band!.Cut + r2.Band!.Cut, Rel);
         C5.Rel(whole.PlanArea, r1.Band.PlanArea + r2.Band.PlanArea, Rel);
     }
@@ -345,7 +346,7 @@ public class ImpactTests(ITestOutputHelper output)
     {
         var partial = new C5FilteredSource(FixtureSurfaces.FgH(maxCellLength: 50), (x, _) => x < 250);
         var r = OverlayIntegrator.IntegrateSegment(FixtureSurfaces.EgH(), partial, S, C5.Seg(0, 500),
-            C5Boundaries.Band(S, 0, 500, -100, 100), C5.Ohwm(100), "SEDIMENT");
+            FakeBands.Band(S, 0, 500, -100, 100), C5.Ohwm(100), "SEDIMENT");
         var i = Ok(r);
         C5.Rel(250, i.ImpactedLength, Rel); C5.Rel(13000, i.CutVolume, Rel); C5.Rel(8000, i.ImpactedArea, Rel);
         C5.Rel(0.5, r.Band!.Coverage, Rel);
@@ -378,10 +379,10 @@ public class ImpactTests(ITestOutputHelper output)
     public void E1020_integrator_is_unit_agnostic()
     {
         const double k = 0.3048;
-        var sm = new C5Alignment.Builder("S_m").Line(2000 * k).Build();
+        var sm = new AlignmentBuilder(new Pt(0, 0), 0).Line(2000 * k).Build("S_m");
         var seg = C5.Seg(0, 500 * k, -100 * k, 100 * k);
         var m = Ok(OverlayIntegrator.IntegrateSegment(new C5ScaledSource(FixtureSurfaces.EgH(), k), new C5ScaledSource(FixtureSurfaces.FgH(), k),
-            sm, seg, C5Boundaries.Band(sm, 0, 500 * k, -100 * k, 100 * k), C5.Ohwm(100 * k), "SEDIMENT"));
+            sm, seg, FakeBands.Band(sm, 0, 500 * k, -100 * k, 100 * k), C5.Ohwm(100 * k), "SEDIMENT"));
         C5.Rel(500 * k, m.ImpactedLength, Rel); C5.Rel(16000 * k * k, m.ImpactedArea, Rel); C5.Rel(26000 * k * k * k, m.CutVolume, Rel);
     }
 
@@ -403,7 +404,7 @@ public class ImpactTests(ITestOutputHelper output)
     {
         var eg = FixtureSurfaces.EgH(maxCellLength: 37);
         var fg = FixtureSurfaces.FgH(maxCellLength: 50);
-        var r = OverlayIntegrator.IntegrateSegment(eg, fg, S, C5.Seg(s0, s1), C5Boundaries.Band(S, s0, s1, -100, 100),
+        var r = OverlayIntegrator.IntegrateSegment(eg, fg, S, C5.Seg(s0, s1), FakeBands.Band(S, s0, s1, -100, 100),
                                                    C5.Ohwm(ohwm), "SEDIMENT");
         var i = Ok(r);
         C5.Rel(length, i.ImpactedLength, Rel, what: "length");
@@ -432,9 +433,9 @@ public class ImpactTests(ITestOutputHelper output)
         foreach (var (eg, fg) in new[] { (FixtureSurfaces.EgH(), FixtureSurfaces.FgH()),
                                          (FixtureSurfaces.EgH(maxCellLength: 37), FixtureSurfaces.FgH(maxCellLength: 50)) })
         {
-            var al = new C5Alignment.Builder("S_rot", dx, dy, a).Line(2000).Build();
+            var al = new AlignmentBuilder(new Pt(dx, dy), a).Line(2000).Build("S_rot");
             var r = OverlayIntegrator.IntegrateSegment(new C5RotatedSource(eg, a, dx, dy), new C5RotatedSource(fg, a, dx, dy),
-                al, C5.Seg(s0, s1), C5Boundaries.Band(al, s0, s1, -100, 100), C5.Ohwm(ohwm), "SEDIMENT");
+                al, C5.Seg(s0, s1), FakeBands.Band(al, s0, s1, -100, 100), C5.Ohwm(ohwm), "SEDIMENT");
             var i = Ok(r);
             C5.Rel(length, i.ImpactedLength, Rel, what: $"length ({eg.All.Count} tris)");
             C5.Rel(area, i.ImpactedArea, Rel, what: $"area ({eg.All.Count} tris)");
@@ -450,7 +451,7 @@ public class ImpactTests(ITestOutputHelper output)
     [Fact]
     public void IntegrateSegment_band_equals_IntegrateBand()
     {
-        var bnd = C5Boundaries.Band(S, 1000, 1500, -100, 100);
+        var bnd = FakeBands.Band(S, 1000, 1500, -100, 100);
         var a = OverlayIntegrator.IntegrateBand(FixtureSurfaces.EgH(), FixtureSurfaces.FgH(), bnd).Totals!;
         var b = RunH(1000, 1500, 100).Band!;
         Assert.Equal(a, b);
@@ -469,7 +470,7 @@ public class ImpactTests(ITestOutputHelper output)
         Assert.Equal(IntegratorCodes.InvalidOhwm, Assert.Single(nan.Problems).Code);
 
         var empty = OverlayIntegrator.IntegrateSegment(FixtureSurfaces.EgH(), new C5EmptySource(), S, C5.Seg(0, 500),
-            C5Boundaries.Band(S, 0, 500, -100, 100), C5.Ohwm(100), "SEDIMENT");
+            FakeBands.Band(S, 0, 500, -100, 100), C5.Ohwm(100), "SEDIMENT");
         Assert.False(empty.Succeeded);
         Assert.Equal(IntegratorCodes.EmptySurface, Assert.Single(empty.Problems).Code);
     }
@@ -477,10 +478,10 @@ public class ImpactTests(ITestOutputHelper output)
     [Fact]
     public void Inconsistent_alignment_geometry_is_an_error()
     {
-        var c = C5Alignment.C();
+        var c = FakeAlignments.C();
         var flipped = new C5SegmentsOverride(c, [.. c.Segments.Select(g => g.Kind == SegKind.Arc ? g with { Clockwise = !g.Clockwise } : g)]);
         var r = OverlayIntegrator.IntegrateSegment(FixtureSurfaces.Eg(), FixtureSurfaces.FgD(), flipped, C5.Seg(0, 300),
-            C5Boundaries.Band(c, 0, 300, -100, 100), C5.Ohwm(100), "SEDIMENT");
+            FakeBands.Band(c, 0, 300, -100, 100), C5.Ohwm(100), "SEDIMENT");
         Assert.False(r.Succeeded);
         var p = Assert.Single(r.Problems);
         Assert.Equal(IntegratorCodes.StationGeometry, p.Code);
@@ -495,7 +496,7 @@ public class ImpactTests(ITestOutputHelper output)
     [Fact]
     public void Performance_FixtureH_full_extent()
     {
-        var bnd = C5Boundaries.Band(S, 0, 2000, -100, 100);
+        var bnd = FakeBands.Band(S, 0, 2000, -100, 100);
         var seg = C5.Seg(0, 2000);
         var sw = Stopwatch.StartNew();
         var coarse = Ok(OverlayIntegrator.IntegrateSegment(FixtureSurfaces.EgH(), FixtureSurfaces.FgH(), S, seg, bnd, C5.Ohwm(100), "SEDIMENT"));

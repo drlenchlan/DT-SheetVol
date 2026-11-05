@@ -1,5 +1,6 @@
 // Station-of-point (closed form on lines and arcs, iterative on spirals) and the interval union.
 
+using SheetVol.Core.Tests.Fakes;
 using SheetVol.Core.Volumes.Integrator;
 
 namespace SheetVol.Core.Tests.Integrator;
@@ -15,7 +16,7 @@ public class StationLocatorTests
     [Fact]
     public void Alignment_S_station_is_x_and_left_is_negative()
     {
-        var loc = Make(C5Alignment.S());
+        var loc = Make(FakeAlignments.S());
         var r = loc.Locate(new Pt(123.4, 56.7));
         Assert.Equal(123.4, r.Station, 12);
         Assert.Equal(-56.7, r.Offset, 12);          // +y is left of an eastbound alignment
@@ -26,7 +27,7 @@ public class StationLocatorTests
     [Fact]
     public void Points_beyond_the_ends_clamp_to_the_end_station()
     {
-        var loc = Make(C5Alignment.S());
+        var loc = Make(FakeAlignments.S());
         var before = loc.Locate(new Pt(-30, 40));
         Assert.Equal((0.0, 50.0), (before.Station, before.Distance));
         Assert.Equal(-50.0, before.Offset);
@@ -36,7 +37,7 @@ public class StationLocatorTests
     [Fact]
     public void Alignment_C_round_trips_PointAt_in_closed_form()
     {
-        var c = C5Alignment.C();
+        var c = FakeAlignments.C();
         var loc = Make(c);
         double end = c.EndStation;
         double worst = 0;
@@ -56,7 +57,7 @@ public class StationLocatorTests
     [Fact]
     public void Alignment_SP_round_trips_through_the_spirals_iteratively()
     {
-        var sp = C5Alignment.SP();
+        var sp = FakeAlignments.SP_C5();
         Assert.Contains(sp.Segments, g => g.Kind == SegKind.Spiral);
         var loc = Make(sp);
         double worst = 0;
@@ -73,8 +74,8 @@ public class StationLocatorTests
     public void State_plane_alignment_in_a_local_frame_matches_the_origin()
     {
         const double ox = 3_000_000, oy = 10_000_000;
-        var c0 = C5Alignment.C();
-        var cf = C5Alignment.C(ox, oy);
+        var c0 = FakeAlignments.C();
+        var cf = FakeAlignments.C(new Pt(ox, oy));
         var loc0 = Make(c0);
         var locf = Make(cf, new Pt(ox, oy));
         for (double s = 0; s <= c0.EndStation; s += 11.1)
@@ -89,7 +90,7 @@ public class StationLocatorTests
     [Fact]
     public void Window_restricts_the_search()
     {
-        var c = C5Alignment.C();
+        var c = FakeAlignments.C();
         var loc = Make(c);
         var onArc = c.PointAt(450, 0);
         Assert.Equal(450.0, loc.Locate(onArc).Station, 9);
@@ -99,7 +100,7 @@ public class StationLocatorTests
     [Fact]
     public void Inconsistent_segments_are_rejected_with_a_reason()
     {
-        var c = C5Alignment.C();
+        var c = FakeAlignments.C();
         var flipped = new C5SegmentsOverride(c, [.. c.Segments.Select(g => g.Kind == SegKind.Arc ? g with { Clockwise = !g.Clockwise } : g)]);
         Assert.False(StationLocator.TryCreate(flipped, default, out _, out string? e1));
         Assert.Contains("Clockwise", e1);

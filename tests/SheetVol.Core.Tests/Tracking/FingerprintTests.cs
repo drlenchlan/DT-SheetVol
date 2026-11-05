@@ -1,5 +1,5 @@
 using System.Globalization;
-using SheetVol.Core.Tests.Views;
+using SheetVol.Core.Tests.Fakes;
 using SheetVol.Core.Tracking;
 
 namespace SheetVol.Core.Tests.Tracking;
@@ -20,7 +20,7 @@ public class FingerprintTests
         new Dictionary<Guid, SegmentOverrides>(),
         new ViewOptions());
 
-    private static C3Alignment AlignmentS(double length = 2000) => C3Alignment.Straight(new Pt(0, 0), 0, length);
+    private static FakeAlignment AlignmentS(double length = 2000) => FakeAlignments.Straight(new Pt(0, 0), 0, length);
 
     private static FrameGeom Frame(double start = 0, double end = 500, double rotation = 0)
         => new("F1", "VF - 1", start, end, new Pt(250, 0), rotation, 600, 250, null, null);
@@ -77,8 +77,8 @@ public class FingerprintTests
         FingerprintInput changed = change switch
         {
             "alignment lengthened" => Input(alignment: AlignmentS(2500)),
-            "alignment moved 0.001" => Input(alignment: C3Alignment.Straight(new Pt(0.001, 0), 0, 2000)),
-            "arc radius" => Input(alignment: C3Alignment.Build("S", new Pt(0, 0), 0, 0, new C3Piece(1000), new C3Piece(1000, 3000.0001))),
+            "alignment moved 0.001" => Input(alignment: FakeAlignments.Straight(new Pt(0.001, 0), 0, 2000)),
+            "arc radius" => Input(alignment: new AlignmentBuilder(new Pt(0, 0), 0).Line(1000).ArcByLength(3000.0001, 1000, clockwise: false).Build("S")),
             "break spec" => Input(run with { BreakSpec = "START, 5+00, 13+00, 18+00, END" }),
             "offset left" => Input(run with { OffsetLeft = -99 }),
             "offset right" => Input(run with { OffsetRight = 101 }),
@@ -97,7 +97,7 @@ public class FingerprintTests
         };
 
         FingerprintInput baseline = change == "arc radius"
-            ? Input(alignment: C3Alignment.Build("S", new Pt(0, 0), 0, 0, new C3Piece(1000), new C3Piece(1000, 3000)))
+            ? Input(alignment: new AlignmentBuilder(new Pt(0, 0), 0).Line(1000).ArcByLength(3000, 1000, clockwise: false).Build("S"))
             : Input();
 
         RunFingerprint before = Fingerprints.Compute(baseline);
