@@ -243,6 +243,24 @@ internal sealed class SelfTestRunner
             Try("T17", T17);
             Try("T18", T18);
             Try("T31", T31);
+            Try("E217", E217);
+            Try("E308", E308);
+            Try("E311", E311);
+            Try("E401-E402-E403", E401E402E403);
+            Try("E411-E421", E411E421);
+            Try("E412", E412);
+            Try("E501", E501);
+            Try("E503", E503);
+            Try("E505", E505);
+            Try("E601", E601);
+            Try("E803", E803);
+            Try("E808", E808);
+            NotRun("E807", "regen refuses a read-only drawing at step 1",
+                "Core Console opens the /i drawing for editing and a script cannot reopen it read-only; RegenEngine.ReadOnlyReason is exercised only in full Civil 3D (Dan's M check)");
+            NotRun("E812", "batch regen over many drawings, one failure does not stop the batch",
+                "the batch runner is L2's tools/regen-sheets.ps1 (Wave 3), not built yet");
+            NotRun("E415", "data-shortcut surfaces compute as native ones",
+                "data-shortcut and corridor surfaces cannot be built headless (P6, P23, E1021); needs Dan's fixture pair (stop conditions 12.2 and 12.9 open)");
         }
         Try("T14", T14);
         Try("D10", D10);
@@ -845,6 +863,218 @@ internal sealed class SelfTestRunner
             $"typed text kept {kept}; WETLANDS deletion kept {gone} ({rows} rows, {rowsBefore} after the edit); handles unchanged {handles}; rows 6, 7, 9: '{length}' ; '{area}' ; '{sediment}'",
             "typed text and the deletion kept; rows 6, 7 and 9 show T26's values (500 LF, 0.30 AC, 907 CY, 1.81); table handles unchanged",
             "H: HCFCD tables, type into the centre-coordinates cell, delete WETLANDS, OHWM 100 -> 97, regen");
+    }
+
+    /// <summary>E217: a run made with a rotated UCS current gives the WCS run's boundaries and volumes exactly (geometry is WCS; only picks are transformed).</summary>
+    private void E217()
+    {
+        var ed = _doc.Editor;
+        var saved = ed.CurrentUserCoordinateSystem;
+        RunOutcome wcs, ucs;
+        try
+        {
+            wcs = Regen(Def("E217W", "START..END@500"));
+            ed.CurrentUserCoordinateSystem = Autodesk.AutoCAD.Geometry.Matrix3d.Rotation(Math.PI / 3, Autodesk.AutoCAD.Geometry.Vector3d.ZAxis, new Autodesk.AutoCAD.Geometry.Point3d(100, 200, 0));
+            ucs = Regen(Def("E217U", "START..END@500"));
+        }
+        finally
+        {
+            ed.CurrentUserCoordinateSystem = saved;
+        }
+        if (!wcs.Result.Succeeded || !ucs.Result.Succeeded || wcs.Plan is null || ucs.Plan is null) { Add("E217", false, $"{Codes(wcs)} / {Codes(ucs)}", "both succeed", "regen with a rotated UCS"); return; }
+        bool rings = wcs.Plan.Boundaries.Zip(ucs.Plan.Boundaries).All(p => p.First.Tessellated.SequenceEqual(p.Second.Tessellated)) && wcs.Plan.Boundaries.Count == ucs.Plan.Boundaries.Count;
+        bool volumes = wcs.Result.Segments.Zip(ucs.Result.Segments).All(p => p.First.Raw == p.Second.Raw && p.First.Area2D == p.Second.Area2D);
+        Add("E217", rings && volumes, $"boundaries identical {rings}, raw volumes and 2D areas identical {volumes} over {wcs.Result.Segments.Count} rows",
+            "identical to the WCS run", "UCS rotated 60 degrees about (100, 200) while regenerating (non-world UCS active)");
+    }
+
+    /// <summary>E308 and E612: a removed break keeps the left segment; the right one's boundary, marks and tables are erased and its layout becomes an orphan.</summary>
+    private void E308()
+    {
+        var first = Regen(Def("E308", "0, 500, 1000"));
+        if (!first.Result.Succeeded) { Add("E308", false, Codes(first), "succeeded", FirstError(first)); return; }
+        var known = first.Run.KnownSegments.OrderBy(k => k.StartStation).ToList();
+        string? rightLayout = HandleOf(first.Record, known[1].Id, OwnedRole.Layout);
+        var o = Regen(Def("E308", "0, 1000"));
+        if (!o.Result.Succeeded) { Add("E308", false, Codes(o), "succeeded", FirstError(o)); return; }
+        var kept = o.Run.KnownSegments.Single();
+        bool right = !o.Record!.Owned.Any(x => x.Key.SegmentId == known[1].Id && x.Key.Role is OwnedRole.Boundary or OwnedRole.MatchMark or OwnedRole.PaperTable);
+        bool orphan = rightLayout is not null && o.Record.Orphans.Any(x => x.Handle == rightLayout && x.SegmentId == known[1].Id)
+                      && Layouts().Any(l => string.Equals(l.Handle, rightLayout, StringComparison.OrdinalIgnoreCase));
+        Add("E308", kept.Id == known[0].Id && o.Applied?.Erased >= 1 && right, $"left GUID kept {kept.Id == known[0].Id}, erased {o.Applied?.Erased}, right segment's owned objects gone {right}",
+            "left keeps its GUID; right's boundary, marks and tables erased", "break at 500 removed from 0, 500, 1000");
+        Add("E612", orphan, $"layout {rightLayout} listed as orphan {o.Record.Orphans.Any(x => x.Handle == rightLayout)}, still in the drawing {Layouts().Any(l => string.Equals(l.Handle, rightLayout, StringComparison.OrdinalIgnoreCase))}",
+            "the removed segment's layout is kept and listed (SVSTATUS), never deleted", "segment removed");
+    }
+
+    /// <summary>E311: a manual segment is computed on the user's polyline as drawn; an erased polyline is an error for that segment.</summary>
+    private void E311()
+    {
+        string handle = WithTransaction(tr =>
+        {
+            var ms = (BlockTableRecord)tr.GetObject(SymbolUtilityServices.GetBlockModelSpaceId(_doc.Database), OpenMode.ForWrite);
+            var pl = new Polyline();
+            foreach (var (x, y) in new[] { (60.0, -60.0), (190.0, -60.0), (190.0, 60.0), (60.0, 60.0) }) pl.AddVertexAt(pl.NumberOfVertices, new Autodesk.AutoCAD.Geometry.Point2d(x, y), 0, 0, 0);
+            pl.Closed = true;
+            ms.AppendEntity(pl);
+            tr.AddNewlyCreatedDBObject(pl, true);
+            return pl.Handle.ToString();
+        });
+        var manual = new ManualSegmentDef(DeterministicId("E311-M1"), "M1", handle);
+        var run = Def("E311", "0, 500") with { ManualSegments = [manual] };
+        var o = Regen(run);
+        var row = o.Result.Segments.FirstOrDefault(r => r.SegmentId == manual.Id);
+        bool used = o.Result.Succeeded && row is not null && Math.Abs(row.Cut - 100) <= _tolCy && Math.Abs(row.Area2D - 130 * 120) < 1e-6;
+        WithTransaction(tr => { EraseByHandle(tr, handle); return true; });
+        var gone = Regen(run);
+        bool refused = !gone.Result.Succeeded && gone.Result.Problems.Any(p => p.Code == Core.Planning.ProblemCodes.E311);
+        Add("E311", used && refused, $"drawn: cut {F(row?.Cut ?? double.NaN)} CY, 2D area {F(row?.Area2D ?? double.NaN)}; erased: succeeded {gone.Result.Succeeded}, codes {Codes(gone)}",
+            "cut 100 CY and area 15600 on the polyline as drawn; erased polyline fails with SV-E311", "manual segment around P1 (130 x 120 rectangle), then the polyline erased");
+    }
+
+    /// <summary>E401, E402, E403: a pair that is one surface, a volume surface as comparison, and an empty TIN are refused before anything is written.</summary>
+    private void E401E402E403()
+    {
+        var same = Regen(Def("E401", "0, 500", analyses: Pair("same", FixtureSpec.Names.EG, FixtureSpec.Names.EG)));
+        Add("E401", !same.Result.Succeeded && same.Result.Problems.Any(p => p.Code == "SV-E401"), $"succeeded {same.Result.Succeeded}, failed at step {same.FailedAtStep}, codes {Codes(same)}", "refused with SV-E401", "base and comparison are the same surface");
+        string volume = _settings.Report.Volumes.OwnedSurfacePrefix + FixtureSpec.Names.EG + _settings.Report.Volumes.OwnedSurfaceSeparator + FixtureSpec.Names.FgA;
+        var vol = Regen(Def("E402", "0, 500", analyses: Pair("volume", FixtureSpec.Names.EG, volume)));
+        Add("E402", !vol.Result.Succeeded && vol.FailedAtStep == 1 && vol.Result.Problems.Any(p => p.Code == "SV-E402"), $"succeeded {vol.Result.Succeeded}, failed at step {vol.FailedAtStep}, codes {Codes(vol)}",
+            "refused at step 1 with SV-E402", $"the owned volume surface '{volume}' picked as comparison");
+        const string empty = "SV-T-EMPTY";
+        WithTransaction(tr =>
+        {
+            var civ = Autodesk.Civil.ApplicationServices.CivilDocument.GetCivilDocument(_doc.Database);
+            bool exists = civ.GetSurfaceIds().Cast<ObjectId>().Any(id => tr.GetObject(id, OpenMode.ForRead) is Autodesk.Civil.DatabaseServices.Surface s && s.Name == empty);
+            if (!exists) Autodesk.Civil.DatabaseServices.TinSurface.Create(_doc.Database, empty);
+            return true;
+        });
+        var before = Snapshot();
+        var none = Regen(Def("E403", "0, 500", analyses: Pair("empty", FixtureSpec.Names.EG, empty)));
+        bool unchanged = Snapshot() == before;
+        Add("E403", !none.Result.Succeeded && none.FailedAtStep == 1 && none.Result.Problems.Any(p => p.Code == "SV-E403") && unchanged,
+            $"succeeded {none.Result.Succeeded}, failed at step {none.FailedAtStep}, codes {Codes(none)}, model space and layouts unchanged {unchanged}", "refused at step 1 with SV-E403, nothing written", $"TIN surface '{empty}' with no triangles");
+    }
+
+    /// <summary>E411 and E421: two analyses on one pair share one owned surface; analyses whose surfaces cover different extents get their own 2D areas.</summary>
+    private void E411E421()
+    {
+        var analyses = new[]
+        {
+            new AnalysisDef(DeterministicId("E411-a"), "EG vs FG_A", FixtureSpec.Names.EG, FixtureSpec.Names.FgA),
+            new AnalysisDef(DeterministicId("E411-b"), "EG vs FG_A again", FixtureSpec.Names.EG, FixtureSpec.Names.FgA),
+            new AnalysisDef(DeterministicId("E411-h"), "EG_H vs FG_H", FixtureSpec.Names.EgH, FixtureSpec.Names.FgH),
+        };
+        var o = Regen(Def("E411", "0, 500", analyses: analyses, left: -150, right: 150));
+        if (!o.Result.Succeeded) { Add("E411", false, Codes(o), "succeeded", FirstError(o)); return; }
+        int owned = o.Record!.Sources.Count(s => s.Kind == SourceKinds.VolumeSurface);
+        var areas = o.Result.Segments.ToDictionary(r => r.AnalysisId, r => (r.Area2D, r.Coverage));
+        Add("E411", owned == 2 && areas.Count == 3, $"{owned} owned volume surface(s) for {areas.Count} analyses", "2 (EG/FG_A shared by two analyses, EG_H/FG_H)", "two analyses on one base/comparison pair");
+        var a = areas[analyses[0].Id];
+        var h = areas[analyses[2].Id];
+        Add("E421", Math.Abs(a.Area2D - 150_000) < 1e-6 && Math.Abs(h.Area2D - 100_000) < 1e-6 && h.Coverage < 1,
+            $"EG/FG_A {F(a.Area2D)} SF coverage {F(a.Coverage)}; EG_H/FG_H {F(h.Area2D)} SF coverage {F(h.Coverage)}", "150000 (coverage 1) and 100000 (coverage 0.667)",
+            "one segment 0-500, offsets +-150: EG covers it, EG_H only |y| <= 100");
+    }
+
+    /// <summary>E412: the owned volume surface erased by a user is recreated on the next regen.</summary>
+    private void E412()
+    {
+        var before = WithTransaction(tr => _writers.Store(_doc.Database, tr, _settings).Load("T2").Record);
+        string? handle = before?.Sources.FirstOrDefault(s => s.Kind == SourceKinds.VolumeSurface)?.Handle;
+        if (handle is null) { Add("E412", false, "no owned surface recorded for T2", "a recorded handle", "T2 must have run"); return; }
+        WithTransaction(tr => { EraseByHandle(tr, handle); return true; });
+        var o = Regen(Def("T2", "0, 500, 1300, 1800, 2000"));
+        string? now = o.Record?.Sources.FirstOrDefault(s => s.Kind == SourceKinds.VolumeSurface)?.Handle;
+        bool pass = o.Result.Succeeded && now is not null && now != handle && o.Result.Problems.Any(p => p.Code == "SV-E412");
+        Add("E412", pass, $"handle {handle} -> {now}, codes {Codes(o)}", "recreated with a new handle, SV-E412 note", "owned volume surface erased by a user");
+    }
+
+    /// <summary>E501: a table style named in settings but missing from the drawing fails the run before any write, naming it.</summary>
+    private void E501()
+    {
+        var missing = _settings with { Report = _settings.Report with { SegmentTable = _settings.Report.SegmentTable with { Style = _settings.Report.SegmentTable.Style with { TableStyle = "SV-T-MISSING" } } } };
+        var before = Snapshot();
+        var o = Regen(Def("E501", "0, 500"), Engine(null, null, missing));
+        bool pass = !o.Result.Succeeded && o.Result.Problems.Any(p => p.Code == "SV-E501" && p.Message.Contains("SV-T-MISSING", StringComparison.Ordinal)) && Snapshot() == before;
+        Add("E501", pass, $"failed at step {o.FailedAtStep}, codes {Codes(o)}", "fails naming SV-T-MISSING, nothing written", "segment table style missing from the drawing");
+    }
+
+    /// <summary>E503: an erased table is recreated at its anchor.</summary>
+    private void E503()
+    {
+        var before = WithTransaction(tr => _writers.Store(_doc.Database, tr, _settings).Load("T2").Record);
+        string? handle = before?.Owned.FirstOrDefault(o => o.Key.Role == OwnedRole.MasterTable)?.Handle;
+        if (handle is null) { Add("E503", false, "no master table recorded for T2", "a recorded handle", "T2 must have run"); return; }
+        WithTransaction(tr => { EraseByHandle(tr, handle); return true; });
+        var o = Regen(Def("T2", "0, 500, 1300, 1800, 2000"));
+        string? now = o.Record?.Owned.FirstOrDefault(x => x.Key.Role == OwnedRole.MasterTable)?.Handle;
+        bool pass = o.Result.Succeeded && now is not null && now != handle && o.Applied?.Created == 1 && o.Result.Problems.Any(p => p.Code == "SV-E503");
+        Add("E503", pass, $"master table {handle} -> {now}, created {o.Applied?.Created}, codes {string.Join(",", o.Result.Problems.Select(p => p.Code).Distinct())}", "recreated, 1 created, SV-E503 note", "master table erased by a user");
+    }
+
+    /// <summary>E505: an analysis added grows every table by one block in place; removed, it shrinks back; handles never change.</summary>
+    private void E505()
+    {
+        var before = WithTransaction(tr => _writers.Store(_doc.Database, tr, _settings).Load("T2").Record);
+        var tables = (before?.Owned ?? []).Where(o => o.Key.Role is OwnedRole.PaperTable or OwnedRole.MasterTable).ToList();
+        var two = new[]
+        {
+            new AnalysisDef(_analysisA, "EG vs FG_A", FixtureSpec.Names.EG, FixtureSpec.Names.FgA),
+            new AnalysisDef(DeterministicId("E505-copy"), "EG vs FG_A copy", FixtureSpec.Names.EG, FixtureSpec.Names.FgA),
+        };
+        var grown = Regen(Def("T2", "0, 500, 1300, 1800, 2000", analyses: two));
+        var shrunk = Regen(Def("T2", "0, 500, 1300, 1800, 2000"));
+        bool Same(RunOutcome o) => tables.Count > 0 && tables.All(t => o.Record?.Owned.Any(n => n.Key == t.Key && n.Handle == t.Handle) == true);
+        bool pass = grown.Result.Succeeded && shrunk.Result.Succeeded && Same(grown) && Same(shrunk)
+                    && grown.Result.Problems.Any(p => p.Code == "SV-E505") && shrunk.Result.Problems.Any(p => p.Code == "SV-E505");
+        Add("E505", pass, $"{tables.Count} table handles kept after grow {Same(grown)} and shrink {Same(shrunk)}; SV-E505 notes {grown.Result.Problems.Count(p => p.Code == "SV-E505")} / {shrunk.Result.Problems.Count(p => p.Code == "SV-E505")}",
+            "same handles; tables grow then shrink by one analysis block in place (SV-E505)", "T2: a second analysis added, then removed");
+    }
+
+    /// <summary>E601: a sheet template that is not there fails the run before any write, naming the file.</summary>
+    private void E601()
+    {
+        string path = Path.Combine(_dir, "no-such-template.dwg");
+        var broken = _settings with { Paper = _settings.Paper with { TemplatePath = path } };
+        var before = Snapshot();
+        var o = Regen(Def("E601", "0, 500"), Engine(null, null, broken));
+        bool pass = !o.Result.Succeeded && o.FailedAtStep == 4 && o.Result.Problems.Any(p => p.Code == "SV-E601" && p.Message.Contains("no-such-template", StringComparison.Ordinal)) && Snapshot() == before;
+        Add("E601", pass, $"failed at step {o.FailedAtStep}, codes {Codes(o)}", "fails at step 4 naming the file, nothing written", "paper.templatePath names a missing file");
+    }
+
+    /// <summary>E803: a stored alignment handle that no longer resolves falls back to the name, with a warning, and the record is repaired.</summary>
+    private void E803()
+    {
+        WithTransaction(tr =>
+        {
+            var store = _writers.Store(_doc.Database, tr, _settings);
+            var r = store.Load("T2").Record!;
+            store.Save(r with { Sources = r.Sources.Select(s => s.Kind == SourceKinds.Alignment ? s with { Handle = "FFFFFF" } : s).ToList() });
+            return true;
+        });
+        var o = Regen(Def("T2", "0, 500, 1300, 1800, 2000"));
+        string? repaired = o.Record?.Sources.FirstOrDefault(s => s.Kind == SourceKinds.Alignment)?.Handle;
+        bool pass = o.Result.Succeeded && o.Result.Problems.Any(p => p.Code == PipelineCodes.MatchedByName) && repaired is not null && repaired != "FFFFFF";
+        Add("E803", pass, $"warning {o.Result.Problems.Any(p => p.Code == PipelineCodes.MatchedByName)}, stored handle FFFFFF -> {repaired}", "matched by name with SV-E803, handle repaired", "stored alignment handle re-referenced");
+    }
+
+    /// <summary>E808: two runs on one alignment are independent; two runs placing tables on one layout are warned.</summary>
+    private void E808()
+    {
+        string target = FixtureSpec.Names.TemplateLayout;
+        RunOutcome Pin(string name)
+        {
+            var first = Regen(Def(name, "0, 500"));
+            var seg = first.Run.KnownSegments.Single().Id;
+            return Regen(Def(name, "0, 500") with { Overrides = new Dictionary<Guid, SegmentOverrides> { [seg] = new SegmentOverrides(TargetLayout: target) } });
+        }
+        var a = Pin("E808a");
+        var b = Pin("E808b");
+        bool pass = a.Result.Succeeded && b.Result.Succeeded && b.Result.Problems.Any(p => p.Code == PipelineCodes.SharedLayout)
+                    && a.Record!.Owned.Any(o => o.Key.Role == OwnedRole.ModelTable) && b.Record!.Owned.Any(o => o.Key.Role == OwnedRole.ModelTable);
+        Add("E808", pass, $"both succeeded {a.Result.Succeeded && b.Result.Succeeded}; second warned {b.Result.Problems.Any(p => p.Code == PipelineCodes.SharedLayout)}; codes {Codes(b)}",
+            "independent runs, each with its own table on the layout; SV-E808 warning on the shared layout", $"two runs on S whose first segment targets layout '{target}'");
     }
 
     private void T29()
