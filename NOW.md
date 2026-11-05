@@ -154,6 +154,7 @@ Filled as workers return. Status: TODO / IN PROGRESS / GREEN / MANUAL-OK / BLOCK
 | 2026-11-05 | wp/a1 (A1 adapters) | 8d073ad | build 0 errors; adapters.scr re-run by orchestrator in the a1 worktree, exit 0, 11 s, 85 + 2 PASS, 0 FAIL; Fixture H reconciled at 67,860 ft³ in that run; diff confined to Adapters/ and adapters*.scr |
 | 2026-11-05 | wp/a3 (A3 paper writers) | 1d5068a | build 0 errors (gated on the literal line); writersPaper.scr re-run by orchestrator in the a3 worktree and again on main after the merge, exit 0, 75 PASS, every phase "no FAIL lines"; diff confined to WritersPaper/ and writersPaper*.scr |
 | 2026-11-05 | wp/u2 (U2 dialog) | 43215c9 | build 0 errors (gated); off-screen smoke outside AutoCAD 28/28 per U2, renders kept in docs/ui/smoke/ and read by the orchestrator against 6.14; diff confined to UI/Dialog and UI/Host; no assembly-level CommandClass in SheetVol.UI |
+| 2026-11-05 | wp/a4 (A4 commands + pipeline) | 453ae3a | build 0 errors (gated); selftest.scr re-run by orchestrator in the a4 worktree and on main after the merge: 37 passed, 0 failed on fake bindings; diff confined to Commands/, Session/, SelfTest/SelfTest*.cs, selftest*.scr |
 
 ## Decisions pending Dan (raised by workers, not yet ruled)
 
