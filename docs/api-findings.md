@@ -1244,3 +1244,568 @@ VERIFY file *Model|Table#75F.cell[1,1] = 'N 13,812,345.67  E 3,101,234.56 (TYPED
 - The `Number=-1` on viewport 756 in `SV-P17` is unexplained.
 
 ## C. Frames, events, modeless UI (S3)
+
+Probes P14, P15, P21. Headless parts run 2026-11-05 in the Civil 3D 2026 Core Console
+(2026.2.3, AeccDbMgd 13.8.0.1873) against `tools/fixtures/blank-c3d.dwg`. Code:
+`src/SheetVol.Civil3D/SelfTest/ProbeCCommon.cs`, `ProbeCEvents.cs`, `ProbeCFrames.cs`
+(Core Console safe) and `src/SheetVol.UI/Probe/**` (the WPF window; full AutoCAD only).
+Commands: `SVPROBEEVENTS`, `SVPROBEEVENTSOFF`, `SVPROBEEVENTSDUMP`, `SVPROBEMARK`,
+`SVPROBEC_EDIT`, `SVPROBEC_STATE` (P15); `SVPROBEFRAMES`, `SVPROBEC_SOLVECHECK` (P14);
+`SVPROBEUI`, `SVPROBEUI_WRITE`, `SVPROBEUI_PICK` (P21). A probe step that fails at the
+command boundary prints `SV-E198`; the final runs printed none. Logs are timestamped and
+append-only under `%TEMP%\sheetvol\` (`probeEvents.log`, `probeFrames.log`, `probeUI.log`).
+Dan's click-through is `docs/dan-probe-steps.md`.
+
+Output blocks follow section A's convention: each line is copied as printed; some lines
+are left out (here the per-dump `counts since the last dump` blocks and the `===== ...
+begin/end =====` banners); the only edit is the user-profile prefix shortened to `%TEMP%`.
+
+### C.0 How to rerun
+
+From the worktree or repo root (the runner stages this checkout's own build):
+
+```powershell
+.\tools\test-headless.ps1 -Script .\tools\scripts\probeC-events.scr          # P15 pre-check, 5-10 s
+.\tools\test-headless.ps1 -Script .\tools\scripts\probeC-solvecheck.scr      # P14 solver self-check
+.\tools\test-headless.ps1 -Script .\tools\scripts\probeC-frames-control.scr  # P14 viewport control (FX template)
+.\tools\test-headless.ps1 -Script .\tools\scripts\probeC-frames.scr -Drawing .\tools\fixtures\frames-src.dwg   # P14, once Dan's fixtures exist
+```
+
+All four exited 0 on the final build. The runner stages only the engine's output folder:
+`SheetVol.UI.dll` is not staged (MEASURED: after a run the stage folder held
+`SheetVol.Civil3D.*` and `SheetVol.Core.*` only). `docs/dan-probe-steps.md` part 0 copies it.
+
+### C.1 Summary
+
+| Probe | Status | Key fact |
+|---|---|---|
+| P15 | PARTLY: headless half MEASURED; interactive half (grips, Layout Tools, match lines, synchronize) coded and waiting for Dan | Civil 3D's managed API declares **no events**. Alignment, surface and Civil object changes are seen only through `Database.ObjectModified` and friends, by RX class name, bracketed by `Document.CommandWillStart`/`CommandEnded`. `Application.Idle` never fired during a Core Console script |
+| P21 | CODED, waiting for Dan's one `SVPROBEUI` run | Routes and API facts below are MEASURED from assembly metadata; behaviour in acad.exe is not measured yet |
+| P14 | CODED, solver self-checked; waiting for Dan's view-frame fixtures (HANDOFF.md section 13). **Cannot be run until Dan provides the drawing pair** | The API gives stations, alignment, `Sheet`, `SheetSet` and no geometry; geometry comes from `Explode`. Once the fixtures exist P14 runs headless, no Dan needed |
+
+### C.2 Rules for L1, L2, A4 and U2 that come out of this so far
+
+1. **No Civil 3D events (P15).** Reflection over the loaded AeccDbMgd in the 2026 host:
+   1887 exported types, 0 public events (C.3, line 8). An offline metadata read of the
+   installed assemblies (`System.Reflection.Metadata`, no load) gave 0 public events in
+   AeccDbMgd and AeccDataShortcutMgd for both 2025 and 2026, and 0 in AecBaseMgd. Only
+   AeccUiMgd declares events (13 in 2025, 14 in 2026: palette, panorama and
+   `AeccReferenceStatusUtils.ReferenceStatusChanged`). It is a UI assembly, absent from the
+   API reference and unusable from the engine, and was not explored. L2 wires
+   `Database.ObjectModified`, `ObjectErased`, `ObjectAppended` (plus `ObjectUnappended`
+   and `ObjectReappended`) and filters by `DBObject.GetRXClass().Name`: `AeccDbAlignment`,
+   `AeccDbSurfaceTin` and so on.
+2. **One alignment edit is a burst (E805).** One API edit of an alignment fired
+   `ObjectModified` on the alignment plus six on its label groups (`AeccDbAlignment*Labeling`).
+   After `CommandEnded`, `AcDbSortentsTable` was modified with no command active. L2's
+   "dirty flag, then one-shot work after the command" design holds. The draw-order table
+   change arrives after `CommandEnded` and must not re-arm a regen on its own.
+3. **Undo is recognised by command name, not by `IsUndoing` (E804).** During `U` of an
+   alignment edit, label groups fired `ObjectModified` with `IsUndoing=False` in between
+   `IsUndoing=True` lines (C.3, #72 to #90): Civil 3D recomputes labels while undoing. The
+   tracker must treat everything between `CommandWillStart 'U'`/`'UNDO'`/`'REDO'` and the
+   matching end as undo, whatever `IsUndoing` says.
+4. **Undo shapes (MEASURED).** Undoing an erase fires `ObjectErased Erased=False`. Undoing
+   an append fires `ObjectUnappended`, then `ObjectErased Erased=True`. Undoing a TIN edit
+   fires one `ObjectModified` on the surface. All carry `IsUndoing=True`, except the
+   label-group lines in rule 3.
+5. **Read-only commands carry `CommandFlags.NoUndoMarker` (A4).** A command that changes
+   nothing is still an undo step: after `SVHELLO` (Modal, no flag), `_.U` undid `SVHELLO`,
+   not the line appended before it. The second `U` then removed the line (C.3, from #111).
+   The probe's own commands carry the flag, and `U` skipped them. `SVSTATUS`, `SVEXPORT`
+   and the dialog's read-only helpers need it, or a user's `SVREGEN`, `SVSTATUS`, `U`
+   undoes nothing and E804 ("one UNDO reverts one regen") fails in practice.
+6. **No `Application.Idle` in Core Console scripts (L2).** The one-shot was armed after
+   every command and fired 0 times in a 26-command script. Batch regen (`regen-sheets.ps1`)
+   and anything headless must do its work in the command, never in an Idle callback.
+   Whether Idle fires after each command in acad.exe is in Dan's P15 run.
+7. **`TinSurface.FindVertexAtXY` returns the nearest vertex**, not an exact match and not
+   an exception: with the apex at (1750, 0) deleted it returned (1705, 45, 100). Callers
+   compare the location.
+8. **The WPF overloads of `ShowModelessWindow` live in AcCoreMgd (U2).** In the 2025
+   reference assemblies, AcMgd's `Autodesk.AutoCAD.ApplicationServices.Application`
+   derives from `Core.Application` (AcCoreMgd). Its own `ShowModelessWindow` overloads take
+   a `System.Uri htmlPage`. The `System.Windows.Window` overloads are declared on
+   `Core.Application`: `(Window formToShow)`, `(Window owner, Window formToShow)`,
+   `(IntPtr owner, Window formToShow)`, and both two-argument forms plus `bool
+   persistSizeAndPosition`. `Application.ShowModelessWindow(window)` therefore binds to the
+   inherited one-argument overload. `MainWindow` is also on `Core.Application` only. Read
+   from metadata (parameter names and signature blobs); not executed yet.
+9. **Exceptions must not escape an `ExecuteInCommandContextAsync` callback (U2).** Autodesk
+   forum guidance says an exception inside the delegate can crash AutoCAD
+   ([forum thread](https://forums.autodesk.com/t5/net-forum/run-a-sample-command-with-parameters-using-c-net/m-p/13335082)).
+   Community source, not measured. The probe wraps every callback body in a try/catch.
+10. **`DocumentLockModeChangedEventArgs.IsVetoed` is not public.** Its getter is
+    assembly-private in AcCoreMgd 2025, so only `GlobalCommandName`, `CurrentMode`,
+    `MyPreviousMode`, `MyCurrentMode` and `Document` are usable.
+
+### C.3 P15 headless pre-check (MEASURED)
+
+**Ran:** `probeC-events.scr`. It builds FX alignment S (`SVFIXTURE S`, a fixed line from
+(0,0) to (2000,0)) and Fixture A (EG, FG_A), and turns the probe on. Then, one API edit per
+command: the end PI of S moves 50 ft north (`AlignmentLine.PassThroughPoint2`; the API has
+no PI collection, and on a fixed line the pass-through points are the PIs); a station
+equation (raw 1000, ahead 800); FG_A's P5 apex deleted (`DeleteVertex`) and added back
+(`AddVertex`); a line appended, then erased. Then `_.U` six times with a state check and a
+dump in between, then a control (append, `SVHELLO`, `U`, `U`), then probe off and one more
+append that must record nothing.
+
+```text
+Command: SVPROBEEVENTS
+process: C:\Program Files\Autodesk\AutoCAD 2026\accoreconsole.exe  Core Console: True
+runtime: .NET 10.0.14  OS: Microsoft Windows 10.0.26200
+AcDbMgd 25.1.0.0  AcCoreMgd 25.1.0.0  AeccDbMgd 13.8.0.1873  SheetVol.Civil3D 0.1.0.0
+ACADVER=25.1  _VERNUM=W.179.0.0 (UNICODE)  PRODUCT=AutoCAD
+active document: C:\LAN-DT-build\sheetvol-wt\s3\tools\fixtures\blank-c3d.dwg  documents open: 1
+subscribed: Database.ObjectAppended, ObjectModified, ObjectErased, ObjectUnappended, ObjectReappended; Document.CommandWillStart, CommandEnded, CommandCancelled, CommandFailed; DocumentCollection.DocumentActivated; Application.Idle (one-shot after each command end) on 1 document(s)
+Civil 3D API events (run-time reflection over loaded Aecc*Mgd, UI assemblies excluded): AeccDbMgd 13.8.0.1873: 1887 exported type(s), 0 public event(s)
+log: %TEMP%\sheetvol\probeEvents.log
+Command: SVPROBEC_STATE
+UNDOCTL=61
+S: PassThroughPoint2=(2000, 0) EndingStation=2000 StationEquations.Count=0
+FG_A: triangles=52 vertex at (1750, 0): (1750, 0, 101)
+appended line: none yet
+Command: SVPROBEC_EDIT
+Edit [PI/EQ/VTXDEL/VTXADD/APPEND/ERASE]: PI
+S 6BF: before PassThroughPoint1=(0, 0) PassThroughPoint2=(2000, 0) EndingStation=2000
+S: set PassThroughPoint2=(2000, 50); after PassThroughPoint2=(2000, 50) EndingStation=2000.6249023742557 Length=2000.6249023742557
+Command: SVPROBEC_EDIT
+Edit [PI/EQ/VTXDEL/VTXADD/APPEND/ERASE]: EQ
+S 6BF: StationEquations.Add(1000, 800, Increasing); Count=1
+Command: SVPROBEC_EDIT
+Edit [PI/EQ/VTXDEL/VTXADD/APPEND/ERASE]: VTXDEL
+FG_A 6E9: DeleteVertex at (1750, 0); triangles 52 -> 50
+Command: SVPROBEC_EDIT
+Edit [PI/EQ/VTXDEL/VTXADD/APPEND/ERASE]: VTXADD
+FG_A 6E9: AddVertex(1750, 0, 101); triangles 50 -> 52
+Command: SVPROBEC_EDIT
+Edit [PI/EQ/VTXDEL/VTXADD/APPEND/ERASE]: APPEND
+appended Line 6EA (0, -500, 0) -> (100, -500, 0)
+Command: SVPROBEC_EDIT
+Edit [PI/EQ/VTXDEL/VTXADD/APPEND/ERASE]: ERASE
+erased Line 6EA
+Command: SVPROBEC_STATE
+UNDOCTL=61
+S: PassThroughPoint2=(2000, 50) EndingStation=2000.6249023742557 StationEquations.Count=1
+FG_A: triangles=52 vertex at (1750, 0): (1750, 0, 101)
+appended line 6EA: IsErased=True
+Command: SVPROBEEVENTSDUMP
+event probe on
+42 line(s) recorded since the last dump:
+  2026-11-05 12:11:07.831 #1 attached to document 'C:\LAN-DT-build\sheetvol-wt\s3\tools\fixtures\blank-c3d.dwg'
+  2026-11-05 12:11:07.862 #2 CommandEnded 'SVPROBEEVENTS' doc='C:\LAN-DT-build\sheetvol-wt\s3\tools\fixtures\blank-c3d.dwg'
+  2026-11-05 12:11:07.863 #3 CommandWillStart 'SVPROBEC_STATE' doc='C:\LAN-DT-build\sheetvol-wt\s3\tools\fixtures\blank-c3d.dwg'
+  2026-11-05 12:11:07.869 #4 CommandEnded 'SVPROBEC_STATE' doc='C:\LAN-DT-build\sheetvol-wt\s3\tools\fixtures\blank-c3d.dwg'
+  2026-11-05 12:11:07.870 #5 CommandWillStart 'SVPROBEC_EDIT' doc='C:\LAN-DT-build\sheetvol-wt\s3\tools\fixtures\blank-c3d.dwg'
+  2026-11-05 12:11:07.875 #6 ObjectModified AeccDbAlignment/Alignment h=6BF cmd=SVPROBEC_EDIT IsUndoing=False
+  2026-11-05 12:11:07.876 #7 ObjectModified AeccDbAlignmentMinorStationLabeling/AlignmentMinorStationLabelGroup h=6C4 cmd=SVPROBEC_EDIT IsUndoing=False
+  2026-11-05 12:11:07.877 #8 ObjectModified AeccDbAlignmentStationLabeling/AlignmentStationLabelGroup h=6C0 cmd=SVPROBEC_EDIT IsUndoing=False
+  2026-11-05 12:11:07.878 #9 ObjectModified AeccDbAlignmentGeomPointLabeling/AlignmentGeometryPointLabelGroup h=6C1 cmd=SVPROBEC_EDIT IsUndoing=False
+  2026-11-05 12:11:07.879 #10 ObjectModified AeccDbAlignmentStaEquLabeling/AlignmentStationEquationLabelGroup h=6C2 cmd=SVPROBEC_EDIT IsUndoing=False
+  2026-11-05 12:11:07.881 #11 ObjectModified AeccDbAlignmentDesignSpeedLabeling/AlignmentDesignSpeedLabelGroup h=6C3 cmd=SVPROBEC_EDIT IsUndoing=False
+  2026-11-05 12:11:07.881 #12 ObjectModified AeccDbAlignmentMinorStationLabeling/AlignmentMinorStationLabelGroup h=6C4 cmd=SVPROBEC_EDIT IsUndoing=False
+  2026-11-05 12:11:07.882 #13 CommandEnded 'SVPROBEC_EDIT' doc='C:\LAN-DT-build\sheetvol-wt\s3\tools\fixtures\blank-c3d.dwg'
+  2026-11-05 12:11:07.883 #14 ObjectModified AcDbSortentsTable/DrawOrderTable h=1C0 cmd=(none) IsUndoing=False
+  2026-11-05 12:11:07.887 #15 CommandWillStart 'SVPROBEC_EDIT' doc='C:\LAN-DT-build\sheetvol-wt\s3\tools\fixtures\blank-c3d.dwg'
+  2026-11-05 12:11:07.889 #16 ObjectModified AeccDbAlignment/Alignment h=6BF cmd=SVPROBEC_EDIT IsUndoing=False
+  2026-11-05 12:11:07.891 #17 ObjectModified AeccDbAlignmentMinorStationLabeling/AlignmentMinorStationLabelGroup h=6C4 cmd=SVPROBEC_EDIT IsUndoing=False
+  2026-11-05 12:11:07.891 #18 ObjectModified AeccDbAlignmentStationLabeling/AlignmentStationLabelGroup h=6C0 cmd=SVPROBEC_EDIT IsUndoing=False
+  2026-11-05 12:11:07.892 #19 ObjectModified AeccDbAlignmentGeomPointLabeling/AlignmentGeometryPointLabelGroup h=6C1 cmd=SVPROBEC_EDIT IsUndoing=False
+  2026-11-05 12:11:07.892 #20 ObjectModified AeccDbAlignmentStaEquLabeling/AlignmentStationEquationLabelGroup h=6C2 cmd=SVPROBEC_EDIT IsUndoing=False
+  2026-11-05 12:11:07.893 #21 ObjectModified AeccDbAlignmentDesignSpeedLabeling/AlignmentDesignSpeedLabelGroup h=6C3 cmd=SVPROBEC_EDIT IsUndoing=False
+  2026-11-05 12:11:07.893 #22 ObjectModified AeccDbAlignmentMinorStationLabeling/AlignmentMinorStationLabelGroup h=6C4 cmd=SVPROBEC_EDIT IsUndoing=False
+  2026-11-05 12:11:07.894 #23 CommandEnded 'SVPROBEC_EDIT' doc='C:\LAN-DT-build\sheetvol-wt\s3\tools\fixtures\blank-c3d.dwg'
+  2026-11-05 12:11:07.894 #24 ObjectModified AcDbSortentsTable/DrawOrderTable h=1C0 cmd=(none) IsUndoing=False
+  2026-11-05 12:11:07.901 #25 CommandWillStart 'SVPROBEC_EDIT' doc='C:\LAN-DT-build\sheetvol-wt\s3\tools\fixtures\blank-c3d.dwg'
+  2026-11-05 12:11:07.904 #26 ObjectModified AeccDbSurfaceTin/TinSurface h=6E9 cmd=SVPROBEC_EDIT IsUndoing=False
+  2026-11-05 12:11:07.904 #27 CommandEnded 'SVPROBEC_EDIT' doc='C:\LAN-DT-build\sheetvol-wt\s3\tools\fixtures\blank-c3d.dwg'
+  2026-11-05 12:11:07.905 #28 CommandWillStart 'SVPROBEC_EDIT' doc='C:\LAN-DT-build\sheetvol-wt\s3\tools\fixtures\blank-c3d.dwg'
+  2026-11-05 12:11:07.907 #29 ObjectModified AeccDbSurfaceTin/TinSurface h=6E9 cmd=SVPROBEC_EDIT IsUndoing=False
+  2026-11-05 12:11:07.907 #30 CommandEnded 'SVPROBEC_EDIT' doc='C:\LAN-DT-build\sheetvol-wt\s3\tools\fixtures\blank-c3d.dwg'
+  2026-11-05 12:11:07.908 #31 CommandWillStart 'SVPROBEC_EDIT' doc='C:\LAN-DT-build\sheetvol-wt\s3\tools\fixtures\blank-c3d.dwg'
+  2026-11-05 12:11:07.910 #32 ObjectModified AcDbBlockTableRecord/BlockTableRecord h=1F cmd=SVPROBEC_EDIT IsUndoing=False
+  2026-11-05 12:11:07.911 #33 ObjectAppended AcDbLine/Line h=6EA cmd=SVPROBEC_EDIT IsUndoing=False
+  2026-11-05 12:11:07.911 #34 ObjectModified AcDbLine/Line h=6EA cmd=SVPROBEC_EDIT IsUndoing=False
+  2026-11-05 12:11:07.911 #35 ObjectModified AcDbLine/Line h=6EA cmd=SVPROBEC_EDIT IsUndoing=False
+  2026-11-05 12:11:07.912 #36 CommandEnded 'SVPROBEC_EDIT' doc='C:\LAN-DT-build\sheetvol-wt\s3\tools\fixtures\blank-c3d.dwg'
+  2026-11-05 12:11:07.912 #37 CommandWillStart 'SVPROBEC_EDIT' doc='C:\LAN-DT-build\sheetvol-wt\s3\tools\fixtures\blank-c3d.dwg'
+  2026-11-05 12:11:07.914 #38 ObjectErased AcDbLine/Line h=6EA cmd=SVPROBEC_EDIT IsUndoing=False Erased=True
+  2026-11-05 12:11:07.915 #39 CommandEnded 'SVPROBEC_EDIT' doc='C:\LAN-DT-build\sheetvol-wt\s3\tools\fixtures\blank-c3d.dwg'
+  2026-11-05 12:11:07.915 #40 CommandWillStart 'SVPROBEC_STATE' doc='C:\LAN-DT-build\sheetvol-wt\s3\tools\fixtures\blank-c3d.dwg'
+  2026-11-05 12:11:07.916 #41 CommandEnded 'SVPROBEC_STATE' doc='C:\LAN-DT-build\sheetvol-wt\s3\tools\fixtures\blank-c3d.dwg'
+  2026-11-05 12:11:07.917 #42 CommandWillStart 'SVPROBEEVENTSDUMP' doc='C:\LAN-DT-build\sheetvol-wt\s3\tools\fixtures\blank-c3d.dwg'
+Idle one-shot: armed after 'SVPROBEC_STATE', not fired yet; fired 0 time(s) this session
+Command: _.U
+SVPROBEC_EDIT
+Command: SVPROBEC_STATE
+UNDOCTL=61
+S: PassThroughPoint2=(2000, 50) EndingStation=2000.6249023742557 StationEquations.Count=1
+FG_A: triangles=52 vertex at (1750, 0): (1750, 0, 101)
+appended line 6EA: IsErased=False
+Command: SVPROBEEVENTSDUMP
+event probe on
+7 line(s) recorded since the last dump:
+  2026-11-05 12:11:07.923 #43 CommandEnded 'SVPROBEEVENTSDUMP' doc='C:\LAN-DT-build\sheetvol-wt\s3\tools\fixtures\blank-c3d.dwg'
+  2026-11-05 12:11:07.923 #44 CommandWillStart 'U' doc='C:\LAN-DT-build\sheetvol-wt\s3\tools\fixtures\blank-c3d.dwg'
+  2026-11-05 12:11:07.924 #45 ObjectErased AcDbLine/Line h=6EA cmd=U IsUndoing=True Erased=False
+  2026-11-05 12:11:07.927 #46 CommandEnded 'U' doc='C:\LAN-DT-build\sheetvol-wt\s3\tools\fixtures\blank-c3d.dwg'
+  2026-11-05 12:11:07.928 #47 CommandWillStart 'SVPROBEC_STATE' doc='C:\LAN-DT-build\sheetvol-wt\s3\tools\fixtures\blank-c3d.dwg'
+  2026-11-05 12:11:07.929 #48 CommandEnded 'SVPROBEC_STATE' doc='C:\LAN-DT-build\sheetvol-wt\s3\tools\fixtures\blank-c3d.dwg'
+  2026-11-05 12:11:07.929 #49 CommandWillStart 'SVPROBEEVENTSDUMP' doc='C:\LAN-DT-build\sheetvol-wt\s3\tools\fixtures\blank-c3d.dwg'
+Idle one-shot: armed after 'SVPROBEC_STATE', not fired yet; fired 0 time(s) this session
+Command: _.U
+SVPROBEC_EDIT
+Command: SVPROBEC_STATE
+UNDOCTL=61
+S: PassThroughPoint2=(2000, 50) EndingStation=2000.6249023742557 StationEquations.Count=1
+FG_A: triangles=52 vertex at (1750, 0): (1750, 0, 101)
+appended line 6EA: IsErased=True
+Command: SVPROBEEVENTSDUMP
+event probe on
+10 line(s) recorded since the last dump:
+  2026-11-05 12:11:07.930 #50 CommandEnded 'SVPROBEEVENTSDUMP' doc='C:\LAN-DT-build\sheetvol-wt\s3\tools\fixtures\blank-c3d.dwg'
+  2026-11-05 12:11:07.930 #51 CommandWillStart 'U' doc='C:\LAN-DT-build\sheetvol-wt\s3\tools\fixtures\blank-c3d.dwg'
+  2026-11-05 12:11:07.931 #52 ObjectModified AcDbBlockTableRecord/BlockTableRecord h=1F cmd=U IsUndoing=True
+  2026-11-05 12:11:07.931 #53 ObjectUnappended AcDbLine/Line h=6EA cmd=U IsUndoing=True
+  2026-11-05 12:11:07.932 #54 ObjectModified AcDbLine/Line h=6EA cmd=U IsUndoing=True
+  2026-11-05 12:11:07.932 #55 ObjectErased AcDbLine/Line h=6EA cmd=U IsUndoing=True Erased=True
+  2026-11-05 12:11:07.935 #56 CommandEnded 'U' doc='C:\LAN-DT-build\sheetvol-wt\s3\tools\fixtures\blank-c3d.dwg'
+  2026-11-05 12:11:07.936 #57 CommandWillStart 'SVPROBEC_STATE' doc='C:\LAN-DT-build\sheetvol-wt\s3\tools\fixtures\blank-c3d.dwg'
+  2026-11-05 12:11:07.937 #58 CommandEnded 'SVPROBEC_STATE' doc='C:\LAN-DT-build\sheetvol-wt\s3\tools\fixtures\blank-c3d.dwg'
+  2026-11-05 12:11:07.938 #59 CommandWillStart 'SVPROBEEVENTSDUMP' doc='C:\LAN-DT-build\sheetvol-wt\s3\tools\fixtures\blank-c3d.dwg'
+Idle one-shot: armed after 'SVPROBEC_STATE', not fired yet; fired 0 time(s) this session
+Command: _.U
+SVPROBEC_EDIT
+Command: SVPROBEC_STATE
+UNDOCTL=61
+S: PassThroughPoint2=(2000, 50) EndingStation=2000.6249023742557 StationEquations.Count=1
+FG_A: triangles=50 vertex at (1750, 0): (1705, 45, 100)
+appended line 6EA: IsErased=True
+Command: SVPROBEEVENTSDUMP
+event probe on
+7 line(s) recorded since the last dump:
+  2026-11-05 12:11:07.939 #60 CommandEnded 'SVPROBEEVENTSDUMP' doc='C:\LAN-DT-build\sheetvol-wt\s3\tools\fixtures\blank-c3d.dwg'
+  2026-11-05 12:11:07.939 #61 CommandWillStart 'U' doc='C:\LAN-DT-build\sheetvol-wt\s3\tools\fixtures\blank-c3d.dwg'
+  2026-11-05 12:11:07.941 #62 ObjectModified AeccDbSurfaceTin/TinSurface h=6E9 cmd=U IsUndoing=True
+  2026-11-05 12:11:07.944 #63 CommandEnded 'U' doc='C:\LAN-DT-build\sheetvol-wt\s3\tools\fixtures\blank-c3d.dwg'
+  2026-11-05 12:11:07.944 #64 CommandWillStart 'SVPROBEC_STATE' doc='C:\LAN-DT-build\sheetvol-wt\s3\tools\fixtures\blank-c3d.dwg'
+  2026-11-05 12:11:07.946 #65 CommandEnded 'SVPROBEC_STATE' doc='C:\LAN-DT-build\sheetvol-wt\s3\tools\fixtures\blank-c3d.dwg'
+  2026-11-05 12:11:07.946 #66 CommandWillStart 'SVPROBEEVENTSDUMP' doc='C:\LAN-DT-build\sheetvol-wt\s3\tools\fixtures\blank-c3d.dwg'
+Idle one-shot: armed after 'SVPROBEC_STATE', not fired yet; fired 0 time(s) this session
+Command: _.U
+SVPROBEC_EDIT
+Command: _.U
+SVPROBEC_EDIT
+Command: _.U
+SVPROBEC_EDIT
+Command: SVPROBEC_STATE
+UNDOCTL=61
+S: PassThroughPoint2=(2000, 0) EndingStation=2000 StationEquations.Count=0
+FG_A: triangles=52 vertex at (1750, 0): (1750, 0, 101)
+appended line 6EA: IsErased=True
+Command: SVPROBEEVENTSDUMP
+event probe on
+44 line(s) recorded since the last dump:
+  2026-11-05 12:11:07.947 #67 CommandEnded 'SVPROBEEVENTSDUMP' doc='C:\LAN-DT-build\sheetvol-wt\s3\tools\fixtures\blank-c3d.dwg'
+  2026-11-05 12:11:07.947 #68 CommandWillStart 'U' doc='C:\LAN-DT-build\sheetvol-wt\s3\tools\fixtures\blank-c3d.dwg'
+  2026-11-05 12:11:07.948 #69 ObjectModified AeccDbSurfaceTin/TinSurface h=6E9 cmd=U IsUndoing=True
+  2026-11-05 12:11:07.951 #70 CommandEnded 'U' doc='C:\LAN-DT-build\sheetvol-wt\s3\tools\fixtures\blank-c3d.dwg'
+  2026-11-05 12:11:07.952 #71 CommandWillStart 'U' doc='C:\LAN-DT-build\sheetvol-wt\s3\tools\fixtures\blank-c3d.dwg'
+  2026-11-05 12:11:07.953 #72 ObjectModified AeccDbAlignmentMinorStationLabeling/AlignmentMinorStationLabelGroup h=6C4 cmd=U IsUndoing=True
+  2026-11-05 12:11:07.953 #73 ObjectModified AeccDbAlignmentDesignSpeedLabeling/AlignmentDesignSpeedLabelGroup h=6C3 cmd=U IsUndoing=True
+  2026-11-05 12:11:07.953 #74 ObjectModified AeccDbAlignmentStaEquLabeling/AlignmentStationEquationLabelGroup h=6C2 cmd=U IsUndoing=True
+  2026-11-05 12:11:07.953 #75 ObjectModified AeccDbAlignmentGeomPointLabeling/AlignmentGeometryPointLabelGroup h=6C1 cmd=U IsUndoing=True
+  2026-11-05 12:11:07.954 #76 ObjectModified AeccDbAlignmentMinorStationLabeling/AlignmentMinorStationLabelGroup h=6C4 cmd=U IsUndoing=False
+  2026-11-05 12:11:07.954 #77 ObjectModified AeccDbAlignmentStationLabeling/AlignmentStationLabelGroup h=6C0 cmd=U IsUndoing=True
+  2026-11-05 12:11:07.954 #78 ObjectModified AeccDbAlignmentMinorStationLabeling/AlignmentMinorStationLabelGroup h=6C4 cmd=U IsUndoing=False
+  2026-11-05 12:11:07.955 #79 ObjectModified AeccDbAlignmentDesignSpeedLabeling/AlignmentDesignSpeedLabelGroup h=6C3 cmd=U IsUndoing=False
+  2026-11-05 12:11:07.955 #80 ObjectModified AeccDbAlignmentStaEquLabeling/AlignmentStationEquationLabelGroup h=6C2 cmd=U IsUndoing=False
+  2026-11-05 12:11:07.955 #81 ObjectModified AeccDbAlignmentGeomPointLabeling/AlignmentGeometryPointLabelGroup h=6C1 cmd=U IsUndoing=False
+  2026-11-05 12:11:07.955 #82 ObjectModified AeccDbAlignmentStationLabeling/AlignmentStationLabelGroup h=6C0 cmd=U IsUndoing=False
+  2026-11-05 12:11:07.955 #83 ObjectModified AeccDbAlignment/Alignment h=6BF cmd=U IsUndoing=True
+  2026-11-05 12:11:07.956 #84 ObjectModified AeccDbAlignment/Alignment h=6BF cmd=U IsUndoing=True
+  2026-11-05 12:11:07.956 #85 ObjectModified AeccDbAlignmentMinorStationLabeling/AlignmentMinorStationLabelGroup h=6C4 cmd=U IsUndoing=False
+  2026-11-05 12:11:07.956 #86 ObjectModified AeccDbAlignmentDesignSpeedLabeling/AlignmentDesignSpeedLabelGroup h=6C3 cmd=U IsUndoing=False
+  2026-11-05 12:11:07.956 #87 ObjectModified AeccDbAlignmentStaEquLabeling/AlignmentStationEquationLabelGroup h=6C2 cmd=U IsUndoing=False
+  2026-11-05 12:11:07.956 #88 ObjectModified AeccDbAlignmentGeomPointLabeling/AlignmentGeometryPointLabelGroup h=6C1 cmd=U IsUndoing=False
+  2026-11-05 12:11:07.957 #89 ObjectModified AeccDbAlignmentStationLabeling/AlignmentStationLabelGroup h=6C0 cmd=U IsUndoing=False
+  2026-11-05 12:11:07.957 #90 ObjectModified AeccDbAlignment/Alignment h=6BF cmd=U IsUndoing=True
+  2026-11-05 12:11:07.959 #91 CommandEnded 'U' doc='C:\LAN-DT-build\sheetvol-wt\s3\tools\fixtures\blank-c3d.dwg'
+  2026-11-05 12:11:07.960 #92 ObjectModified AcDbSortentsTable/DrawOrderTable h=1C0 cmd=(none) IsUndoing=False
+  2026-11-05 12:11:07.963 #93 CommandWillStart 'U' doc='C:\LAN-DT-build\sheetvol-wt\s3\tools\fixtures\blank-c3d.dwg'
+  2026-11-05 12:11:07.964 #94 ObjectModified AeccDbAlignmentMinorStationLabeling/AlignmentMinorStationLabelGroup h=6C4 cmd=U IsUndoing=True
+  2026-11-05 12:11:07.964 #95 ObjectModified AeccDbAlignmentDesignSpeedLabeling/AlignmentDesignSpeedLabelGroup h=6C3 cmd=U IsUndoing=True
+  2026-11-05 12:11:07.965 #96 ObjectModified AeccDbAlignmentStaEquLabeling/AlignmentStationEquationLabelGroup h=6C2 cmd=U IsUndoing=True
+  2026-11-05 12:11:07.965 #97 ObjectModified AeccDbAlignmentGeomPointLabeling/AlignmentGeometryPointLabelGroup h=6C1 cmd=U IsUndoing=True
+  2026-11-05 12:11:07.966 #98 ObjectModified AeccDbAlignmentMinorStationLabeling/AlignmentMinorStationLabelGroup h=6C4 cmd=U IsUndoing=False
+  2026-11-05 12:11:07.966 #99 ObjectModified AeccDbAlignmentStationLabeling/AlignmentStationLabelGroup h=6C0 cmd=U IsUndoing=True
+  2026-11-05 12:11:07.967 #100 ObjectModified AeccDbAlignmentMinorStationLabeling/AlignmentMinorStationLabelGroup h=6C4 cmd=U IsUndoing=False
+  2026-11-05 12:11:07.967 #101 ObjectModified AeccDbAlignmentDesignSpeedLabeling/AlignmentDesignSpeedLabelGroup h=6C3 cmd=U IsUndoing=False
+  2026-11-05 12:11:07.967 #102 ObjectModified AeccDbAlignmentStaEquLabeling/AlignmentStationEquationLabelGroup h=6C2 cmd=U IsUndoing=False
+  2026-11-05 12:11:07.968 #103 ObjectModified AeccDbAlignmentGeomPointLabeling/AlignmentGeometryPointLabelGroup h=6C1 cmd=U IsUndoing=False
+  2026-11-05 12:11:07.968 #104 ObjectModified AeccDbAlignmentStationLabeling/AlignmentStationLabelGroup h=6C0 cmd=U IsUndoing=False
+  2026-11-05 12:11:07.968 #105 ObjectModified AeccDbAlignment/Alignment h=6BF cmd=U IsUndoing=True
+  2026-11-05 12:11:07.971 #106 CommandEnded 'U' doc='C:\LAN-DT-build\sheetvol-wt\s3\tools\fixtures\blank-c3d.dwg'
+  2026-11-05 12:11:07.971 #107 ObjectModified AcDbSortentsTable/DrawOrderTable h=1C0 cmd=(none) IsUndoing=False
+  2026-11-05 12:11:07.974 #108 CommandWillStart 'SVPROBEC_STATE' doc='C:\LAN-DT-build\sheetvol-wt\s3\tools\fixtures\blank-c3d.dwg'
+  2026-11-05 12:11:07.976 #109 CommandEnded 'SVPROBEC_STATE' doc='C:\LAN-DT-build\sheetvol-wt\s3\tools\fixtures\blank-c3d.dwg'
+  2026-11-05 12:11:07.976 #110 CommandWillStart 'SVPROBEEVENTSDUMP' doc='C:\LAN-DT-build\sheetvol-wt\s3\tools\fixtures\blank-c3d.dwg'
+Idle one-shot: armed after 'SVPROBEC_STATE', not fired yet; fired 0 time(s) this session
+Command: SVPROBEC_EDIT
+Edit [PI/EQ/VTXDEL/VTXADD/APPEND/ERASE]: APPEND
+appended Line 6EB (0, -500, 0) -> (100, -500, 0)
+Command: SVHELLO
+SVHELLO ok. SheetVol.Civil3D 0.1.0.0 tfm=.NETCoreApp,Version=v10.0
+Runtime: .NET 10.0.14  Process: C:\Program Files\Autodesk\AutoCAD 2026\accoreconsole.exe
+AcDbMgd: 25.1.0.0  AeccDbMgd: 13.8.0.1873
+Core Console: True
+CivilApplication.ActiveDocument: ok
+Command: _.U
+SVHELLO
+Command: SVPROBEC_STATE
+UNDOCTL=61
+S: PassThroughPoint2=(2000, 0) EndingStation=2000 StationEquations.Count=0
+FG_A: triangles=52 vertex at (1750, 0): (1750, 0, 101)
+appended line 6EB: IsErased=False
+Command: SVPROBEEVENTSDUMP
+event probe on
+14 line(s) recorded since the last dump:
+  2026-11-05 12:11:07.977 #111 CommandEnded 'SVPROBEEVENTSDUMP' doc='C:\LAN-DT-build\sheetvol-wt\s3\tools\fixtures\blank-c3d.dwg'
+  2026-11-05 12:11:07.978 #112 CommandWillStart 'SVPROBEC_EDIT' doc='C:\LAN-DT-build\sheetvol-wt\s3\tools\fixtures\blank-c3d.dwg'
+  2026-11-05 12:11:07.978 #113 ObjectModified AcDbBlockTableRecord/BlockTableRecord h=1F cmd=SVPROBEC_EDIT IsUndoing=False
+  2026-11-05 12:11:07.978 #114 ObjectAppended AcDbLine/Line h=6EB cmd=SVPROBEC_EDIT IsUndoing=False
+  2026-11-05 12:11:07.979 #115 ObjectModified AcDbLine/Line h=6EB cmd=SVPROBEC_EDIT IsUndoing=False
+  2026-11-05 12:11:07.979 #116 ObjectModified AcDbLine/Line h=6EB cmd=SVPROBEC_EDIT IsUndoing=False
+  2026-11-05 12:11:07.979 #117 CommandEnded 'SVPROBEC_EDIT' doc='C:\LAN-DT-build\sheetvol-wt\s3\tools\fixtures\blank-c3d.dwg'
+  2026-11-05 12:11:07.980 #118 CommandWillStart 'SVHELLO' doc='C:\LAN-DT-build\sheetvol-wt\s3\tools\fixtures\blank-c3d.dwg'
+  2026-11-05 12:11:07.981 #119 CommandEnded 'SVHELLO' doc='C:\LAN-DT-build\sheetvol-wt\s3\tools\fixtures\blank-c3d.dwg'
+  2026-11-05 12:11:07.981 #120 CommandWillStart 'U' doc='C:\LAN-DT-build\sheetvol-wt\s3\tools\fixtures\blank-c3d.dwg'
+  2026-11-05 12:11:07.984 #121 CommandEnded 'U' doc='C:\LAN-DT-build\sheetvol-wt\s3\tools\fixtures\blank-c3d.dwg'
+  2026-11-05 12:11:07.985 #122 CommandWillStart 'SVPROBEC_STATE' doc='C:\LAN-DT-build\sheetvol-wt\s3\tools\fixtures\blank-c3d.dwg'
+  2026-11-05 12:11:07.986 #123 CommandEnded 'SVPROBEC_STATE' doc='C:\LAN-DT-build\sheetvol-wt\s3\tools\fixtures\blank-c3d.dwg'
+  2026-11-05 12:11:07.986 #124 CommandWillStart 'SVPROBEEVENTSDUMP' doc='C:\LAN-DT-build\sheetvol-wt\s3\tools\fixtures\blank-c3d.dwg'
+Idle one-shot: armed after 'SVPROBEC_STATE', not fired yet; fired 0 time(s) this session
+Command: _.U
+SVPROBEC_EDIT
+Command: SVPROBEC_STATE
+UNDOCTL=61
+S: PassThroughPoint2=(2000, 0) EndingStation=2000 StationEquations.Count=0
+FG_A: triangles=52 vertex at (1750, 0): (1750, 0, 101)
+appended line 6EB: IsErased=True
+Command: SVPROBEEVENTSDUMP
+event probe on
+10 line(s) recorded since the last dump:
+  2026-11-05 12:11:07.987 #125 CommandEnded 'SVPROBEEVENTSDUMP' doc='C:\LAN-DT-build\sheetvol-wt\s3\tools\fixtures\blank-c3d.dwg'
+  2026-11-05 12:11:07.988 #126 CommandWillStart 'U' doc='C:\LAN-DT-build\sheetvol-wt\s3\tools\fixtures\blank-c3d.dwg'
+  2026-11-05 12:11:07.988 #127 ObjectModified AcDbBlockTableRecord/BlockTableRecord h=1F cmd=U IsUndoing=True
+  2026-11-05 12:11:07.988 #128 ObjectUnappended AcDbLine/Line h=6EB cmd=U IsUndoing=True
+  2026-11-05 12:11:07.988 #129 ObjectModified AcDbLine/Line h=6EB cmd=U IsUndoing=True
+  2026-11-05 12:11:07.989 #130 ObjectErased AcDbLine/Line h=6EB cmd=U IsUndoing=True Erased=True
+  2026-11-05 12:11:07.991 #131 CommandEnded 'U' doc='C:\LAN-DT-build\sheetvol-wt\s3\tools\fixtures\blank-c3d.dwg'
+  2026-11-05 12:11:07.992 #132 CommandWillStart 'SVPROBEC_STATE' doc='C:\LAN-DT-build\sheetvol-wt\s3\tools\fixtures\blank-c3d.dwg'
+  2026-11-05 12:11:07.993 #133 CommandEnded 'SVPROBEC_STATE' doc='C:\LAN-DT-build\sheetvol-wt\s3\tools\fixtures\blank-c3d.dwg'
+  2026-11-05 12:11:07.993 #134 CommandWillStart 'SVPROBEEVENTSDUMP' doc='C:\LAN-DT-build\sheetvol-wt\s3\tools\fixtures\blank-c3d.dwg'
+Idle one-shot: armed after 'SVPROBEC_STATE', not fired yet; fired 0 time(s) this session
+Command: SVPROBEEVENTSOFF
+===== P15 event probe OFF: unsubscribed everywhere =====
+2 line(s) recorded since the last dump:
+  2026-11-05 12:11:07.994 #135 CommandEnded 'SVPROBEEVENTSDUMP' doc='C:\LAN-DT-build\sheetvol-wt\s3\tools\fixtures\blank-c3d.dwg'
+  2026-11-05 12:11:07.995 #136 CommandWillStart 'SVPROBEEVENTSOFF' doc='C:\LAN-DT-build\sheetvol-wt\s3\tools\fixtures\blank-c3d.dwg'
+Idle one-shot: not armed; fired 0 time(s) this session
+session totals by event and object class:
+  CommandEnded SVHELLO: 1
+  CommandEnded SVPROBEC_EDIT: 7
+  CommandEnded SVPROBEC_STATE: 8
+  CommandEnded SVPROBEEVENTS: 1
+  CommandEnded SVPROBEEVENTSDUMP: 7
+  CommandEnded U: 8
+  CommandWillStart SVHELLO: 1
+  CommandWillStart SVPROBEC_EDIT: 7
+  CommandWillStart SVPROBEC_STATE: 8
+  CommandWillStart SVPROBEEVENTSDUMP: 7
+  CommandWillStart SVPROBEEVENTSOFF: 1
+  CommandWillStart U: 8
+  ObjectAppended AcDbLine: 2
+  ObjectErased AcDbLine: 4
+  ObjectModified AcDbBlockTableRecord: 4
+  ObjectModified AcDbLine: 6
+  ObjectModified AcDbSortentsTable: 4
+  ObjectModified AeccDbAlignment: 6
+  ObjectModified AeccDbAlignmentDesignSpeedLabeling: 7
+  ObjectModified AeccDbAlignmentGeomPointLabeling: 7
+  ObjectModified AeccDbAlignmentMinorStationLabeling: 11
+  ObjectModified AeccDbAlignmentStaEquLabeling: 7
+  ObjectModified AeccDbAlignmentStationLabeling: 7
+  ObjectModified AeccDbSurfaceTin: 4
+  ObjectUnappended AcDbLine: 2
+Idle one-shot fired 0 time(s) in the session
+log: %TEMP%\sheetvol\probeEvents.log
+Command: SVPROBEC_EDIT
+Edit [PI/EQ/VTXDEL/VTXADD/APPEND/ERASE]: APPEND
+appended Line 6EC (0, -500, 0) -> (100, -500, 0)
+Command: SVPROBEEVENTSDUMP
+event probe off
+0 line(s) recorded since the last dump:
+Idle one-shot: not armed; fired 0 time(s) this session
+```
+
+**Reading it:**
+
+- After each `_.U`, AutoCAD echoes the command it undid (`SVPROBEC_EDIT`, then
+  `SVHELLO`), and `SVPROBEC_STATE` shows the revert: the line unerased, then gone; FG_A
+  back to 50 triangles after the re-add is undone; S back to (2000, 0), 2000 and no
+  equation after the last three. The probe's own commands (`SVPROBEC_STATE`,
+  `SVPROBEEVENTSDUMP`) were skipped by `U` because they carry `NoUndoMarker`. `SVHELLO`
+  was not skipped (rule 5).
+- The `CommandWillStart`/`CommandEnded` pairs for script commands, including `U`, fire in
+  Core Console. `CommandCancelled`, `CommandFailed` and `DocumentActivated` did not occur
+  in this script.
+- The `AcDbSortentsTable` lines with `cmd=(none)` come right after `CommandEnded` of every
+  alignment edit and every alignment undo.
+- Control: after `SVPROBEEVENTSOFF`, an append recorded `0 line(s)`, so the unsubscribe is
+  complete.
+- Not measured headless, because a script cannot produce them: grip edits, Alignment
+  Layout Tools edits, frame and match-line grips, data-shortcut synchronize, and `Idle` in
+  acad.exe. Dan's run (C.4) covers them.
+
+### C.4 P15 interactive half (coded, waiting for Dan)
+
+`SVPROBEEVENTS` attaches to every open document and to any document activated later. It
+detaches a document on `DocumentToBeDestroyed`, and `SVPROBEEVENTSOFF` detaches
+everything. Handlers only record: they never open other objects or write to the editor
+(the 6.11 rule). `SVPROBEMARK <text>` writes a marker line so Dan's log reads in sections.
+The steps (grip PI, `U`, Layout Tools, frame grips, match-line grip, optional surface
+edit, save, then synchronize in the referencing drawing) and the pass criteria are part 4
+of `docs/dan-probe-steps.md`. The answer L2 needs from that log: the command name of each
+grip edit and of a synchronize; which RX classes they modify (alignment, view frame, match
+line, view frame group, reference objects); and whether `Idle` fires once after each
+command end in acad.exe.
+
+### C.5 P21: modeless WPF on .NET 10 (coded, waiting for Dan)
+
+`SVPROBEUI` (`src/SheetVol.UI/Probe/`) opens a resizable window built in code, so the probe
+still opens if compiled XAML fails to load. A separate XAML `UserControl`
+(`ProbeXamlPanel.xaml`) tests compiled XAML from a NETLOADed assembly. The window logs
+everything to `%TEMP%\sheetvol\probeUI.log` and to a log pane, and Dan ticks what he saw;
+each tick is logged. Routes, and the reference for each:
+
+| Question | Route in the probe | Reference |
+|---|---|---|
+| Show the window | `Application.ShowModelessWindow(window)`, which binds to `Core.Application.ShowModelessWindow(System.Windows.Window)` in AcCoreMgd (rule 8). Logs owner handle vs `Core.Application.MainWindow.Handle`, `System.Windows.Application.Current`, thread, apartment | AcCoreMgd and AcMgd 2025 metadata (MEASURED); AutoCAD .NET Developer's Guide, modeless windows (the guide's topic, not re-opened this session) |
+| Database work from a button | R0: no lock (the control; `eLockViolation` expected). R1: `Document.LockDocument()`. R2: `DocumentCollection.ExecuteInCommandContextAsync(Func<object, Task>, object)`, writing first without an explicit lock, then under `LockDocument()` if that throws. R3: `Document.SendStringToExecute(command, activate, wrapUpInactiveDoc, echoCommand)` queuing the registered command `SVPROBEUI_WRITE`. Each writes one Xrecord under `NOD/SHEETVOL_PROBE/P21_R<n>` and logs `LockMode()`, `LockMode(bIncludeMyLocks)`, `CommandInProgress`, `IsApplicationContext`, `Editor.IsQuiescent` and `CMDACTIVE` before, inside and after | Signatures and parameter names from AcCoreMgd 2025 metadata (MEASURED); ExecuteInCommandContextAsync exception caution from the Autodesk forum (rule 9) |
+| Colour theme | `COLORTHEME` (0 dark, 1 light) read via `Core.Application.GetSystemVariable`. Three signals subscribed: `Core.Application.SystemVariableChanged`; `Autodesk.Windows.ComponentManager.PropertyChanged` (an `EventHandler<PropertyChangedEventArgs>`) with `CurrentTheme`; `Autodesk.AutoCAD.Internal.ActiveThemeColor.ColorThemeChanged`, observed only (Internal namespace, unsupported, not for the product). Whichever first sees a change restyles by swapping the window's merged `ResourceDictionary`; every brush is a `DynamicResource`, in code and in the XAML panel (E908) | AcCoreMgd, AcMgd and AdWindows 2025 metadata (MEASURED) |
+| Command active (E905) | Counter from `Document.CommandWillStart`/`Ended`/`Cancelled`/`Failed` on the followed document; `DocumentCollection.DocumentLockModeChanged` logged alongside; `CMDACTIVE` and `CommandInProgress` logged for comparison. Work buttons are disabled while the counter is above 0. A drift guard on `Application.Idle` resets the counter, and logs it, when no command is in progress | AcCoreMgd 2025 metadata (MEASURED) |
+| Highlight (E911) | `Entity.Highlight()`/`Unhighlight()` under `LockDocument()`; a red `Polyline` added with `TransientManager.CurrentTransientManager.AddTransient(..., TransientDrawingMode.DirectTopmost, 128, ...)`. `TransientManager` is in AcDbMgd, not AcMgd (MEASURED). Pick through `ExecuteInCommandContextAsync` with `Editor.GetEntity`, falling back to the command `SVPROBEUI_PICK` on `PromptStatus.Error` or an exception. Cleared on Clear and on close. Ids are forgotten on `DocumentToBeDestroyed` and on close, and a transient that cannot be erased stays referenced, never finalized | AcDbMgd and AcCoreMgd 2025 metadata (MEASURED) |
+| DPI and size (E909) | `VisualTreeHelper.GetDpi`, `CompositionTarget.TransformToDevice`, user32 `GetDpiForWindow`, thread and window DPI awareness, `Window.DpiChanged`; size logged on open, on first render, after each resize settles and on demand. `MinWidth`/`MinHeight` enforced; the controls scroll above a fixed log pane, so a small window clips by scaling only, never by layout. A reopen shows whether the one-argument `ShowModelessWindow` restores size and position | WPF (.NET 10) |
+
+Checked without AutoCAD: the solution builds with 0 errors. The BAML resource
+`probe/probexamlpanel.baml` is embedded in `SheetVol.UI.dll` (resource
+`SheetVol.UI.g.resources`). An independent read-only review of the window code found no
+crash or hang on the scripted path, and its eight confirmed findings were fixed before
+commit (pick fallback on `PromptStatus.Error`, guarded callbacks, ids forgotten before a
+drawing closes, transients never disposed while held, cleanup when `ShowModelessWindow`
+throws, the E911 message only when something was cleared, keyboard focus in the steps,
+the NETLOAD path wording). Nothing in this section has run in acad.exe. Dan's steps and
+pass criteria are part 1 of `docs/dan-probe-steps.md`.
+
+### C.6 P14: view frame geometry (coded, waiting for Dan's fixtures)
+
+**Cannot be run until Dan provides the view-frame drawing pair (HANDOFF.md section 13).**
+The API cannot create view frames. On `blank-c3d.dwg` the probe reports
+`CivilDocument.GetViewFrameGroupIds(): 0` and inspects the layouts only.
+
+**API surface (MEASURED from AeccDbMgd 2025 metadata, matching
+[civapidocs 2026 ViewFrame](https://civapidocs.com/2026/a7752a5d-4a88-8c86-7321-4c3f3fbbe46e.htm)):**
+
+- Groups come from `CivilDocument.GetViewFrameGroupIds()`.
+- `ViewFrameGroup` has `GetViewFrameIds()`, `GetMatchLineIds()` and label-style members.
+- `ViewFrame` declares `StartStation`, `EndStation`, `AlignmentId`, `GroupId`, `Sheet`,
+  `SheetSet`, `IsLabelVisible`, `LabelStyleId` and `LabelAnchorPosition`, and no
+  methods. `Name` and the reference flags are inherited.
+- `MatchLine` declares `Station`, `Number`, `AlignmentId`, `GroupId` and left and right
+  label members.
+- All three derive from `Autodesk.Civil.DatabaseServices.GeoEntity`. None has geometry,
+  corner or rotation members (5.1 confirmed).
+
+**What `SVPROBEFRAMES` does:**
+
+- Prints every group, frame and match line with stations (raw, and displayed through
+  `GetStationStringWithEquations`), alignment, `Sheet` and `SheetSet` (raw, so the format
+  is the answer), reference flags and `GetReferenceInfo` on references.
+- Explodes each frame and match line recursively (frame, block reference, polyline,
+  lines), printing every primitive with its endpoints.
+- Chains the first four consecutive segments that close square into the frame rectangle.
+  It then solves center, rotation, width and height twice: by the 5.2 hypothesis (first
+  edge is the top edge, left to right), with a HOLDS / DOES NOT HOLD verdict, and
+  independently (the edge most parallel to the alignment at mid-frame, on its left,
+  oriented with increasing station).
+- Reports the corners as station and offset, the E712 first and last frame stations
+  against the alignment, and each join (frame end, next frame start, match line station).
+- Inspects every layout's viewports with their XData and extension dictionaries, in this
+  drawing and in a sheet drawing that a frame's `Sheet` names (opened read-only as a side
+  database).
+- For the layout a frame's `Sheet` names, compares the nearest floating viewport's
+  `TwistAngle` with −rotation (6.6), its model center with the solved center, and its
+  `CustomScale` with viewport width ÷ frame width (E708).
+
+**Solver self-check (MEASURED, `probeC-solvecheck.scr`).** An in-memory rectangle
+polyline with known center, rotation and size, exploded and solved exactly as a frame
+would be. It proves the probe's arithmetic, not P14:
+
+```text
+case 'S, top edge first, left to right': expected center (1000, 0) rotation 0 deg width 800 height 300; hypothesis should HOLD
+    hypothesis HOLDS: runs with increasing station=True, lies left of the alignment (top of the sheet)=True
+    independent solution (mid-frame station 1000, tangent 0 deg): top edge = rectangle edge 0; center (1000, 0, 0) rotation 0 deg width 800 height 300
+case 'S, top edge first, left to right': hypothesis verdict HOLDS, independent solution solved: PASS
+case 'S, bottom edge first, right to left': expected center (1000, 0) rotation 0 deg width 800 height 300; hypothesis should NOT HOLD
+    hypothesis DOES NOT HOLD: runs with increasing station=False, lies left of the alignment (top of the sheet)=False
+    independent solution (mid-frame station 1000, tangent 0 deg): top edge = rectangle edge 2; center (1000, 0, 0) rotation 0 deg width 800 height 300
+case 'S, bottom edge first, right to left': hypothesis verdict DOES NOT HOLD, independent solution solved: PASS
+case 'K second leg, top edge first, left to right': expected center (629.903811, -75) rotation -30 deg width 800 height 300; hypothesis should HOLD
+    hypothesis HOLDS: runs with increasing station=True, lies left of the alignment (top of the sheet)=True
+    independent solution (mid-frame station 650, tangent -30 deg): top edge = rectangle edge 0; center (629.903811, -75, 0) rotation -30 deg width 800 height 300
+case 'K second leg, top edge first, left to right': hypothesis verdict HOLDS, independent solution solved: PASS
+SOLVECHECK: all cases PASS
+```
+
+**Viewport control (MEASURED, `probeC-frames-control.scr` on FX's code-built template
+layout).** This is what a plain AutoCAD viewport carries, the baseline against which a
+Create Sheets "Plan" viewport's marker will stand out:
+
+```text
+[this drawing] layout 'SV-SHEET' tab 3 h=6C6 plot style ''
+  paper space contents: AcDbBlockReference 1, AcDbViewport 2
+  viewport [0] (first in the block: AutoCAD's overall viewport slot) h=6CC Number=-1 layer=0 size 15.876947 x 8.993 at (5.303149, 3.580709, 0) CustomScale=1 StandardScale=Scale1To1 TwistAngle=0 deg ViewTarget=(0, 0, 0) ViewCenter=(5.303149, 3.580709) model center (5.303149, 3.580709, 0) NonRectClipOn=False clip=0 Locked=False On=True
+    viewport XData: (1001 ACAD) (1000 MVIEW) (1002 {) (1070 16) (1010 (0,0,0)) (1010 (0,0,1)) (1040 0) (1040 8.99299974576695) (1040 5.303149486151268) (1040 3.580708541269378) (1040 50) (1040 0) (1040 0) (1070 0) (1070 1000) (1070 1) (1070 1) (1070 0) (1070 0) (1070 0) (1070 0) (1040 0) (1040 0) (1040 0) (1040 0.5) (1040 0.5) (1040 0.5) (1040 0.5) (1070 0) (1002 {) (1002 }) (1002 })
+    viewport extension dictionary 6CD: 1 entry
+    viewport   'ASDK_XREC_ANNOTATION_SCALE_INFO': Xrecord (90 1) (340 (1977738329968))
+  viewport [1] h=6D4 Number=-1 layer=SV-VPORT size 12 x 5 at (7, 4.5, 0) CustomScale=0.02 StandardScale=Scale1To50 TwistAngle=0 deg ViewTarget=(0, 0, 0) ViewCenter=(0, 0) model center (0, 0, 0) NonRectClipOn=False clip=0 Locked=False On=True
+    viewport XData: (1001 ACAD) (1000 MVIEW) (1002 {) (1070 16) (1010 (0,0,0)) (1010 (0,0,1)) (1040 0) (1040 250) (1040 0) (1040 0) (1040 50) (1040 0) (1040 0) (1070 0) (1070 1000) (1070 1) (1070 1) (1070 0) (1070 0) (1070 0) (1070 0) (1040 0) (1040 0) (1040 0) (1040 0.5) (1040 0.5) (1040 0.5) (1040 0.5) (1070 0) (1002 {) (1002 }) (1002 })
+    viewport extension dictionary: none
+registered applications (14): ACAD, AcadAnnoPO, AcadAnnotative, ACAD_DSTYLE_DIMJAG, ACAD_DSTYLE_DIMTALN, ACAD_MLEADERVER, ACAD_NAV_VCDISPLAY, ACAD_PSEXT, AcMapDMDisplayStyleRegapp, ADE, ADE_PROJECTION, AeccLand130, DCO15, MapGWS
+```
+
+A plain viewport carries only AutoCAD's `ACAD`/`MVIEW` XData, plus an annotation-scale
+Xrecord on the viewport that was activated. Whatever Create Sheets adds (an `Aecc*`
+registered application, XData, or an extension-dictionary entry) is the "Plan" marker.
+
+**What L1 gets once the fixtures exist (section 7.7):**
+
+- whether `Explode` reads native and reference frames (E707, stop condition 12.3);
+- the frame rectangle and the hypothesis verdict (E701);
+- whether frame stations equal match-line stations, and how the first and last frames end
+  (E702, E712);
+- the frame-to-viewport twist and scale relation (E708);
+- the `Sheet` string format and how a Plan viewport is marked (E709, E710, `SVADOPT`);
+- whether reference frames behave the same (E705).
+
+### C.7 Open items and what remains
+
+| Item | Status | Needs |
+|---|---|---|
+| P21 in acad.exe | OPEN (coded) | Dan: `docs/dan-probe-steps.md` parts 0 and 1, about 10 min; send `probeUI.log` |
+| P14 | OPEN (coded; solver self-checked) | Dan: the three fixture drawings, part 2. Then anyone runs part 3 headless |
+| P15 interactive half | OPEN (headless half MEASURED) | Dan: part 4 on the fixtures; send `probeEvents.log` |
+| `SheetVol.UI.dll` not staged by `tools/test-headless.ps1` | WORKAROUND in part 0 | Orchestrator: stage the UI project's output too (the runner is not S3's) |
+| AeccUiMgd events (`AeccReferenceStatusUtils.ReferenceStatusChanged` and others) | NOT EXPLORED | Only if L2 finds Database events insufficient for synchronize; UI-only assembly, undocumented |
+| `Idle` in acad.exe | OPEN | Dan's P15 run |

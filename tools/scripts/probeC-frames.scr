@@ -1,0 +1,4 @@
+(command "_.NETLOAD" (getenv "SHEETVOL_DLL"))
+SVPROBEFRAMES
+_.QUIT
+_Y
