@@ -1,0 +1,6 @@
+(progn (vl-load-com) (setq svp9-mgd (strcat (vl-filename-directory (findfile "accore.dll")) "/C3D/AeccDbMgd.dll")) (princ (strcat "\nP9 NETLOAD first: " svp9-mgd " found=" (if (findfile svp9-mgd) "yes" "no"))) (command "_.NETLOAD" svp9-mgd) (princ))
+(command "_.NETLOAD" (getenv "SHEETVOL_DLL"))
+SVHELLO
+SVPROBEA_P9
+_.QUIT
+_Y

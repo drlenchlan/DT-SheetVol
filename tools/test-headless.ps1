@@ -3,9 +3,15 @@
   Run a SheetVol .scr in Civil 3D Core Console (accoreconsole.exe) with a hard timeout.
 
 .DESCRIPTION
-  Starting form from Wave 0 (HANDOFF.md section 11). S1 replaces the switches with
-  what probe P9 proves. Invocation pattern copied from the Sheet Set Editor's
-  AccoreConsole.RunScript, which is live-proven on Civil 3D 2026.2:
+  Switches are what probe P9 proved (docs/api-findings.md A.12, MEASURED 2026-11-05 on
+  Civil 3D 2026.2.3): /i <drawing> /s <script> /product C3D /l en-US. TIN surfaces,
+  volume surfaces and alignments are created headless with these. /product C3D is kept
+  but is not required on this seat: without it the AECC modules demand-load when the
+  drawing holds Civil objects, or when the script NETLOADs this DLL (it references
+  AeccDbMgd). A prior NETLOAD of AeccDbMgd.dll and /ld AecBase.dbx are not needed;
+  both were measured and change nothing. /isolate is not used (it hung, NOW.md X3).
+  Invocation pattern copied from the Sheet Set Editor's AccoreConsole.RunScript, which
+  is live-proven on Civil 3D 2026.2:
     - stdin is redirected and closed, so an unanswered prompt reads EOF instead
       of hanging on the parent's console;
     - LAN_DT_BATCH=1 keeps the LAN DT Framework's per-open hooks silent in the
@@ -29,6 +35,10 @@
   Omit /product C3D (passed by default).
 .PARAMETER LogPath
   Where the decoded console output is written. Default: $env:TEMP\sheetvol\<script>.log.
+.PARAMETER ExtraArgs
+  Appended verbatim to the accoreconsole command line, for measurements such as P9's
+  /ld test. Quote paths with spaces yourself, e.g.
+  -ExtraArgs '/ld "C:\Program Files\Autodesk\AutoCAD 2026\ACA\AecBase.dbx"'
 
 .EXAMPLE
   .\tools\test-headless.ps1 -Script .\tools\scripts\p16.scr -Drawing "C:\Program Files\Autodesk\AutoCAD 2026\UserDataCache\Template\map2d.dwt"
@@ -42,7 +52,8 @@ param(
     [switch]$NoProduct,
     [string]$LogPath,
     [string]$BuildDir,
-    [string]$Configuration = 'Debug'
+    [string]$Configuration = 'Debug',
+    [string]$ExtraArgs
 )
 
 $ErrorActionPreference = 'Stop'
@@ -101,6 +112,7 @@ if ($Drawing) { $argList += '/i'; $argList += "`"$Drawing`"" }
 $argList += '/s'; $argList += "`"$Script`""
 if (-not $NoProduct) { $argList += '/product'; $argList += 'C3D' }
 $argList += '/l'; $argList += 'en-US'
+if ($ExtraArgs) { $argList += $ExtraArgs }   # verbatim; quote paths with spaces yourself
 
 $psi = New-Object System.Diagnostics.ProcessStartInfo
 $psi.FileName = $HostExe
