@@ -98,6 +98,10 @@ $psi = New-Object System.Diagnostics.ProcessStartInfo
 $psi.FileName = $HostExe
 $psi.Arguments = ($args -join ' ')
 $psi.UseShellExecute = $false
+# The LAN Framework's acad.lsp writes a <drawing>_<id>.log into the process's
+# working directory. Keep those out of the repo (MEASURED 2026-11-05: nine of
+# them landed in the first commit).
+$psi.WorkingDirectory = Split-Path $LogPath -Parent
 $psi.CreateNoWindow = $true
 $psi.RedirectStandardOutput = $true
 $psi.RedirectStandardInput = $true

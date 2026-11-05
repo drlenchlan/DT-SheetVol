@@ -13,3 +13,4 @@ Thumbs.db
 *.dwl
 *.dwl2
 selftest-result.json
+*.log
