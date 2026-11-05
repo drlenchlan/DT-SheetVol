@@ -1,0 +1,5 @@
+(command "_.NETLOAD" (getenv "SHEETVOL_DLL"))
+SVHELLO
+SVPROBEA_P9
+_.QUIT
+_Y
