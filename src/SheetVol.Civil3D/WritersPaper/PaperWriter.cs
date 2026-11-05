@@ -71,6 +71,7 @@ public sealed class PaperWriter
         if (run.RunId == Guid.Empty) p.Add(new Problem(PaperCodes.WriterFailed, Severity.Error, "Paper run request has an empty run id."));
 
         var seen = new HashSet<Guid>();
+        var toAdd = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);   // annotation scales this run will add, by name
         foreach (var s in run.Sheets)
         {
             if (!seen.Add(s.SegmentId)) p.Add(new Problem(PaperCodes.WriterFailed, Severity.Error, $"Segment {s.SegmentId} is listed twice in the paper request.", s.SegmentId));
@@ -83,6 +84,15 @@ public sealed class PaperWriter
                 p.Add(new Problem(ViewProblemCodes.InvalidScale, Severity.Error, $"Segment {s.SegmentId}: scale {v.ModelUnitsPerPaperUnit:R} model units per paper unit is not a positive number.", s.SegmentId));
             else if (_viewports.ScaleNameCollision(db, v.ModelUnitsPerPaperUnit, s.SegmentId) is { } collision)
                 p.Add(collision);
+            else if (_viewports.FindScale(db, v.ModelUnitsPerPaperUnit) is null)
+            {
+                string name = _config.AnnotationScaleName(v.ModelUnitsPerPaperUnit);
+                if (toAdd.TryGetValue(name, out double other) && ViewportWriter.RelativeDifference(other, v.ModelUnitsPerPaperUnit) > _config.ScaleRelativeTolerance)
+                    p.Add(new Problem(PaperCodes.AnnotationScale, Severity.Error,
+                        $"Annotation scales 1:{other:R} and 1:{v.ModelUnitsPerPaperUnit:R} are both missing and would both be named '{name}'.", s.SegmentId,
+                        "Use more decimals in annotationScaleNumberFormat, or round the scales."));
+                else toAdd[name] = v.ModelUnitsPerPaperUnit;
+            }
             if (_viewports.DesiredClip(v, new Pt(0, 0)) is { } relative
                 && (relative.Count < 3 || relative.Any(q => !double.IsFinite(q.Point.X) || !double.IsFinite(q.Point.Y) || !double.IsFinite(q.Bulge))))
                 p.Add(new Problem(PaperCodes.WriterFailed, Severity.Error, $"Segment {s.SegmentId}: the clip has {relative.Count} distinct vertices or a value that is not finite; at least 3 are needed.", s.SegmentId));
@@ -110,12 +120,11 @@ public sealed class PaperWriter
     /// <summary>Step 4: renames, creates and updates. See the file header. Throws <see cref="PaperWriterException"/> for an abort.</summary>
     public PaperApplyResult Apply(Transaction tr, Database db, PaperTemplate template, PaperRunRequest run)
     {
-        var validation = Validate(tr, db, template, run);
-        if (validation.Any(x => x.Severity == Severity.Error))
-            return new PaperApplyResult(false, [], [], null, validation, 0);
-
         try
         {
+            var validation = Validate(tr, db, template, run);
+            if (validation.Any(x => x.Severity == Severity.Error))
+                return new PaperApplyResult(false, [], [], null, validation, 0);
             using var scope = new WorkingDatabaseScope(db);
             return ApplyCore(tr, db, template, run, validation.ToList());
         }
@@ -124,7 +133,7 @@ public sealed class PaperWriter
         {
             throw new PaperWriterException(PaperCodes.WriterFailed, $"Paper writer: AutoCAD {ex.ErrorStatus}: {ex.Message}", ex);
         }
-        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or FormatException)
+        catch (Exception ex)
         {
             throw new PaperWriterException(PaperCodes.WriterFailed, $"Paper writer: {ex.GetType().Name}: {ex.Message}", ex);
         }
@@ -173,7 +182,10 @@ public sealed class PaperWriter
             return new OwnedLayout(s.SegmentId, current, requested);
         }).ToList();
         var ownedCurrent = new HashSet<string>(owned.Where(o => o.CurrentName is not null).Select(o => o.CurrentName!), StringComparer.OrdinalIgnoreCase);
-        var plan = _namer.PlanRenames(owned, allNames.Where(n => !ownedCurrent.Contains(n)));
+        // Renumbering off: existing layouts are named first, so a new sheet's pattern name can
+        // never take an existing layout's name and push it into a rename (stable order otherwise).
+        var ordered = _config.RenumberLayouts ? owned : owned.OrderBy(o => o.CurrentName is null).ToList();
+        var plan = _namer.PlanRenames(ordered, allNames.Where(n => !ownedCurrent.Contains(n)));
         problems.AddRange(plan.Problems);
 
         var renamed = new HashSet<Guid>();
@@ -186,7 +198,7 @@ public sealed class PaperWriter
             fresh[c.SegmentId] = CloneLayout(tr, template, c.Name, writes, problems, c.SegmentId);
 
         // 4. Content per sheet.
-        var finalNames = plan.Assignments.ToDictionary(a => run.Sheets[a.Index].SegmentId, a => a.Final);
+        var finalNames = plan.Assignments.ToDictionary(a => ordered[a.Index].SegmentId, a => a.Final);
         var results = new List<PaperSheetResult>();
         foreach (var s in run.Sheets)
         {
@@ -211,7 +223,7 @@ public sealed class PaperWriter
             ObjectId vpId = layoutFresh ? made.PlanViewport : FindTagged<Viewport>(tr, block, run.RunId, s.SegmentId, OwnedRole.Viewport, sheetProblems, layoutName);
             if (vpId.IsNull)
             {
-                vpId = ClonePlanViewport(tr, template, block.ObjectId, writes);
+                vpId = ClonePlanViewport(tr, template, block.ObjectId, writes, sheetProblems);
                 vpFresh = true;
                 sheetProblems.Add(new Problem(PaperCodes.OwnedObjectRecreated, Severity.Info,
                     $"Layout '{layoutName}' had no plan viewport of this run; one was cloned from the template.", s.SegmentId));
@@ -253,7 +265,7 @@ public sealed class PaperWriter
             if (s.Table is { } model)
             {
                 tableId = _tables.Find(tr, block, run.RunId, s.SegmentId, PaperTableWriter.Qualifier(model), sheetProblems);
-                var anchorPt = tableId.IsNull ? LayoutAnchor(tr, block) ?? template.TableAnchor : default;
+                var anchorPt = tableId.IsNull ? LayoutAnchor(tr, block, sheetProblems, layoutName, s.SegmentId) ?? template.TableAnchor : default;
                 tableChange = _tables.Apply(tr, db, block, ref tableId, model, anchorPt, layoutFresh, run.RunId, s.SegmentId, writes, sheetProblems, layoutName);
             }
 
@@ -308,8 +320,8 @@ public sealed class PaperWriter
         using var map = new IdMapping();
         template.Source.WblockCloneObjects(new ObjectIdCollection(template.CloneIds.ToArray()), layout.BlockTableRecordId, map, DuplicateRecordCloning.Ignore, false);
         writes.Add();
-        var planId = ReplaceWithNewViewport(tr, map[template.PlanViewportId].Value, writes);
-        foreach (var on in template.OtherViewportsOn) ReplaceWithNewViewport(tr, map[on].Value, writes);   // E602: shown as in the template, never driven
+        var planId = ReplaceWithNewViewport(tr, map[template.PlanViewportId].Value, writes, problems);
+        foreach (var on in template.OtherViewportsOn) ReplaceWithNewViewport(tr, map[on].Value, writes, problems);   // E602: shown as in the template, never driven
         trS.Commit();
         FitOverallView(tr, layout, overall, writes);
         return (layoutId, planId);
@@ -326,7 +338,7 @@ public sealed class PaperWriter
     /// everything the viewport references (layers, frozen-layer list, visual style, clip
     /// entity), so the copy below only moves ids that already exist in this drawing.
     /// </summary>
-    private static ObjectId ReplaceWithNewViewport(Transaction tr, ObjectId cloneId, WriteCounter writes)
+    private static ObjectId ReplaceWithNewViewport(Transaction tr, ObjectId cloneId, WriteCounter writes, List<Problem> problems)
     {
         var clone = (Viewport)tr.GetObject(cloneId, OpenMode.ForWrite, false, true);
         var owner = (BlockTableRecord)tr.GetObject(clone.OwnerId, OpenMode.ForWrite);
@@ -357,16 +369,29 @@ public sealed class PaperWriter
         vp.UcsPerViewport = clone.UcsPerViewport;
         var frozen = clone.GetFrozenLayers();
         if (frozen.Count > 0) vp.FreezeLayersInViewport(frozen.Cast<ObjectId>().ToList().GetEnumerator());
-        if (!clone.NonRectClipEntityId.IsNull && !clone.NonRectClipEntityId.IsErased)
+        var clipId = clone.NonRectClipEntityId;
+        if (!clipId.IsNull && !clipId.IsErased)
         {
-            vp.NonRectClipEntityId = clone.NonRectClipEntityId;
+            // The new viewport gets its own copy of the template's clip. MEASURED (E802 check):
+            // erasing a clipped viewport through the API erases its clip entity too, so sharing
+            // the clone's clip would lose it when the clone is erased below.
+            var original = (Entity)tr.GetObject(clipId, OpenMode.ForWrite, false, true);
+            var copy = (Entity)original.Clone();
+            owner.AppendEntity(copy);
+            tr.AddNewlyCreatedDBObject(copy, true);
+            vp.NonRectClipEntityId = copy.ObjectId;
             vp.NonRectClipOn = clone.NonRectClipOn;
+            original.Erase();
         }
         var scale = PaperViewMath.SafeAnnotationScale(clone);
         if (scale is not null)
         {
             try { vp.AnnotationScale = scale; }
-            catch (Autodesk.AutoCAD.Runtime.Exception) { }   // a scale AutoCAD cannot assign here is left at the default; the plan viewport gets its scale from ApplyView
+            catch (Autodesk.AutoCAD.Runtime.Exception ex)
+            {
+                problems.Add(new Problem(PaperCodes.AnnotationScale, Severity.Info,
+                    $"Template viewport {clone.Handle}: its annotation scale '{scale.Name}' could not be assigned to the copy ({ex.ErrorStatus}); the copy has the drawing's default annotation scale."));
+            }
         }
         vp.Locked = clone.Locked;
         clone.Erase();
@@ -411,12 +436,12 @@ public sealed class PaperWriter
     }
 
     /// <summary>Clones the template's plan viewport alone into an existing layout (its owned viewport was erased).</summary>
-    private static ObjectId ClonePlanViewport(Transaction tr, PaperTemplate template, ObjectId blockId, WriteCounter writes)
+    private static ObjectId ClonePlanViewport(Transaction tr, PaperTemplate template, ObjectId blockId, WriteCounter writes, List<Problem> problems)
     {
         using var map = new IdMapping();
         template.Source.WblockCloneObjects(new ObjectIdCollection([template.PlanViewportId]), blockId, map, DuplicateRecordCloning.Ignore, false);
         writes.Add();
-        return ReplaceWithNewViewport(tr, map[template.PlanViewportId].Value, writes);
+        return ReplaceWithNewViewport(tr, map[template.PlanViewportId].Value, writes, problems);
     }
 
     /// <summary>The run's tagged object of a role on a layout, lowest handle first; Null when none.</summary>
@@ -439,8 +464,8 @@ public sealed class PaperWriter
         return keep.ObjectId;
     }
 
-    /// <summary>The insertion point of the layout's own table anchor reference, or null.</summary>
-    private Pt? LayoutAnchor(Transaction tr, BlockTableRecord block)
+    /// <summary>The insertion point of the layout's own table anchor reference, or null (the template's anchor is then used, with a note when the layout has several).</summary>
+    private Pt? LayoutAnchor(Transaction tr, BlockTableRecord block, List<Problem> problems, string layoutName, Guid segmentId)
     {
         var cls = Autodesk.AutoCAD.Runtime.RXObject.GetClass(typeof(BlockReference));
         var points = new List<Pt>();
@@ -451,6 +476,9 @@ public sealed class PaperWriter
                 && string.Equals(PaperTemplate.EffectiveName(tr, br), _placement.TableAnchorBlock, StringComparison.OrdinalIgnoreCase))
                 points.Add(new Pt(br.Position.X, br.Position.Y));
         }
+        if (points.Count > 1)
+            problems.Add(new Problem(PaperCodes.TableRecreated, Severity.Info,
+                $"Layout '{layoutName}' has {points.Count} '{_placement.TableAnchorBlock}' references; the table is placed at the template's anchor instead.", segmentId));
         return points.Count == 1 ? points[0] : null;
     }
 

@@ -79,6 +79,7 @@ public static partial class PaperCheckCommands
 
         // ---------- the E-rows (PaperCheckRows.cs)
         E602Largest(db);
+        E602Clipped(db);
         E6Rows(db, writer, template);
         E608ClipRows(db, writer, template);
         E605Rows(db, writer, template);
@@ -229,7 +230,11 @@ public static partial class PaperCheckCommands
     }
 
     /// <summary>A template viewport that is neither the overall nor the plan viewport: where it sits and what it shows.</summary>
-    internal sealed record OtherViewport(string Handle, Pt Center, double Width, double Height, Pt Target, double Scale, double Twist, bool On);
+    internal sealed record OtherViewport(string Handle, Pt Center, double Width, double Height, Pt Target, double Scale, double Twist, bool On, int ClipVertices);
+
+    /// <summary>Vertex count of the viewport's clip polyline when the clip is on and the entity alive; -1 otherwise.</summary>
+    internal static int ClipVertexCount(Transaction tr, Viewport v)
+        => v.NonRectClipOn && !v.NonRectClipEntityId.IsNull && !v.NonRectClipEntityId.IsErased && tr.GetObject(v.NonRectClipEntityId, OpenMode.ForRead) is Polyline pl ? pl.NumberOfVertices : -1;
 
     /// <summary>The template's other floating viewports, read from the template's side database.</summary>
     internal static IReadOnlyList<OtherViewport> TemplateOthers(PaperTemplate template)
@@ -239,7 +244,7 @@ public static partial class PaperCheckCommands
         foreach (var h in template.OtherViewportHandles)
         {
             var v = (Viewport)tr.GetObject(Id(template.Source, h), OpenMode.ForRead);
-            list.Add(new OtherViewport(h, new Pt(v.CenterPoint.X, v.CenterPoint.Y), v.Width, v.Height, new Pt(v.ViewTarget.X, v.ViewTarget.Y), v.CustomScale, v.TwistAngle, v.On));
+            list.Add(new OtherViewport(h, new Pt(v.CenterPoint.X, v.CenterPoint.Y), v.Width, v.Height, new Pt(v.ViewTarget.X, v.ViewTarget.Y), v.CustomScale, v.TwistAngle, v.On, ClipVertexCount(tr, v)));
         }
         tr.Commit();
         return list;
@@ -259,9 +264,9 @@ public static partial class PaperCheckCommands
             var t = template.FirstOrDefault(o => Dist(o.Center, new Pt(v.CenterPoint.X, v.CenterPoint.Y)) <= 1e-9);
             bool ok = t is not null && Math.Abs(v.Width - t.Width) <= 1e-9 && Math.Abs(v.Height - t.Height) <= 1e-9
                       && Dist(new Pt(v.ViewTarget.X, v.ViewTarget.Y), t.Target) <= 1e-9 && Math.Abs(v.CustomScale - t.Scale) <= 1e-12 * t.Scale
-                      && PaperViewMath.AngleDifference(v.TwistAngle, t.Twist) <= 1e-12 && v.Number != 1;
+                      && PaperViewMath.AngleDifference(v.TwistAngle, t.Twist) <= 1e-12 && v.Number != 1 && ClipVertexCount(tr, v) == t.ClipVertices;
             if (activated && t is not null) ok &= t.On ? v.On && v.Number >= 2 : !v.On;
-            Expect($"{label} other viewport untouched", ok, $"{VpLine(tr, v)}; template {t?.Handle ?? "none"} target {(t is null ? "-" : P(t.Target))} customScale {(t is null ? "-" : F(t.Scale))} on={t?.On}");
+            Expect($"{label} other viewport untouched", ok, $"{VpLine(tr, v)}; template {t?.Handle ?? "none"} target {(t is null ? "-" : P(t.Target))} customScale {(t is null ? "-" : F(t.Scale))} on={t?.On} clipVertices={t?.ClipVertices}");
         }
     }
 

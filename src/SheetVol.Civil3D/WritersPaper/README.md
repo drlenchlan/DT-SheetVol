@@ -43,7 +43,7 @@ PaperApplyResult result = paper.Apply(tr, db, template, request);
 ## Settings (`PaperConfig`; the table anchor name comes from `ReportConfig.Placement`)
 
 | Key | Default | Note |
-|---|---|---|
+| --- | --- | --- |
 | `templatePath` | none | DWT, or a DWG holding the layout; read with ReadDwgFile. Empty = E601 |
 | `templateLayout` | none | Layout to clone. Empty = E601 |
 | `planViewportLayer` | `SV-VPORT` | 6.7; else the largest floating viewport (Info E602) |
@@ -76,7 +76,10 @@ A2 tags model-space objects too; the two formats should become one at the A2/A3 
    entered by `_.MSPACE` after first activation (number -1, or taken over as number 1 with the
    paper-space view). A new Viewport carrying the clone's properties got number 2 and kept its view.
    Other viewports that are on in the template are replaced the same way; ones that are off stay clones (off).
-   Evidence: `tools/scripts/writersPaperNumbering.scr`, cases R1 to R8.
+   A template clip goes with the replacement as its own copy: erasing a clipped viewport through the
+   API erases its clip entity too (E802 check), so a shared clip would vanish with the erased clone.
+   Evidence: `tools/scripts/writersPaperNumbering.scr`, cases R1 to R8; `SV-T-CLIPPED` and the clipped
+   key map in `writersPaper.scr`.
 3. **Paper-space view of a new layout.** `Layout.Initialize()` leaves the overall view at a fixed window
    (centre (16.83, 12.00), height 7.857, with or without a paper size). A viewport outside it is not
    entered. The writer fits the overall view to the cloned content.
@@ -93,6 +96,10 @@ A2 tags model-space objects too; the two formats should become one at the A2/A3 
    (`GetTextString(IgnoreMtextFormat)`), so cell formatting the user added to an unchanged value stays.
 10. Force-open (`GetObject(id, ForWrite, false, true)`) updates objects on locked layers; the layer stays locked (E504, E604).
 
+Not checked: multiline (MText) title-block attributes. The fill compares and sets `TextString`; if
+that returns formatting codes for an MText attribute, the attribute is rewritten on every regen
+(E811) and may not refresh. Add one to the PREP title block before relying on it.
+
 Not measured: any of this in full Civil 3D (acad.exe). One manual open of `%TEMP%\sheetvol\a3-t18.dwg`,
 clicking T18-1 and T18-2, closes it: the band and its clip should fill the plan viewport, the key map
 at the right should show, and double-clicking inside the plan viewport should enter it.
@@ -105,7 +112,7 @@ at the right should show, and double-clicking inside the plan viewport should en
 .\tools\test-headless.ps1 -Script .\tools\scripts\writersPaperNumbering.scr
 ```
 
-`SVWRITERSPAPER <step>`; every evidence line starts with `A3 `, a failed expectation prints `FAIL`,
+`SVWRITERSPAPER <step>`; every evidence line starts with `A3`, a failed expectation prints `FAIL`,
 a probe-step failure prints `SV-E197`. The first script builds FX's template in the open drawing,
 adds a title block and two key maps (PREP), saves it as `%TEMP%\sheetvol\a3-template.dwg`, then runs
 E601, E501, T18, the P12 checks, E811 and the E-rows, saves `a3-t18.dwg` and reads it back, then

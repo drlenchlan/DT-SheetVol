@@ -147,8 +147,8 @@ internal sealed class PaperTableWriter(PaperConfig config)
         {
             structural = true;
             int added = 0, removed = 0;
-            bool reshaped = stored is not null && stored.Count == t.Rows.Count && t.Columns.Count == model.ColumnCount
-                            && Reshape(t, stored, keys, out added, out removed);
+            bool handEdited = stored is null || stored.Count != t.Rows.Count || t.Columns.Count != model.ColumnCount;
+            bool reshaped = !handEdited && Reshape(t, stored!, keys, out added, out removed);
             if (reshaped)
             {
                 if (added + removed > 0)
@@ -158,8 +158,11 @@ internal sealed class PaperTableWriter(PaperConfig config)
             else
             {
                 Rebuild(t, model);
-                problems.Add(new Problem(PaperCodes.TableRebuilt, Severity.Warning,
-                    $"The rows or columns of the sheet table on layout '{layoutName}' were changed by hand; it was rebuilt in place, keeping its position, style and layer.", segmentId));
+                problems.Add(handEdited
+                    ? new Problem(PaperCodes.TableRebuilt, Severity.Warning,
+                        $"The rows or columns of the sheet table on layout '{layoutName}' were changed by hand; it was rebuilt in place, keeping its position, style and layer.", segmentId)
+                    : new Problem(PaperCodes.TableResized, Severity.Warning,
+                        $"The analyses of the sheet table on layout '{layoutName}' changed order; it was rebuilt in place. Cell formats stay with row positions, so check the row formatting.", segmentId));
             }
         }
 

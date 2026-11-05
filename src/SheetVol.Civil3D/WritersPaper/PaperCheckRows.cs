@@ -38,11 +38,40 @@ public static partial class PaperCheckCommands
         tr.Commit();
     }
 
+    /// <summary>
+    /// A template whose plan viewport is clipped: with clip mode None the new viewport keeps a live
+    /// copy of the template's clip; with Boundary the copy is reshaped to the band in place.
+    /// </summary>
+    private static void E602Clipped(Database db)
+    {
+        var writer = CheckPlans.Writer(CheckPlans.Config(CheckPlans.LayoutClipped));
+        var loaded = writer.LoadTemplate();
+        if (!loaded.Succeeded) { Expect("E602 clipped template", false, string.Join(" | ", loaded.Problems.Select(p => $"{p.Code} {p.Message}"))); return; }
+        using var template = loaded.Value;
+        double w = template.PlanViewportWidth, h = template.PlanViewportHeight;
+        var none = CheckPlans.OnS("CLIP", 1, CheckPlans.SegClippedNone, 0, w, h, analyses: 0, clip: ClipMode.None);
+        var band = CheckPlans.OnS("CLIP", 2, CheckPlans.SegClippedBand, 500, w, h, analyses: 0);
+        var r = Run(db, writer, template, new PaperRunRequest(CheckPlans.RunClipped, [none.Request(), band.Request()]), out var c, out _);
+        PrintResult("E602 clipped template", r, c);
+        var a = template.PlanViewportCenter;
+        using var tr = db.TransactionManager.StartTransaction();
+        var v1 = (Viewport)tr.GetObject(Id(db, r.Sheets[0].ViewportHandle), OpenMode.ForRead);
+        var v2 = (Viewport)tr.GetObject(Id(db, r.Sheets[1].ViewportHandle), OpenMode.ForRead);
+        var l1 = PaperViewMath.ModelToPaper(v1, none.View.ModelCenter);
+        var l2 = PaperViewMath.ModelToPaper(v2, band.View.ModelCenter);
+        Expect("E602 clipped template, clip mode None", r.Succeeded && ClipVertexCount(tr, v1) == 6 && Dist(l1, a) <= 1e-9,
+            $"template plan viewport {F(w)}x{F(h)} at {P(a)}; {VpLine(tr, v1)}; model centre lands at {P(l1)}");
+        Expect("E602 clipped template, clip mode Boundary", r.Succeeded && ClipVertexCount(tr, v2) == band.View.ClipInPaper!.Count && Dist(l2, a) <= 1e-9,
+            $"{VpLine(tr, v2)}; model centre lands at {P(l2)}; plan clip {band.View.ClipInPaper!.Count} vertices");
+        tr.Commit();
+    }
+
     /// <summary>E604, E608 (move, same-view regen, re-apply, clipped ViewCenter kept, LockView), E609, E615, E503, E502, E504, E505 on sheet E6-1.</summary>
     private static void E6Rows(Database db, PaperWriter writer, PaperTemplate template)
     {
         double w = template.PlanViewportWidth, h = template.PlanViewportHeight;
-        CheckSheet At(double start, int analyses = 2, double rate = 1.0) => CheckPlans.OnS("E6", 1, CheckPlans.SegE6, start, w, h, analyses, rate);
+        CheckSheet At(double start, int analyses = 2, double rate = 1.0, bool onlySecond = false)
+            => CheckPlans.OnS("E6", 1, CheckPlans.SegE6, start, w, h, analyses, rate, onlySecond: onlySecond);
         PaperRunRequest Req(CheckSheet s, bool lockView = false) => new(CheckPlans.RunE6, [s.Request(lockView)]);
         var a0 = template.PlanViewportCenter;
 
@@ -214,6 +243,19 @@ public static partial class PaperCheckCommands
         Expect("E802 plan viewport recreated", r13.Sheets[0].Viewport == PaperChange.Created && newVp != vpId && r13.Sheets[0].Clip == PaperChange.Created && clips == 1
                 && Dist(lands13, a0) <= 1e-9 && clip13 <= 1e-9 && r13.Problems.Any(p => p.Code == PaperCodes.OwnedObjectRecreated),
             $"viewport {r13.Sheets[0].ViewportHandle} (was {vpId.Handle}), clip {r13.Sheets[0].ClipHandle} (was {clipBefore}), owned clip polylines {clips}; model centre lands at {P(lands13)} (template anchor {P(a0)}); clip |d|={E(clip13)}");
+
+        // E505 with rows inserted ahead of existing ones: the first analysis removed, then added back.
+        var s14 = At(900, analyses: 2, rate: 4.0, onlySecond: true);
+        var r14 = Run(db, writer, template, Req(s14), out var c14, out _);
+        PrintResult("E505 first analysis removed", r14, c14);
+        var (m14, d14) = TableCheck(db, tableId, s14.Table!);
+        Expect("E505 shrink at the front", r14.Sheets[0].TableHandle == tableId.Handle.ToString() && m14, d14);
+        var s15 = At(900, analyses: 2, rate: 4.0);
+        var r15 = Run(db, writer, template, Req(s15), out var c15, out _);
+        PrintResult("E505 first analysis added back", r15, c15);
+        var (m15, d15) = TableCheck(db, tableId, s15.Table!);
+        Expect("E505 grow at the front", r15.Sheets[0].TableHandle == tableId.Handle.ToString() && m15 && r15.Problems.Any(p => p.Code == PaperCodes.TableResized && p.Severity == Severity.Info),
+            $"{d15}; {r15.Problems.FirstOrDefault(p => p.Code == PaperCodes.TableResized)?.Message}");
     }
 
     /// <summary>
@@ -305,6 +347,21 @@ public static partial class PaperCheckCommands
         var orphan = r3.Orphans.FirstOrDefault(o => o.SegmentId == CheckPlans.SegRenB);
         Expect("E612", orphan is not null && lm.LayoutExists("REN-3") && LayoutCount(db) == layouts && r3.Problems.Any(p => p.Code == PaperCodes.OrphanLayout),
             $"orphan {orphan?.Name} {orphan?.Handle}: {orphan?.Reason}; layouts {layouts} -> {LayoutCount(db)}");
+
+        // RenumberLayouts off: an inserted sheet takes a free name; existing layouts keep theirs.
+        var keepWriter = CheckPlans.Writer(CheckPlans.Config() with { RenumberLayouts = false });
+        var ka = CheckPlans.OnS("KEEP", 1, CheckPlans.SegRenA, 0, w, h, analyses: 0);
+        var kb = CheckPlans.OnS("KEEP", 2, CheckPlans.SegRenB, 1000, w, h, analyses: 0);
+        var k1 = Run(db, keepWriter, template, new PaperRunRequest(CheckPlans.RunKeep, [ka.Request(), kb.Request()]), out var kc1, out _);
+        PrintResult("E307 renumber off, two sheets", k1, kc1);
+        var kc = CheckPlans.OnS("KEEP", 2, CheckPlans.SegRenC, 500, w, h, analyses: 0);
+        var kb3 = CheckPlans.OnS("KEEP", 3, CheckPlans.SegRenB, 1000, w, h, analyses: 0);
+        var k2 = Run(db, keepWriter, template, new PaperRunRequest(CheckPlans.RunKeep, [ka.Request(), kc.Request(), kb3.Request()]), out var kc2, out _);
+        PrintResult("E307 renumber off, sheet inserted", k2, kc2);
+        var kp = k2.RenamePlan!;
+        Expect("E307 renumber off", kp.FirstPass.Count == 0 && kp.SecondPass.Count == 0 && k2.Sheets[0].LayoutName == "KEEP-1" && k2.Sheets[2].LayoutName == "KEEP-2"
+                && k2.Sheets[2].LayoutHandle == k1.Sheets[1].LayoutHandle && k2.Sheets[1].Layout == PaperChange.Created && k2.Sheets[1].LayoutName != "KEEP-2",
+            $"names [{string.Join(", ", k2.Sheets.Select(s => $"{s.LayoutName} {s.LayoutHandle}/{s.Layout}"))}]; renames {kp.FirstPass.Count + kp.SecondPass.Count}; {k2.Problems.FirstOrDefault(p => p.Code == ViewProblemCodes.LayoutNameChanged)?.Message}");
     }
 
     /// <summary>E613: 60 sheets in one regen, then an unchanged regen of all 60.</summary>

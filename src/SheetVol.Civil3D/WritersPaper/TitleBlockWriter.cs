@@ -26,6 +26,7 @@ internal sealed class TitleBlockWriter(PaperConfig config)
     {
         if (values.Count == 0) return PaperChange.None;
         var found = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var constant = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var change = PaperChange.None;
 
         foreach (ObjectId id in layoutBlock)
@@ -42,8 +43,8 @@ internal sealed class TitleBlockWriter(PaperConfig config)
                 if (attId.IsErased) continue;
                 var att = (AttributeReference)tr.GetObject(attId, OpenMode.ForRead);
                 if (!values.TryGetValue(att.Tag, out var value)) continue;
+                if (att.IsConstant) { constant.Add(att.Tag); continue; }
                 found.Add(att.Tag);
-                if (att.IsConstant) continue;
                 written[att.Tag] = value;
                 if (att.TextString == value) continue;
                 att = OwnerTags.OpenForWrite<AttributeReference>(tr, attId);
@@ -55,7 +56,9 @@ internal sealed class TitleBlockWriter(PaperConfig config)
             if (written.Count == 0) continue;
 
             handles.Add(br.Handle.ToString());
-            var tag = new OwnerTag(runId, segmentId, OwnedRole.TitleAttributes, blockName,
+            // Block names run to 255 characters; an owner-tag field holds 250 (6.9).
+            string qualifier = blockName.Length <= 200 ? blockName : "sha256:" + CanonicalWriter.Hash(blockName);
+            var tag = new OwnerTag(runId, segmentId, OwnedRole.TitleAttributes, qualifier,
                 ContentSignatures.OfTexts(written.Select(kv => $"{kv.Key}={kv.Value}")), []);
             bool hadTag = OwnerTags.Read(tr, br, config.OwnerTagKey) is not null;
             if (!OwnerTags.Matches(tr, br, config.OwnerTagKey, tag))
@@ -72,9 +75,13 @@ internal sealed class TitleBlockWriter(PaperConfig config)
         }
 
         foreach (var tag in values.Keys.Where(k => !found.Contains(k)))
-            problems.Add(new Problem(PaperCodes.TitleTagMissing, Severity.Info,
-                $"Title-block attribute tag '{tag}' is not on layout '{layoutName}'; skipped.", segmentId,
-                $"Add an attribute tagged '{tag}' to the title block, or remove it from the titleAttributes map."));
+            problems.Add(constant.Contains(tag)
+                ? new Problem(PaperCodes.TitleTagMissing, Severity.Info,
+                    $"Title-block attribute '{tag}' on layout '{layoutName}' is a constant attribute and cannot be filled; skipped.", segmentId,
+                    $"Make '{tag}' a normal attribute in the title block definition.")
+                : new Problem(PaperCodes.TitleTagMissing, Severity.Info,
+                    $"Title-block attribute tag '{tag}' is not on layout '{layoutName}'; skipped.", segmentId,
+                    $"Add an attribute tagged '{tag}' to the title block, or remove it from the titleAttributes map."));
         return change;
     }
 }

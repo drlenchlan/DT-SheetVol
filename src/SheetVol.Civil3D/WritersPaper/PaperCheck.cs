@@ -216,6 +216,14 @@ public static partial class PaperCheckCommands
         AddViewport(tr, db, two, "SV-VPORT", new Point3d(12.0, 4.5, 0), 6.0, 5.0, Point3d.Origin, 1.0 / 50.0);
         Insert(tr, db, two, anchorDef, new Point3d(13.5, 7.0, 0));
         Say($"A3 PREP {CheckPlans.LayoutTwoPlan}: two viewports on SV-VPORT; anchor");
+
+        var clipped = NewLayout(tr, lm, CheckPlans.LayoutClipped);
+        var cvp = AddViewport(tr, db, clipped, "SV-VPORT", new Point3d(7.0, 4.5, 0), 12.0, 5.0, Point3d.Origin, 1.0 / 50.0);
+        var hex = ClipPolyline(tr, db, clipped, [(2, 2.5, 0), (12, 2.5, 0), (12.5, 4.5, 0), (12, 6.5, 0), (2, 6.5, 0), (1.5, 4.5, 0)]);
+        cvp.NonRectClipEntityId = hex.ObjectId;
+        cvp.NonRectClipOn = true;
+        Insert(tr, db, clipped, anchorDef, new Point3d(13.5, 7.0, 0));
+        Say($"A3 PREP {CheckPlans.LayoutClipped}: plan viewport {cvp.Handle} on SV-VPORT clipped by a 6-vertex polyline {hex.Handle}; anchor");
         tr.Commit();
 
         // A second key map made the way an author makes one: while SV-SHEET is current, then turned on.
@@ -227,7 +235,10 @@ public static partial class PaperCheckCommands
             var sheet2 = LayoutBlock(tr2, lm.GetLayoutId(CheckPlans.TemplateLayout));
             var key2 = AddViewport(tr2, db, sheet2, "0", new Point3d(15.0, 6.0, 0), 2.0, 1.5, new Point3d(777, 777, 0), 1.0 / 200.0);
             key2.On = true;
-            Say($"A3 PREP {CheckPlans.TemplateLayout}: second key-map viewport {key2.Handle} 2x1.5 target (777, 777) 1:200, created while the layout was current, On={key2.On}");
+            var five = ClipPolyline(tr2, db, sheet2, [(14.2, 5.4, 0), (15.8, 5.4, 0), (15.8, 6.4, 0.3), (15.0, 6.7, 0), (14.2, 6.4, 0)]);
+            key2.NonRectClipEntityId = five.ObjectId;
+            key2.NonRectClipOn = true;
+            Say($"A3 PREP {CheckPlans.TemplateLayout}: second key-map viewport {key2.Handle} 2x1.5 target (777, 777) 1:200, created while the layout was current, On={key2.On}, clipped by a 5-vertex polyline {five.Handle}");
             tr2.Commit();
         }
         finally { lm.CurrentLayout = previous; }
@@ -261,6 +272,17 @@ public static partial class PaperCheckCommands
         vp.TwistAngle = 0;
         vp.CustomScale = scale;
         return vp;
+    }
+
+    private static Polyline ClipPolyline(Transaction tr, Database db, BlockTableRecord owner, (double X, double Y, double Bulge)[] vertices)
+    {
+        var pl = new Polyline();
+        pl.SetDatabaseDefaults(db);
+        for (int i = 0; i < vertices.Length; i++) pl.AddVertexAt(i, new Point2d(vertices[i].X, vertices[i].Y), vertices[i].Bulge, 0, 0);
+        pl.Closed = true;
+        owner.AppendEntity(pl);
+        tr.AddNewlyCreatedDBObject(pl, true);
+        return pl;
     }
 
     private static BlockReference Insert(Transaction tr, Database db, BlockTableRecord owner, ObjectId def, Point3d at)

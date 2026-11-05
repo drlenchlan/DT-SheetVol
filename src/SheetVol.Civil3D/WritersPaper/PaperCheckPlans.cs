@@ -114,6 +114,11 @@ internal static class CheckPlans
     internal static readonly Guid SegRenB = Guid.Parse("a3a3a3a3-0307-4000-8000-00000000000b");
     internal static readonly Guid SegRenC = Guid.Parse("a3a3a3a3-0307-4000-8000-00000000000c");
     internal static readonly Guid RunMany = Guid.Parse("a3a3a3a3-0613-4000-8000-000000000613");
+    internal static readonly Guid RunKeep = Guid.Parse("a3a3a3a3-0307-4000-8000-0000000000ee");
+    internal static readonly Guid RunClipped = Guid.Parse("a3a3a3a3-602c-4000-8000-00000000602c");
+    internal static readonly Guid SegClippedNone = Guid.Parse("a3a3a3a3-602c-4000-8000-000000000001");
+    internal static readonly Guid SegClippedBand = Guid.Parse("a3a3a3a3-602c-4000-8000-000000000002");
+    internal const string LayoutClipped = "SV-T-CLIPPED";
     internal static readonly Guid AnalysisFg = Guid.Parse("a3a3a3a3-aaaa-4000-8000-000000000001");
     internal static readonly Guid AnalysisFg2 = Guid.Parse("a3a3a3a3-aaaa-4000-8000-000000000002");
 
@@ -156,7 +161,7 @@ internal static class CheckPlans
     internal static readonly Guid SegE608C = Guid.Parse("a3a3a3a3-608c-4000-8000-00000006608c");
 
     /// <summary>C2 per-sheet tables for the given sheets, through the real Reconciler and SegmentTableBuilder.</summary>
-    internal static IReadOnlyDictionary<Guid, TableModel> Tables(IReadOnlyList<(IAlignmentGeometry A, SegmentDef Seg)> sheets, int analyses, double rate)
+    internal static IReadOnlyDictionary<Guid, TableModel> Tables(IReadOnlyList<(IAlignmentGeometry A, SegmentDef Seg)> sheets, int analyses, double rate, bool onlySecond = false)
     {
         var boundaries = new List<Boundary>();
         var band = new List<IReadOnlyList<Pt>>();
@@ -171,8 +176,9 @@ internal static class CheckPlans
         {
             new(new AnalysisDef(AnalysisFg, "EG vs FG", "EG", "FG"), new AreaVolumeSource(0.054 * rate, 0.027 * rate, band)),
         };
-        if (analyses > 1)
+        if (analyses > 1 || onlySecond)
             inputs.Add(new(new AnalysisDef(AnalysisFg2, "EG vs FG2", "EG", "FG2"), new AreaVolumeSource(0.0135 * rate, 0, band)));
+        if (onlySecond) inputs.RemoveAt(0);
 
         var result = Reconciler.Reconcile(new ReconcileRequest(sheets.Select(s => s.Seg).ToList(), boundaries, band, inputs,
             new DrawingUnits(UnitSystem.Imperial, 1.0)), ReportConfig.Default.Volumes);
@@ -202,10 +208,10 @@ internal static class CheckPlans
     /// <summary>One sheet on alignment S from <paramref name="start"/> for 500 ft, for the E-row checks.</summary>
     internal static CheckSheet OnS(string run, int number, Guid segment, double start, double templateWidth, double templateHeight,
                                    int analyses = 2, double rate = 1.0, double scale = 50, ClipMode clip = ClipMode.Boundary,
-                                   double offset = 100, double length = 500)
+                                   double offset = 100, double length = 500, bool onlySecond = false)
     {
         var seg = new SegmentDef(segment, number.ToString(CultureInfo.InvariantCulture), start, start + length, -offset, offset);
-        var table = analyses == 0 ? null : Tables([(AlignS, seg)], analyses, rate)[segment];
+        var table = analyses == 0 ? null : Tables([(AlignS, seg)], analyses, rate, onlySecond)[segment];
         return new CheckSheet(run, number, AlignS, seg, View(AlignS, seg, templateWidth, templateHeight, scale, clip), table);
     }
 }
