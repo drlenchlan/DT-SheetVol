@@ -102,7 +102,7 @@ public class PresentationInfrastructureTests
     public void PendingEdits_are_keyed_by_drawing_name_ignoring_case()
     {
         var store = new PendingEdits();
-        var edit = new PendingEdit(Fixture.T2Run(), new DrawOptions(true, false, true));
+        var edit = new PendingEdit(Fixture.T2Run() with { Draw = new DrawOptions(true, false, true) });
 
         store.Save(@"C:\proj\A.dwg", edit);
 

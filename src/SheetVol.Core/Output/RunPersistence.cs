@@ -19,11 +19,18 @@ public sealed record RunLoadResult(
 /// characters, and the schema guard: a stored schema newer than the plugin's refuses
 /// modification and reports both versions (E105). The Xrecord itself is written by the model
 /// writer (A2); this class never touches the drawing.
+/// <para>
+/// Schema history. 1: Wave 0. 2 (contract rev 2): <see cref="RunDefinition.Draw"/> and
+/// <see cref="SegmentOverrides.OffsetLeft"/> / <see cref="SegmentOverrides.OffsetRight"/> added,
+/// all optional. A schema 1 run reads as schema 2 with no draw options (<c>Draw = null</c>, which
+/// draws everything) and no offset overrides; <see cref="RunLoadResult.StoredSchemaVersion"/>
+/// still reports 1.
+/// </para>
 /// </summary>
 public static class RunPersistence
 {
     /// <summary>The run schema version this plugin reads and writes. Matches the <see cref="RunDefinition.SchemaVersion"/> default.</summary>
-    public const int PluginSchemaVersion = 1;
+    public const int PluginSchemaVersion = 2;
 
     /// <summary>The 6.9 ceiling for one Xrecord string.</summary>
     public const int MaxChunkLength = 250;
@@ -41,6 +48,8 @@ public static class RunPersistence
     /// Reads a run from JSON. The schema version is read first: newer than the plugin's refuses
     /// the run and reports both versions (E105); missing or malformed is an SV-E533 error.
     /// Missing required members and nulls in non-nullable members are errors, never defaults.
+    /// An older schema is upgraded in memory: the returned run carries <see cref="PluginSchemaVersion"/>,
+    /// and members that schema did not have take their documented contract defaults.
     /// </summary>
     public static RunLoadResult Deserialize(string json)
     {
@@ -74,7 +83,9 @@ public static class RunPersistence
         {
             var run = JsonSerializer.Deserialize<RunDefinition>(json, Options);
             if (run is null) return Refused(stored, "Stored run JSON is null.");
-            return new RunLoadResult(run, true, stored, PluginSchemaVersion, []);
+            // Schema 1 has no "draw" and no override offsets; both are optional constructor
+            // parameters, so they read as null: draw everything, no per-segment offsets.
+            return new RunLoadResult(run with { SchemaVersion = PluginSchemaVersion }, true, stored, PluginSchemaVersion, []);
         }
         catch (JsonException ex)
         {

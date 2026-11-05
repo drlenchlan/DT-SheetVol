@@ -9,7 +9,7 @@ public class GridAndChartTests
     [Fact]
     public async Task Totals_are_hidden_until_every_segment_has_a_result()
     {
-        var (session, _, _, vm) = Fixture.Open();
+        var (session, _, vm) = Fixture.Open();
         session.OmitResultForSegment.Add(3);
 
         await vm.RegenerateCommand.ExecuteAsync();
@@ -36,7 +36,7 @@ public class GridAndChartTests
     [Fact]
     public async Task Net_shows_magnitude_with_CUT_or_FILL_and_no_tag_at_zero()
     {
-        var (_, _, _, vm) = Fixture.Open();
+        var (_, _, vm) = Fixture.Open();
         await vm.RegenerateCommand.ExecuteAsync();
         var rows = vm.Grid.Rows;
 
@@ -49,7 +49,7 @@ public class GridAndChartTests
     [Fact]
     public async Task Coverage_below_full_is_flagged()
     {
-        var (session, _, _, vm) = Fixture.Open();
+        var (session, _, vm) = Fixture.Open();
         session.CoverageBySegment[2] = 0.8;
 
         await vm.RegenerateCommand.ExecuteAsync();
@@ -66,18 +66,48 @@ public class GridAndChartTests
         var session = new FakeSheetVolSession();
         var plan = session.Plan(Fixture.T2Run());
         var stored = Fixture.T2Run() with { KnownSegments = plan.Segments };
-        var result = session.BuildResult(stored, plan, 1) with { OutsideLimits = new RawVolume(270, 54), PartitionCheckPassed = false };
-        var host = new FakeDialogHost { Status = new RunStatus(false, result) };
+        var result = session.BuildResult(stored, plan, 1) with
+        {
+            OutsideLimits = [new OutsideLimits(Fixture.AnalysisA, new RawVolume(270, 54))],
+            PartitionCheckPassed = false,
+        };
+        session.Status = new RunStatus(false, result);
 
-        var (_, _, _, vm) = Fixture.Open(stored, session, host);
+        var (_, _, vm) = Fixture.Open(stored, session);
 
         Assert.Equal("Sum of segments: cut 200 CY, fill 200 CY. Outside the offsets: cut 10 CY, fill 2 CY before factors. Partition check FAILED.", vm.Grid.ReconciliationText);
     }
 
     [Fact]
+    public void E916_reconciliation_line_shows_the_outside_limits_row_of_the_selected_analysis()
+    {
+        var session = new FakeSheetVolSession();
+        var run = Fixture.T2Run(analyses:
+        [
+            new AnalysisDef(Fixture.AnalysisA, "EG vs FG_A", "EG", "FG_A"),
+            new AnalysisDef(Fixture.AnalysisB, "EG vs FG_B", "EG", "FG_B"),
+        ]);
+        var plan = session.Plan(run);
+        var stored = run with { KnownSegments = plan.Segments };
+        var result = session.BuildResult(stored, plan, 1) with
+        {
+            OutsideLimits = [new OutsideLimits(Fixture.AnalysisB, new RawVolume(540, 0))],   // only B is above tolerance
+        };
+        session.Status = new RunStatus(false, result);
+        var (_, _, vm) = Fixture.Open(stored, session);
+
+        Assert.Equal(Fixture.AnalysisA, vm.Grid.SelectedComparison!.AnalysisId);
+        Assert.Equal("Sum of segments: cut 200 CY, fill 200 CY. Outside the offsets: none. Partition check passed.", vm.Grid.ReconciliationText);
+
+        vm.Grid.SelectedComparison = vm.Grid.Comparisons[1];
+
+        Assert.Equal("Sum of segments: cut 400 CY, fill 400 CY. Outside the offsets: cut 20 CY, fill 0 CY before factors. Partition check passed.", vm.Grid.ReconciliationText);
+    }
+
+    [Fact]
     public async Task Strip_chart_width_follows_length_with_fill_above_and_cut_below()
     {
-        var (_, _, _, vm) = Fixture.Open();
+        var (_, _, vm) = Fixture.Open();
         await vm.RegenerateCommand.ExecuteAsync();
         var bars = vm.Chart.Bars;
 
@@ -99,10 +129,10 @@ public class GridAndChartTests
     [Fact]
     public void Strip_chart_labels_each_break_and_outlines_the_selected_segment()
     {
-        var (_, host, _, vm) = Fixture.Open();
+        var (session, _, vm) = Fixture.Open();
 
         Assert.Equal([0, 0.25, 0.65, 0.9, 1], vm.Chart.Labels.Select(l => Math.Round(l.Position, 12)));
-        Assert.Equal(new[] { 0d, 500, 1300, 1800, 2000 }.Select(s => Fixture.Sta(host, s)), vm.Chart.Labels.Select(l => l.Text));
+        Assert.Equal(new[] { 0d, 500, 1300, 1800, 2000 }.Select(s => Fixture.Sta(session, s)), vm.Chart.Labels.Select(l => l.Text));
 
         vm.Grid.SelectedRow = vm.Grid.Rows[1];
 
@@ -112,7 +142,7 @@ public class GridAndChartTests
     [Fact]
     public void Strip_chart_without_results_draws_hollow_bars_of_the_right_width()
     {
-        var (_, _, _, vm) = Fixture.Open();
+        var (_, _, vm) = Fixture.Open();
 
         Assert.All(vm.Chart.Bars, b => Assert.False(b.HasValue));
         Assert.All(vm.Chart.Bars, b => Assert.Equal((0d, 0d), (b.FillHeight, b.CutHeight)));
@@ -123,7 +153,7 @@ public class GridAndChartTests
     [Fact]
     public async Task Rows_update_in_place_so_selection_survives_live_validation()
     {
-        var (_, _, _, vm) = Fixture.Open();
+        var (_, _, vm) = Fixture.Open();
         await vm.RegenerateCommand.ExecuteAsync();
         var row = vm.Grid.Rows[3];
         vm.Grid.SelectedRow = row;

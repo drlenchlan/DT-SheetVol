@@ -204,7 +204,13 @@ public class FingerprintTests
         // Pinned value for the baseline input. If the canonical text changes on purpose,
         // bump Fingerprints.FormatVersion and re-pin; an accidental change fails here.
         Assert.Equal(PinnedBaselineValue, Fingerprints.Compute(Input()).Value);
+
+        // Contract rev 2 moved the RunDefinition.SchemaVersion default from 1 to 2, which is an
+        // input to the definition signature. The canonical text did not change: the schema 1
+        // input still gives the value pinned before rev 2, so FormatVersion stays.
+        Assert.Equal(PinnedSchema1Value, Fingerprints.Compute(Input(BaseRun() with { SchemaVersion = 1 })).Value);
     }
 
-    private const string PinnedBaselineValue = "386de603b99a304a690de3c21f91d6e040deaafa123625409612436c67d211f8";
+    private const string PinnedBaselineValue = "ff6dc11d5039faf3dc326b22ce691fa7b2d05ed87fd624ed008538264b36de1f";
+    private const string PinnedSchema1Value = "386de603b99a304a690de3c21f91d6e040deaafa123625409612436c67d211f8";
 }

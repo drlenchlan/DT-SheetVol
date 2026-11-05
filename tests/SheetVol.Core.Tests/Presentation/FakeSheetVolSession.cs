@@ -1,9 +1,13 @@
 // A deterministic ISheetVolSession for the presentation tests (HANDOFF.md 8, T22).
 // Validate parses a small subset of the 6.3 grammar (single breaks, START, END,
 // "a+bb" stations, A..B@L, A..B/N, skip A..B), carries segment GUIDs forward by index
-// from KnownSegments, and raises SV-E201 on the segment at CurveSegmentIndex when an
-// offset reaches CurveRadius. RegenerateAsync returns canned results (T2 by default),
-// reports progress, honours cancellation and "persists" the run for LoadRun.
+// from KnownSegments, gives each segment the offsets that apply to it (per-segment
+// override, else the run's: the planner behaviour D8 asks for), and raises SV-E201 on
+// the segment at CurveSegmentIndex when its widest offset reaches CurveRadius.
+// RegenerateAsync returns canned results (T2 by default), reports progress, honours
+// cancellation and "persists" the run for LoadRun. The rev 2 host members (drawing,
+// station text, tracker status, command state, export) are settable properties; they
+// were FakeDialogHost before contract revision 2.
 
 using System.Globalization;
 using SheetVol.Core.Presentation;
@@ -17,6 +21,7 @@ internal sealed class FakeSheetVolSession : ISheetVolSession
 
     private EventHandler? _sourcesChanged;
     private int _nextId;
+    private RegenResult? _lastSucceeded;
 
     public List<string> Alignments { get; set; } = ["S", "C"];
     public List<string> Surfaces { get; set; } = ["EG", "FG_A", "FG_B"];
@@ -46,6 +51,42 @@ internal sealed class FakeSheetVolSession : ISheetVolSession
     public double VolumeScale { get; set; } = 1;
     public Dictionary<int, double> CoverageBySegment { get; } = [];
     public Func<int, SegmentDef, ImpactResult?>? ImpactFactory { get; set; }
+
+    // ---- Rev 2 host members (formerly FakeDialogHost) ------------------------------------
+
+    public DrawingInfo? ActiveDrawing { get; set; } = new(@"C:\proj\T2.dwg", UnitSystem.Imperial);
+    public RunStatus Status { get; set; } = new(false, null);
+    public bool IsCommandActive { get; set; }
+    public (double Start, double End)? Range { get; set; } = (0, 2000);
+    public List<string> ExportRequests { get; } = [];
+
+    /// <summary>What ExportAsync returns; when unset, the last successful regen of that run with its paths, or null.</summary>
+    public Func<RunDefinition, RegenResult?>? ExportFactory { get; set; }
+
+    public string FormatStation(string alignmentName, double rawStation)
+    {
+        var scale = ActiveDrawing?.Units == UnitSystem.Metric ? 1000 : 100;
+        var major = Math.Floor(rawStation / scale);
+        var minor = rawStation - major * scale;
+        var minorFormat = scale == 1000 ? "000.00" : "00.00";
+        return major.ToString("0", CultureInfo.InvariantCulture) + "+" + minor.ToString(minorFormat, CultureInfo.InvariantCulture);
+    }
+
+    public (double Start, double End)? StationRange(string alignmentName) => Range;
+
+    public RunStatus GetRunStatus(string runName) => Status;
+
+    public Task<RegenResult?> ExportAsync(RunDefinition run, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        ExportRequests.Add(run.Name);
+        var result = ExportFactory is not null
+            ? ExportFactory(run)
+            : _lastSucceeded?.RunName == run.Name ? _lastSucceeded : null;
+        return Task.FromResult(result);
+    }
+
+    // ---- Engine members ------------------------------------------------------------------
 
     public IReadOnlyList<string> AlignmentNames => Alignments;
     public IReadOnlyList<string> TinSurfaceNames => Surfaces;
@@ -79,15 +120,16 @@ internal sealed class FakeSheetVolSession : ISheetVolSession
         {
             FailNextRegen = false;
             var problem = new Problem("SV-E801", Severity.Error, "Integrator and bounded volume disagree on segment 3.", plan.Segments[2].Id);
-            return new RegenResult(false, run.Name, [], [problem], null, false, TimeSpan.FromSeconds(1), null, null);
+            return new RegenResult(false, run.Name, [], [problem], [], false, TimeSpan.FromSeconds(1), null, null);
         }
         var result = BuildResult(run, plan, VolumeScale);
         progress.Report(1.0);
         Runs[run.Name] = run with { KnownSegments = plan.Segments };
+        _lastSucceeded = result;
         return result;
     }
 
-    /// <summary>Canned result: T2 cut/fill by index, times (analysis index + 1), times scale. Area = length × band width.</summary>
+    /// <summary>Canned result: T2 cut/fill by index, times (analysis index + 1), times scale. Area = length × the segment's band width. No outside-limits rows.</summary>
     public RegenResult BuildResult(RunDefinition run, ValidationResult plan, double scale)
     {
         var rows = new List<SegmentResult>();
@@ -101,7 +143,7 @@ internal sealed class FakeSheetVolSession : ISheetVolSession
                 var (cut, fill) = i < T2CutFill.Length ? T2CutFill[i] : (0, 0);
                 cut *= (a + 1) * scale;
                 fill *= (a + 1) * scale;
-                var area = (s.EndStation - s.StartStation) * (run.OffsetRight - run.OffsetLeft);
+                var area = (s.EndStation - s.StartStation) * (s.OffsetRight - s.OffsetLeft);
                 rows.Add(new SegmentResult(
                     s.Id, s.Label, s.StartStation, s.EndStation, analysis.Id,
                     area, CoverageBySegment.TryGetValue(i, out var coverage) ? coverage : 1.0, new RawVolume(cut * 27, fill * 27),
@@ -109,7 +151,7 @@ internal sealed class FakeSheetVolSession : ISheetVolSession
                     ImpactFactory?.Invoke(i, s), SegmentStatus.Current, []));
             }
         }
-        return new RegenResult(true, run.Name, rows, [], null, true, TimeSpan.FromSeconds(1.25), "run.csv", "run.json");
+        return new RegenResult(true, run.Name, rows, [], [], true, TimeSpan.FromSeconds(1.25), "run.csv", "run.json");
     }
 
     public void Highlight(Guid? segmentId) => Highlights.Add(segmentId);
@@ -152,16 +194,19 @@ internal sealed class FakeSheetVolSession : ISheetVolSession
             if (skips.Any(s => s.From <= a + 1e-6 && b <= s.To + 1e-6)) continue;
             var index = segments.Count;
             var id = index < run.KnownSegments.Count ? run.KnownSegments[index].Id : NewId();
-            segments.Add(new SegmentDef(id, (index + 1).ToString(CultureInfo.InvariantCulture), a, b, run.OffsetLeft, run.OffsetRight));
+            run.Overrides.TryGetValue(id, out var overrides);
+            segments.Add(new SegmentDef(id, (index + 1).ToString(CultureInfo.InvariantCulture), a, b,
+                overrides?.OffsetLeft ?? run.OffsetLeft, overrides?.OffsetRight ?? run.OffsetRight));
         }
 
-        var widest = Math.Max(Math.Abs(run.OffsetLeft), Math.Abs(run.OffsetRight));
-        if (CurveSegmentIndex < segments.Count && widest >= CurveRadius)
+        if (CurveSegmentIndex < segments.Count)
         {
             var s = segments[CurveSegmentIndex];
-            problems.Add(new Problem("SV-E201", Severity.Error,
-                $"Segment {s.Label}: offset {widest:0.00} on the inside of the curve at {(s.StartStation + s.EndStation) / 2:0.00} reaches the radius {CurveRadius:0.00}. Maximum usable offset is {CurveRadius - 0.01:0.00}.",
-                s.Id, $"Use an offset below {CurveRadius:0.00} on this segment."));
+            var widest = Math.Max(Math.Abs(s.OffsetLeft), Math.Abs(s.OffsetRight));
+            if (widest >= CurveRadius)
+                problems.Add(new Problem("SV-E201", Severity.Error,
+                    $"Segment {s.Label}: offset {widest:0.00} on the inside of the curve at {(s.StartStation + s.EndStation) / 2:0.00} reaches the radius {CurveRadius:0.00}. Maximum usable offset is {CurveRadius - 0.01:0.00}.",
+                    s.Id, $"Use an offset below {CurveRadius:0.00} on this segment."));
         }
 
         var errorIds = problems.Where(p => p.Severity == Severity.Error && p.SegmentId is not null).Select(p => p.SegmentId!.Value).ToHashSet();
@@ -240,30 +285,6 @@ internal sealed class FakeSheetVolSession : ISheetVolSession
     }
 }
 
-internal sealed class FakeDialogHost : IDialogHost
-{
-    public DrawingInfo? ActiveDrawing { get; set; } = new(@"C:\proj\T2.dwg", UnitSystem.Imperial);
-    public RunStatus Status { get; set; } = new(false, null);
-    public bool IsCommandActive { get; set; }
-    public List<string> ExportRequests { get; } = [];
-    public (double Start, double End)? Range { get; set; } = (0, 2000);
-
-    public string FormatStation(string alignmentName, double rawStation)
-    {
-        var scale = ActiveDrawing?.Units == UnitSystem.Metric ? 1000 : 100;
-        var major = Math.Floor(rawStation / scale);
-        var minor = rawStation - major * scale;
-        var minorFormat = scale == 1000 ? "000.00" : "00.00";
-        return major.ToString("0", CultureInfo.InvariantCulture) + "+" + minor.ToString(minorFormat, CultureInfo.InvariantCulture);
-    }
-
-    public (double Start, double End)? StationRange(string alignmentName) => Range;
-
-    public RunStatus GetRunStatus(string runName) => Status;
-
-    public void RequestExport(string runName) => ExportRequests.Add(runName);
-}
-
 /// <summary>Shared setup: T2's run on alignment S, offsets ±100, EG vs FG_A.</summary>
 internal static class Fixture
 {
@@ -278,17 +299,16 @@ internal static class Fixture
             analyses.Length > 0 ? analyses : [new AnalysisDef(AnalysisA, "EG vs FG_A", "EG", "FG_A")],
             [], [], new Dictionary<Guid, SegmentOverrides>(), new ViewOptions());
 
-    public static (FakeSheetVolSession Session, FakeDialogHost Host, PendingEdits Pending, DialogViewModel Vm) Open(
-        RunDefinition? run = null, FakeSheetVolSession? session = null, FakeDialogHost? host = null, PendingEdits? pending = null)
+    public static (FakeSheetVolSession Session, PendingEdits Pending, DialogViewModel Vm) Open(
+        RunDefinition? run = null, FakeSheetVolSession? session = null, PendingEdits? pending = null)
     {
         session ??= new FakeSheetVolSession();
-        host ??= new FakeDialogHost();
         pending ??= new PendingEdits();
         if (run is not null) session.Runs[run.Name] = run;
         else if (!session.Runs.ContainsKey("Run1")) session.Runs["Run1"] = T2Run();
-        var vm = new DialogViewModel(session, host, pending, Config);
-        return (session, host, pending, vm);
+        var vm = new DialogViewModel(session, pending, Config);
+        return (session, pending, vm);
     }
 
-    public static string Sta(FakeDialogHost host, double raw) => host.FormatStation("S", raw);
+    public static string Sta(FakeSheetVolSession session, double raw) => session.FormatStation("S", raw);
 }

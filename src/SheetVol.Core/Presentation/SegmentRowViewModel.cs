@@ -3,12 +3,17 @@ namespace SheetVol.Core.Presentation;
 /// <summary>
 /// One row of the segments grid (6.14): number, begin and end station (editable, parsed
 /// by the session's Validate), length, 2D area in the selected unit, cut, fill, net with
-/// its CUT or FILL tag, coverage, status chip, and the row's problem with its fix. The
-/// HCFCD columns (6.16) are filled when that preset is active. Value texts are empty
-/// until the row has a result that still applies.
+/// its CUT or FILL tag, coverage, status chip, and the row's problem with its fix. A
+/// failing station segment also offers the per-segment offset fix (two distance fields and
+/// Apply, D8). The HCFCD columns (6.16) are filled when that preset is active. Value texts
+/// are empty until the row has a result that still applies.
 /// </summary>
 public sealed class SegmentRowViewModel : ObservableObject
 {
+    private DisplayFormatter? _fmt;
+    private bool _showOffsetFix;
+    private bool _offsetIsOverride;
+    private string? _offsetFixError;
     private Guid _segmentId;
     private int _number;
     private string _label = string.Empty;
@@ -47,6 +52,11 @@ public sealed class SegmentRowViewModel : ObservableObject
         BeginStation = new TextFieldViewModel(DialogText.ColumnBegin, t => owner.EditStation(SegmentId, isEnd: false, t), owner.FieldErrorChanged);
         EndStation = new TextFieldViewModel(DialogText.ColumnEnd, t => owner.EditStation(SegmentId, isEnd: true, t), owner.FieldErrorChanged);
         Ohwm = new TextFieldViewModel(DialogText.ColumnOhwm, t => owner.EditOhwm(SegmentId, t), owner.FieldErrorChanged);
+        OffsetFixLeft = new TextFieldViewModel(DialogText.OffsetFixLeft, CheckOffsetText, owner.FieldErrorChanged);
+        OffsetFixRight = new TextFieldViewModel(DialogText.OffsetFixRight, CheckOffsetText, owner.FieldErrorChanged);
+        ApplyOffsetFixCommand = new RelayCommand(
+            () => OffsetFixError = owner.ApplyOffsetOverride(SegmentId, OffsetFixLeft.Text, OffsetFixRight.Text),
+            () => _showOffsetFix && owner.CanEditOffsets);
     }
 
     /// <summary>Segment GUID.</summary>
@@ -182,10 +192,37 @@ public sealed class SegmentRowViewModel : ObservableObject
     /// <summary>HCFCD: note when the values are marked, for example "widen the offsets" (E1002).</summary>
     public string? ImpactNote { get => _impactNote; private set => SetProperty(ref _impactNote, value); }
 
+    // ---- Per-segment offset fix (6.14, D8) -------------------------------------------------
+
+    /// <summary>True when the row shows the offset fix: a station segment in Error, or one whose offsets are overridden.</summary>
+    public bool ShowOffsetFix { get => _showOffsetFix; private set => SetProperty(ref _showOffsetFix, value); }
+
+    /// <summary>True when the segment's offsets override the run's (<see cref="SegmentOverrides.OffsetLeft"/> or <see cref="SegmentOverrides.OffsetRight"/>).</summary>
+    public bool OffsetIsOverride { get => _offsetIsOverride; private set => SetProperty(ref _offsetIsOverride, value); }
+
+    /// <summary>Left offset for this segment as a distance (positive is left), prefilled with the offset that applies. Blank means the run's.</summary>
+    public TextFieldViewModel OffsetFixLeft { get; }
+
+    /// <summary>Right offset for this segment as a distance (positive is right), prefilled with the offset that applies. Blank means the run's.</summary>
+    public TextFieldViewModel OffsetFixRight { get; }
+
+    /// <summary>Writes the two offsets as the segment's override and re-runs Validate. A side equal to the run's offset carries no override.</summary>
+    public RelayCommand ApplyOffsetFixCommand { get; }
+
+    /// <summary>Why the last Apply was refused, or null.</summary>
+    public string? OffsetFixError { get => _offsetFixError; private set => SetProperty(ref _offsetFixError, value); }
+
+    internal void RefreshCommands() => ApplyOffsetFixCommand.RaiseCanExecuteChanged();
+
+    private string? CheckOffsetText(string text)
+        => string.IsNullOrWhiteSpace(text) || _fmt is null || _fmt.TryParse(text, out _) ? null : DialogText.NotANumber;
+
     internal void Apply(RowModel model, GridContext ctx)
     {
         var fmt = ctx.Fmt;
+        _fmt = fmt;
         var segment = model.Segment;
+        if (segment.Id != SegmentId) OffsetFixError = null;
         SegmentId = segment.Id;
         Number = model.Number;
         Label = segment.Label;
@@ -251,6 +288,12 @@ public sealed class SegmentRowViewModel : ObservableObject
         Ohwm.SetFromModel(model.OhwmEffective is double ohwm ? fmt.Elevation(ohwm) : string.Empty);
         Ohwm.IsEditable = !ctx.IsBusy;
         OhwmIsOverride = model.OhwmIsOverride;
+
+        ShowOffsetFix = model.OffsetFixAvailable;
+        OffsetIsOverride = model.OffsetIsOverride;
+        OffsetFixLeft.SetFromModel(fmt.Offset(-model.OffsetLeftEffective));
+        OffsetFixRight.SetFromModel(fmt.Offset(model.OffsetRightEffective));
+        OffsetFixLeft.IsEditable = OffsetFixRight.IsEditable = !ctx.IsBusy;
     }
 
     internal static string NetTagFor(double net, DisplayFormatter fmt)
@@ -259,5 +302,5 @@ public sealed class SegmentRowViewModel : ObservableObject
         return shown > 0 ? DialogText.NetTagCut : shown < 0 ? DialogText.NetTagFill : string.Empty;
     }
 
-    internal bool HasFieldError => BeginStation.HasError || EndStation.HasError || Ohwm.HasError;
+    internal bool HasFieldError => BeginStation.HasError || EndStation.HasError || Ohwm.HasError || OffsetFixLeft.HasError || OffsetFixRight.HasError;
 }

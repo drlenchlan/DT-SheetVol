@@ -13,7 +13,7 @@ public class DialogEdgeCaseTests
     [Fact]
     public void E902_no_alignment_shows_empty_state_naming_it_and_disables_regenerate()
     {
-        var (_, _, _, vm) = Fixture.Open(session: new FakeSheetVolSession { Alignments = [] });
+        var (_, _, vm) = Fixture.Open(session: new FakeSheetVolSession { Alignments = [] });
 
         Assert.True(vm.IsEmptyState);
         Assert.Equal(DialogText.EmptyNoAlignment, vm.EmptyStateText);
@@ -26,7 +26,7 @@ public class DialogEdgeCaseTests
     [Fact]
     public void E902_fewer_than_two_tin_surfaces_names_the_count_and_disables_regenerate()
     {
-        var (_, _, _, vm) = Fixture.Open(session: new FakeSheetVolSession { Surfaces = ["EG"] });
+        var (_, _, vm) = Fixture.Open(session: new FakeSheetVolSession { Surfaces = ["EG"] });
 
         Assert.True(vm.IsEmptyState);
         Assert.Equal(string.Format(CultureInfo.InvariantCulture, DialogText.EmptyTooFewSurfacesFormat, 1), vm.EmptyStateText);
@@ -37,7 +37,7 @@ public class DialogEdgeCaseTests
     [Fact]
     public void E902_both_missing_names_both()
     {
-        var (_, _, _, vm) = Fixture.Open(session: new FakeSheetVolSession { Alignments = [], Surfaces = [] });
+        var (_, _, vm) = Fixture.Open(session: new FakeSheetVolSession { Alignments = [], Surfaces = [] });
 
         Assert.Contains(DialogText.EmptyNoAlignment, vm.EmptyStateText);
         Assert.Contains(string.Format(CultureInfo.InvariantCulture, DialogText.EmptyTooFewSurfacesFormat, 0), vm.EmptyStateText);
@@ -48,7 +48,7 @@ public class DialogEdgeCaseTests
     public void E902_empty_state_clears_when_a_second_surface_appears()
     {
         var session = new FakeSheetVolSession { Surfaces = ["EG"] };
-        var (_, _, _, vm) = Fixture.Open(session: session);
+        var (_, _, vm) = Fixture.Open(session: session);
         Assert.True(vm.IsEmptyState);
 
         session.Surfaces = ["EG", "FG_A"];
@@ -64,7 +64,7 @@ public class DialogEdgeCaseTests
     [Fact]
     public void E903_invalid_station_text_marks_the_cell_and_keeps_the_last_valid_value()
     {
-        var (session, host, _, vm) = Fixture.Open();
+        var (session, _, vm) = Fixture.Open();
         var specBefore = vm.Run.BreakSpec;
         var row2 = vm.Grid.Rows[1];
         var row3 = vm.Grid.Rows[2];
@@ -81,13 +81,13 @@ public class DialogEdgeCaseTests
         Assert.Equal(specBefore, vm.Run.BreakSpec);                            // last valid value kept
         Assert.True(vm.Validation!.IsValid);
         Assert.Equal(1300, row2.EndRaw);
-        Assert.Equal(Fixture.Sta(host, 1300), row3.BeginStation.Text);         // neighbour untouched
+        Assert.Equal(Fixture.Sta(session,1300), row3.BeginStation.Text);         // neighbour untouched
         Assert.False(row3.BeginStation.HasError);
         Assert.Equal(DialogText.BlockedFieldErrors, vm.RegenerateBlockedReason);
 
         row2.EndStation.Revert();                                               // Esc
         Assert.False(row2.EndStation.HasError);
-        Assert.Equal(Fixture.Sta(host, 1300), row2.EndStation.Text);
+        Assert.Equal(Fixture.Sta(session,1300), row2.EndStation.Text);
         Assert.True(vm.CanRegenerate);
 
         row2.EndStation.Text = "12+00";
@@ -99,7 +99,7 @@ public class DialogEdgeCaseTests
     [Fact]
     public void E903_station_outside_the_alignment_is_refused_on_the_cell()
     {
-        var (_, _, _, vm) = Fixture.Open();
+        var (_, _, vm) = Fixture.Open();
         var last = vm.Grid.Rows[3];
 
         last.EndStation.Text = "25+00";
@@ -113,7 +113,7 @@ public class DialogEdgeCaseTests
     [Fact]
     public void E903_empty_or_comma_station_text_is_refused_without_touching_the_break_list()
     {
-        var (session, _, _, vm) = Fixture.Open();
+        var (session, _, vm) = Fixture.Open();
         var validates = session.ValidateCalls;
 
         vm.Grid.Rows[0].EndStation.Text = "  ";
@@ -131,20 +131,20 @@ public class DialogEdgeCaseTests
     [Fact]
     public void E904_editing_an_end_station_moves_the_next_begin()
     {
-        var (_, host, _, vm) = Fixture.Open();
+        var (session, _, vm) = Fixture.Open();
 
         vm.Grid.Rows[1].EndStation.Text = "12+00";
 
         Assert.Equal("0, 500, 12+00, 1800, 2000", vm.Run.BreakSpec);
         Assert.Equal(1200, vm.Grid.Rows[2].BeginRaw);
-        Assert.Equal(Fixture.Sta(host, 1200), vm.Grid.Rows[2].BeginStation.Text);
+        Assert.Equal(Fixture.Sta(session,1200), vm.Grid.Rows[2].BeginStation.Text);
         Assert.Equal([500d, 700d, 600d, 200d], vm.Grid.Rows.Select(r => r.Length));
     }
 
     [Fact]
     public void E904_editing_a_begin_station_moves_the_previous_end()
     {
-        var (_, _, _, vm) = Fixture.Open();
+        var (_, _, vm) = Fixture.Open();
 
         vm.Grid.Rows[2].BeginStation.Text = "1250";
 
@@ -156,7 +156,7 @@ public class DialogEdgeCaseTests
     [Fact]
     public void E904_a_gap_exists_only_through_an_explicit_skip()
     {
-        var (_, _, _, vm) = Fixture.Open(Fixture.T2Run("0, 500, skip 500..800, 800, 1300"));
+        var (_, _, vm) = Fixture.Open(Fixture.T2Run("0, 500, skip 500..800, 800, 1300"));
         Assert.Equal(2, vm.Grid.Rows.Count);
 
         vm.Grid.Rows[0].EndStation.Text = "400";
@@ -169,7 +169,7 @@ public class DialogEdgeCaseTests
     [Fact]
     public void E904_START_and_END_survive_a_grid_edit_so_END_keeps_following_the_alignment()
     {
-        var (_, _, _, vm) = Fixture.Open(Fixture.T2Run("START..END@500"));
+        var (_, _, vm) = Fixture.Open(Fixture.T2Run("START..END@500"));
         Assert.Equal(4, vm.Grid.Rows.Count);
 
         vm.Grid.Rows[1].EndStation.Text = "12+00";
@@ -183,7 +183,7 @@ public class DialogEdgeCaseTests
     [Fact]
     public void E907_edits_not_regenerated_are_kept_for_the_drawing_and_restored_on_reopen()
     {
-        var (session, host, pending, vm) = Fixture.Open();
+        var (session, pending, vm) = Fixture.Open();
         vm.Grid.Rows[1].EndStation.Text = "12+00";
         vm.SameOnBothSides = false;
         vm.OffsetLeft.Text = "120";
@@ -191,12 +191,12 @@ public class DialogEdgeCaseTests
 
         vm.Close();
 
-        Assert.True(pending.TryGet(host.ActiveDrawing!.Name, out var edit));
+        Assert.True(pending.TryGet(session.ActiveDrawing!.Name, out var edit));
         Assert.Equal("0, 500, 12+00, 1800, 2000", edit.Run.BreakSpec);
         Assert.Equal(0, session.RegenerateCalls);                               // nothing written
         Assert.Equal("0, 500, 1300, 1800, 2000", session.Runs["Run1"].BreakSpec);
 
-        var reopened = new DialogViewModel(session, host, pending, Fixture.Config);
+        var reopened = new DialogViewModel(session, pending, Fixture.Config);
 
         Assert.Equal(1200, reopened.Grid.Rows[1].EndRaw);
         Assert.Equal(-120, reopened.Run.OffsetLeft);
@@ -211,15 +211,14 @@ public class DialogEdgeCaseTests
     [Fact]
     public void E907_pending_edits_belong_to_their_drawing_only()
     {
-        var session = new FakeSheetVolSession();
+        var session = new FakeSheetVolSession { ActiveDrawing = new(@"C:\proj\A.dwg", UnitSystem.Imperial) };
         var pending = new PendingEdits();
-        var hostA = new FakeDialogHost { ActiveDrawing = new(@"C:\proj\A.dwg", UnitSystem.Imperial) };
-        var (_, _, _, a) = Fixture.Open(session: session, host: hostA, pending: pending);
+        var (_, _, a) = Fixture.Open(session: session, pending: pending);
         a.Grid.Rows[1].EndStation.Text = "12+00";
         a.Close();
 
-        var hostB = new FakeDialogHost { ActiveDrawing = new(@"C:\proj\B.dwg", UnitSystem.Imperial) };
-        var b = new DialogViewModel(session, hostB, pending, Fixture.Config);
+        session.ActiveDrawing = new(@"C:\proj\B.dwg", UnitSystem.Imperial);
+        var b = new DialogViewModel(session, pending, Fixture.Config);
 
         Assert.Equal(1300, b.Grid.Rows[1].EndRaw);
         Assert.False(b.IsDirty);
@@ -229,18 +228,18 @@ public class DialogEdgeCaseTests
     [Fact]
     public async Task E907_regenerate_clears_the_pending_edits()
     {
-        var (session, host, pending, vm) = Fixture.Open();
+        var (session, pending, vm) = Fixture.Open();
         vm.Grid.Rows[1].EndStation.Text = "12+00";
         vm.Close();
-        var reopened = new DialogViewModel(session, host, pending, Fixture.Config);
+        var reopened = new DialogViewModel(session, pending, Fixture.Config);
 
         await reopened.RegenerateCommand.ExecuteAsync();
 
-        Assert.False(pending.TryGet(host.ActiveDrawing!.Name, out _));
+        Assert.False(pending.TryGet(session.ActiveDrawing!.Name, out _));
         Assert.Equal("0, 500, 12+00, 1800, 2000", session.Runs["Run1"].BreakSpec);
         reopened.Close();
         Assert.Equal(0, pending.Count);
-        var third = new DialogViewModel(session, host, pending, Fixture.Config);
+        var third = new DialogViewModel(session, pending, Fixture.Config);
         Assert.False(third.IsDirty);
         Assert.Equal(1200, third.Grid.Rows[1].EndRaw);
     }
@@ -248,17 +247,17 @@ public class DialogEdgeCaseTests
     [Fact]
     public void E907_switching_the_active_drawing_keeps_the_old_drawings_edits()
     {
-        var (session, host, pending, vm) = Fixture.Open();
+        var (session, pending, vm) = Fixture.Open();
         vm.Grid.Rows[1].EndStation.Text = "12+00";
 
-        host.ActiveDrawing = new(@"C:\proj\other.dwg", UnitSystem.Imperial);
+        session.ActiveDrawing = new(@"C:\proj\other.dwg", UnitSystem.Imperial);
         session.RaiseSourcesChanged();
 
         Assert.True(pending.TryGet(@"C:\proj\T2.dwg", out _));
         Assert.Equal(@"C:\proj\other.dwg", vm.Drawing!.Name);
         Assert.False(vm.IsDirty);
 
-        host.ActiveDrawing = new(@"C:\proj\T2.dwg", UnitSystem.Imperial);
+        session.ActiveDrawing = new(@"C:\proj\T2.dwg", UnitSystem.Imperial);
         session.RaiseSourcesChanged();
         Assert.Equal(1200, vm.Grid.Rows[1].EndRaw);
         Assert.True(vm.IsDirty);
@@ -269,11 +268,11 @@ public class DialogEdgeCaseTests
     [Fact]
     public async Task E912_tracker_staleness_raises_the_banner_and_marks_chips_out_of_date()
     {
-        var (session, host, _, vm) = Fixture.Open();
+        var (session, _, vm) = Fixture.Open();
         await vm.RegenerateCommand.ExecuteAsync();
         Assert.Null(vm.StaleBannerText);
 
-        host.Status = new RunStatus(true, vm.LastResult);
+        session.Status =new RunStatus(true, vm.LastResult);
         session.RaiseSourcesChanged();
 
         Assert.Equal(DialogText.StaleExternal, vm.StaleBannerText);
@@ -282,7 +281,7 @@ public class DialogEdgeCaseTests
         Assert.All(vm.Grid.Rows, r => Assert.True(r.HasValues));                 // values kept, marked
         Assert.Equal(1, session.RegenerateCalls);
 
-        host.Status = new RunStatus(false, vm.LastResult);
+        session.Status =new RunStatus(false, vm.LastResult);
         session.RaiseSourcesChanged();
         Assert.Null(vm.StaleBannerText);
         Assert.All(vm.Grid.Rows, r => Assert.Equal(SegmentStatus.Current, r.Status));
@@ -291,13 +290,13 @@ public class DialogEdgeCaseTests
     [Fact]
     public async Task E912_values_refresh_after_an_external_regen()
     {
-        var (session, host, _, vm) = Fixture.Open();
+        var (session, _, vm) = Fixture.Open();
         await vm.RegenerateCommand.ExecuteAsync();
         Assert.Equal("100", vm.Grid.Rows[0].CutText);
 
         var stored = session.Runs["Run1"];                                       // a typed SVREGEN after a surface rebuild
         var external = session.BuildResult(stored, session.Plan(stored), scale: 2);
-        host.Status = new RunStatus(false, external);
+        session.Status =new RunStatus(false, external);
         session.RaiseSourcesChanged();
 
         Assert.Same(external, vm.LastResult);
@@ -313,9 +312,9 @@ public class DialogEdgeCaseTests
         var session = new FakeSheetVolSession();
         var plan = session.Plan(Fixture.T2Run());
         var stored = Fixture.T2Run() with { KnownSegments = plan.Segments };
-        var host = new FakeDialogHost { Status = new RunStatus(false, session.BuildResult(stored, plan, 1)) };
+        session.Status = new RunStatus(false, session.BuildResult(stored, plan, 1));
 
-        var (_, _, _, vm) = Fixture.Open(stored, session, host);
+        var (_, _, vm) = Fixture.Open(stored, session);
 
         Assert.All(vm.Grid.Rows, r => Assert.True(r.HasValues));
         Assert.All(vm.Grid.Rows, r => Assert.Equal(SegmentStatus.Current, r.Status));
@@ -326,7 +325,7 @@ public class DialogEdgeCaseTests
     [Fact]
     public void E912_object_lists_and_an_external_definition_edit_refresh_when_nothing_is_pending()
     {
-        var (session, _, _, vm) = Fixture.Open();
+        var (session, _, vm) = Fixture.Open();
 
         session.Alignments.Add("K");
         session.Runs["Run1"] = Fixture.T2Run("0, 1000, 2000");                 // SVBREAK typed at the command line
@@ -340,7 +339,7 @@ public class DialogEdgeCaseTests
     [Fact]
     public void E912_an_external_definition_edit_does_not_overwrite_pending_dialog_edits()
     {
-        var (session, _, _, vm) = Fixture.Open();
+        var (session, _, vm) = Fixture.Open();
         vm.Grid.Rows[1].EndStation.Text = "12+00";
 
         session.Runs["Run1"] = Fixture.T2Run("0, 1000, 2000");
@@ -356,9 +355,8 @@ public class DialogEdgeCaseTests
     [Fact]
     public void E914_metric_drawing_switches_labels_units_and_offered_area_units()
     {
-        var host = new FakeDialogHost { ActiveDrawing = new(@"C:\proj\metric.dwg", UnitSystem.Metric) };
-        var session = new FakeSheetVolSession { PlusScale = 1000 };
-        var (_, _, _, vm) = Fixture.Open(Fixture.T2Run() with { AreaUnit = AreaUnit.SquareMetres }, session, host);
+        var session = new FakeSheetVolSession { PlusScale = 1000, ActiveDrawing = new(@"C:\proj\metric.dwg", UnitSystem.Metric) };
+        var (_, _, vm) = Fixture.Open(Fixture.T2Run() with { AreaUnit = AreaUnit.SquareMetres }, session);
 
         Assert.Equal(UnitSystem.Metric, vm.Units);
         Assert.Equal("m", vm.LengthUnitLabel);
@@ -370,16 +368,15 @@ public class DialogEdgeCaseTests
         Assert.Equal("Cut (m³)", vm.Grid.CutHeader);
         Assert.Equal("Fill (m³)", vm.Grid.FillHeader);
         Assert.Equal("Net (m³)", vm.Grid.NetHeader);
-        Assert.Equal(host.FormatStation("S", 500), vm.Grid.Rows[0].EndStation.Text);
+        Assert.Equal(session.FormatStation("S", 500), vm.Grid.Rows[0].EndStation.Text);
         Assert.Equal("m³", vm.Chart.UnitLabel);
     }
 
     [Fact]
     public void E914_new_run_in_a_metric_drawing_takes_metric_defaults()
     {
-        var host = new FakeDialogHost { ActiveDrawing = new(@"C:\proj\metric.dwg", UnitSystem.Metric) };
-        var session = new FakeSheetVolSession { Alignments = ["S"] };
-        var vm = new DialogViewModel(session, host, new PendingEdits(), Fixture.Config);
+        var session = new FakeSheetVolSession { Alignments = ["S"], ActiveDrawing = new(@"C:\proj\metric.dwg", UnitSystem.Metric) };
+        var vm = new DialogViewModel(session, new PendingEdits(), Fixture.Config);
 
         Assert.Equal(AreaUnit.SquareMetres, vm.Run.AreaUnit);
         Assert.Equal(Fixture.Config.DefaultBreakSpecMetric, vm.Run.BreakSpec);
@@ -390,8 +387,8 @@ public class DialogEdgeCaseTests
     [Fact]
     public void E914_a_stored_imperial_area_unit_maps_to_its_metric_counterpart()
     {
-        var host = new FakeDialogHost { ActiveDrawing = new(@"C:\proj\metric.dwg", UnitSystem.Metric) };
-        var (_, _, _, vm) = Fixture.Open(Fixture.T2Run() with { AreaUnit = AreaUnit.Acres }, host: host);
+        var session = new FakeSheetVolSession { ActiveDrawing = new(@"C:\proj\metric.dwg", UnitSystem.Metric) };
+        var (_, _, vm) = Fixture.Open(Fixture.T2Run() with { AreaUnit = AreaUnit.Acres }, session);
 
         Assert.Equal(AreaUnit.Hectares, vm.SelectedAreaUnit!.Unit);
         Assert.Equal(AreaUnit.Hectares, vm.Run.AreaUnit);
@@ -400,8 +397,8 @@ public class DialogEdgeCaseTests
     [Fact]
     public void E1020_metric_hcfcd_labels_switch_to_m_ha_m3_and_m3_per_m()
     {
-        var host = new FakeDialogHost { ActiveDrawing = new(@"C:\proj\metric.dwg", UnitSystem.Metric) };
-        var (_, _, _, vm) = Fixture.Open(Fixture.T2Run() with { AreaUnit = AreaUnit.SquareMetres }, host: host);
+        var session = new FakeSheetVolSession { ActiveDrawing = new(@"C:\proj\metric.dwg", UnitSystem.Metric) };
+        var (_, _, vm) = Fixture.Open(Fixture.T2Run() with { AreaUnit = AreaUnit.SquareMetres }, session);
 
         vm.SelectedPreset = vm.Presets.Single(p => p.Preset == ReportPreset.HcfcdSegment);
 
@@ -424,7 +421,7 @@ public class DialogEdgeCaseTests
             new AnalysisDef(Fixture.AnalysisA, "EG vs FG_A", "EG", "FG_A"),
             new AnalysisDef(Fixture.AnalysisB, "EG vs FG_B", "EG", "FG_B"),
         ]);
-        var (session, _, _, vm) = Fixture.Open(run);
+        var (session, _, vm) = Fixture.Open(run);
         await vm.RegenerateCommand.ExecuteAsync();
 
         Assert.True(vm.Grid.ShowComparisonSelector);
@@ -446,7 +443,7 @@ public class DialogEdgeCaseTests
     [Fact]
     public void E916_one_analysis_hides_the_selector()
     {
-        var (_, _, _, vm) = Fixture.Open();
+        var (_, _, vm) = Fixture.Open();
 
         Assert.False(vm.Grid.ShowComparisonSelector);
         Assert.Single(vm.Grid.Comparisons);
@@ -457,7 +454,7 @@ public class DialogEdgeCaseTests
     [Fact]
     public async Task E917_area_unit_change_reformats_at_once_without_regenerating_and_is_saved_with_the_run()
     {
-        var (session, _, _, vm) = Fixture.Open();
+        var (session, _, vm) = Fixture.Open();
         await vm.RegenerateCommand.ExecuteAsync();
         var rows = vm.Grid.Rows;
         Assert.Equal(["SF", "AC"], vm.AreaUnits.Select(u => u.Label));            // offered units follow the drawing
@@ -484,7 +481,7 @@ public class DialogEdgeCaseTests
     [Fact]
     public async Task E418_area_unit_switch_marks_the_drawn_tables_out_of_date_until_regen()
     {
-        var (_, _, _, vm) = Fixture.Open();
+        var (_, _, vm) = Fixture.Open();
         await vm.RegenerateCommand.ExecuteAsync();
 
         vm.SelectedAreaUnit = vm.AreaUnits.Single(u => u.Unit == AreaUnit.Acres);
