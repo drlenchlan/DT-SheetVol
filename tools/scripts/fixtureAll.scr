@@ -1,0 +1,10 @@
+(command "_.NETLOAD" (getenv "SHEETVOL_DLL"))
+SVFIXTURE
+ALL
+SVFIXTURE
+VOLUMES
+(progn (vl-load-com) (setq svfx-tpl (strcat (getenv "TEMP") "\\sheetvol\\fixture-template.dwg")) (if (findfile svfx-tpl) (vl-file-delete svfx-tpl)) (command "SVFIXTURE" "TEMPLATEDWG" svfx-tpl))
+SVFIXTUREREPORT
+(progn (setq svfx-out (strcat (getenv "TEMP") "\\sheetvol\\fixtureAll.dwg")) (if (findfile svfx-out) (vl-file-delete svfx-out)) (command "_.SAVEAS" "2018" svfx-out))
+_.QUIT
+_Y

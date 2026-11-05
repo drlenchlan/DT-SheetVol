@@ -1,0 +1,4 @@
+(command "_.NETLOAD" (getenv "SHEETVOL_DLL"))
+(progn (vl-load-com) (setq svfx-tpl (strcat (getenv "TEMP") "\\sheetvol\\fixture-template.dwg")) (if (findfile svfx-tpl) (vl-file-delete svfx-tpl)) (command "SVFIXTURE" "TEMPLATEDWG" svfx-tpl))
+_.QUIT
+_Y

@@ -1,0 +1,5 @@
+(command "_.NETLOAD" (getenv "SHEETVOL_DLL"))
+(setvar "CTAB" "SV-SHEET")
+SVFIXTUREREPORT
+_.QUIT
+_Y

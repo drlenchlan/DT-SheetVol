@@ -1,0 +1,11 @@
+(command "_.NETLOAD" (getenv "SHEETVOL_DLL"))
+SVFIXTURE
+A
+SVFIXTURE
+S
+SVFIXTURE
+VOLUMES
+SVFIXTUREREPORT
+(progn (vl-load-com) (setq svfx-out (strcat (getenv "SHEETVOL_REPO") "/tools/fixtures/fixtureA.dwg")) (if (findfile svfx-out) (vl-file-delete svfx-out)) (command "_.SAVEAS" "2018" svfx-out))
+_.QUIT
+_Y
