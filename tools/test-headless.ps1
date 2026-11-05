@@ -112,6 +112,15 @@ Get-ChildItem $buildRoot -Recurse -File | Where-Object { $_.Extension -in '.dll'
         New-Item -ItemType Directory -Force (Split-Path $dest -Parent) | Out-Null
         Copy-Item $_.FullName $dest -Force
     }
+# The UI assembly too, when it has been built, so Dan can NETLOAD it from the same
+# trusted folder for interactive probes (S3, 2026-11-05). Core Console never loads it.
+$uiProj = Join-Path (Split-Path $PSScriptRoot -Parent) 'src\SheetVol.UI\SheetVol.UI.csproj'
+$uiDir = (& dotnet msbuild $uiProj -getProperty:OutDir -p:Configuration=$Configuration -nologo 2>$null | Select-Object -Last 1).Trim()
+if ($uiDir -and -not [IO.Path]::IsPathRooted($uiDir)) { $uiDir = Join-Path (Split-Path $uiProj -Parent) $uiDir }
+if ($uiDir -and (Test-Path (Join-Path $uiDir 'SheetVol.UI.dll'))) {
+    Get-ChildItem $uiDir -File | Where-Object { $_.Name -like 'SheetVol.UI.*' } |
+        ForEach-Object { Copy-Item $_.FullName (Join-Path $stage $_.Name) -Force }
+}
 $dllPath = (Join-Path $stage 'SheetVol.Civil3D.dll') -replace '\\', '/'
 Write-Host "staged:        $stage"
 
