@@ -17,12 +17,12 @@ namespace SheetVol.Civil3D.Adapters;
 /// <param name="Offset">Offset used on each side, drawing units.</param>
 /// <param name="AnalyticPoints">Offset points computed in closed form (lines and arcs) and compared with <c>PointLocation</c>.</param>
 /// <param name="PointAtPoints">Offset points on spirals, which C1 takes from <see cref="IAlignmentGeometry.PointAt"/> itself; compared too, so they read 0.</param>
-/// <param name="MitrePointsSkipped">Mitre vertices at tangent-tangent angle points; by design not on the perpendicular offset, so not compared.</param>
+/// <param name="JunctionPointsSkipped">Vertices at kinked junctions: mitres at tangent-tangent angle points (off the perpendicular offset by design) and near-tangent kinks where C1 and PointLocation may evaluate different elements; not compared.</param>
 /// <param name="MaxDeviation">Largest distance found, drawing units.</param>
 /// <param name="Worst">Where the largest distance was found.</param>
 /// <param name="MaxDirectionError">Largest difference, radians, between a converted azimuth and the direction of the element's own geometry.</param>
 public sealed record CrossCheckReport(
-    string Method, double Offset, int AnalyticPoints, int PointAtPoints, int MitrePointsSkipped,
+    string Method, double Offset, int AnalyticPoints, int PointAtPoints, int JunctionPointsSkipped,
     double MaxDeviation, string Worst, double MaxDirectionError);
 
 /// <summary>
@@ -92,10 +92,17 @@ public sealed class AlignmentAdapter : IAlignmentGeometry
     internal StationTable Stations { get; }
 
     /// <summary>
-    /// Finds the alignment by name, then by its stored handle (renamed: SV-E445 warning), and opens it.
-    /// Neither found is SV-E213.
+    /// Finds the alignment by name, then by its stored handle when that handle was stored for the
+    /// same name (renamed: SV-E445 warning), and opens it. Neither found is SV-E213.
     /// </summary>
-    public static Outcome<AlignmentAdapter> Find(Transaction tr, Database db, string name, string? storedHandle,
+    /// <param name="tr">The caller's transaction.</param>
+    /// <param name="db">The drawing.</param>
+    /// <param name="name">Alignment name from the run definition.</param>
+    /// <param name="stored">Name and handle persisted with the run (6.9), or null on a first run.</param>
+    /// <param name="units">Drawing units.</param>
+    /// <param name="cfg">Adapter settings.</param>
+    /// <param name="geometry">Boundary tolerances; default from <paramref name="units"/>.</param>
+    public static Outcome<AlignmentAdapter> Find(Transaction tr, Database db, string name, StoredRef? stored,
         DrawingUnitInfo units, AdapterConfig cfg, GeometryOptions? geometry = null)
     {
         ArgumentNullException.ThrowIfNull(tr);
@@ -111,16 +118,19 @@ public sealed class AlignmentAdapter : IAlignmentGeometry
             if (tr.GetObject(id, OpenMode.ForRead) is Alignment a && string.Equals(a.Name, name, StringComparison.Ordinal)) { byName = id; break; }
         }
         var notes = new List<Problem>();
-        if (byName.IsNull && Handles.TryResolve(db, storedHandle, out var byHandle) && tr.GetObject(byHandle, OpenMode.ForRead) is Alignment renamed)
+        // The stored handle stands in for the name only when it was stored for this same name: a
+        // run whose alignment name was edited must not fall back to the previous alignment.
+        bool storedForThisName = stored is not null && string.Equals(stored.Name, name, StringComparison.OrdinalIgnoreCase);
+        if (byName.IsNull && storedForThisName && Handles.TryResolve(db, stored!.Handle, out var byHandle) && tr.GetObject(byHandle, OpenMode.ForRead) is Alignment renamed)
         {
             notes.Add(new Problem(AdapterCodes.SourceRenamed, Severity.Warning,
-                $"Alignment '{name}' was not found by name; its stored handle {storedHandle} is now alignment '{renamed.Name}', which is used.",
+                $"Alignment '{name}' was not found by name; its stored handle {stored.Handle} is now alignment '{renamed.Name}', which is used.",
                 Fix: "The run now refers to the renamed alignment; check it is the intended one."));
             byName = byHandle;
         }
         if (byName.IsNull)
             return Outcome<AlignmentAdapter>.Fail(new Problem(AdapterCodes.AlignmentNotFound, Severity.Error,
-                $"Alignment '{name}' is not in the drawing" + (storedHandle is null ? "." : $" (by name or by stored handle {storedHandle})."),
+                $"Alignment '{name}' is not in the drawing" + (storedForThisName && stored!.Handle is not null ? $" (by name or by stored handle {stored.Handle})." : "."),
                 Fix: "Restore the alignment or point the run at another one; nothing was changed."));
 
         var opened = Open(tr, byName, units, cfg, geometry);
@@ -254,7 +264,11 @@ public sealed class AlignmentAdapter : IAlignmentGeometry
                         double g0 = Math.Atan2(a.Y - c.Y, a.X - c.X) + turn, g1 = Math.Atan2(b.Y - c.Y, b.X - c.X) + turn;
                         double err = Math.Max(Math.Abs(Normalize(d0 - g0)), Math.Abs(Normalize(d1 - g1)));
                         maxDirError = Math.Max(maxDirError, err);
-                        if (err > cfg.DirectionTolerance)
+                        // atan2 of (point - center) carries about one coordinate ulp / R of rounding: at
+                        // state-plane magnitudes that exceeds 1e-9 rad on curb-return radii, so allow it.
+                        double magnitude = Math.Max(Math.Max(Math.Abs(a.X), Math.Abs(a.Y)), Math.Max(Math.Abs(c.X), Math.Abs(c.Y)));
+                        double rounding = 8 * (Math.BitIncrement(magnitude) - magnitude) / r;
+                        if (err > Math.Max(cfg.DirectionTolerance, rounding))
                             problems.Add(new Problem(AdapterCodes.AlignmentCrossCheck, Severity.Error,
                                 $"Alignment '{al.Name}': the arc at {Where(s0)} reports directions that differ from its own geometry by {err:E2} rad (Clockwise={cw}).",
                                 Fix: "This points to an adapter defect, not a drafting error. Report it with the drawing."));
@@ -369,7 +383,7 @@ public sealed class AlignmentAdapter : IAlignmentGeometry
         {
             double s = st[k];
             int e = ElementUsed(s);
-            if (IsMitre(s)) { mitre += 2; continue; }
+            if (IsKinkedJunction(s, c, cfg)) { mitre += 2; continue; }
             foreach (var (vertex, o) in new[] { (ring[k], c), (ring[2 * n - 1 - k], -c) })
             {
                 var q = PointAt(s, o);
@@ -390,7 +404,9 @@ public sealed class AlignmentAdapter : IAlignmentGeometry
         {
             var g = _segs[e];
             if (g.Kind == SegKind.Spiral) continue;
-            for (int k = 0; k <= 4; k++)
+            // Interior stations only: at an element end that meets a kink the two elements' offset
+            // points differ by 2c sin(d/2) and PointLocation can match only one of them.
+            for (int k = 1; k <= 3; k++)
             {
                 double s = g.StartStation + (g.EndStation - g.StartStation) * k / 4;
                 foreach (double o in new[] { -c, 0, c })
@@ -430,14 +446,19 @@ public sealed class AlignmentAdapter : IAlignmentGeometry
         return Math.Clamp(i, 0, _segs.Length - 1);
     }
 
-    /// <summary>True at a line-line junction with a change of direction: C1 puts a mitre point there, off the perpendicular offset by design.</summary>
-    private bool IsMitre(double s)
+    /// <summary>
+    /// True at a junction whose change of direction could move an offset point by more than the
+    /// tolerance: a line-line angle point (C1 puts a mitre point there, off the perpendicular
+    /// offset by design), or a near-tangent kink C1 still treats as tangent (it evaluates the
+    /// following element while PointLocation may evaluate the preceding one). Neither vertex is
+    /// comparable with a single PointLocation call, so both are skipped and counted.
+    /// </summary>
+    private bool IsKinkedJunction(double s, double offset, AdapterConfig cfg)
     {
         for (int j = 0; j + 1 < _segs.Length; j++)
         {
             if (Math.Abs(_segs[j].EndStation - s) > _tol) continue;
-            return _segs[j].Kind == SegKind.Line && _segs[j + 1].Kind == SegKind.Line
-                && Math.Abs(Normalize(_segs[j + 1].StartDir - _segs[j].EndDir)) > 1e-12;
+            return Math.Abs(Normalize(_segs[j + 1].StartDir - _segs[j].EndDir)) * offset > cfg.CrossCheckTolerance;
         }
         return false;
     }

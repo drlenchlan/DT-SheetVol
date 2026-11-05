@@ -1,0 +1,5 @@
+(command "_.NETLOAD" (getenv "SHEETVOL_DLL"))
+SVADAPTERS_ABORT
+ALIGNERASE
+_.QUIT
+_Y

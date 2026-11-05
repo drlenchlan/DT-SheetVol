@@ -9,16 +9,18 @@ Every quirk the probes found (docs/api-findings.md section A) is absorbed here; 
 | Type | Use | Fails with |
 |---|---|---|
 | `DrawingUnitsReader.Read(db, VolumeConfig.Constants)` | Civil 3D drawing unit (never `INSUNITS`, P2): `DrawingUnitsPerFoot` for `PlanningOptions.ForUnitScale`, `VolumeUnits` for C2, `DialogUnits` for C4 | SV-E434 |
-| `AlignmentAdapter.Find(tr, db, name, storedHandle, units, cfg)` / `.Open(tr, id, ...)` | `IAlignmentGeometry` from sub-entities (P7), equation-aware `TryParseStation` (P8, E208), cross-check against `PointLocation` at construction | SV-E213, SV-E214, SV-E204 |
+| `AlignmentAdapter.Find(tr, db, name, stored, units, cfg)` / `.Open(tr, id, ...)` | `IAlignmentGeometry` from sub-entities (P7), equation-aware `TryParseStation` (P8, E208), cross-check against `PointLocation` at construction | SV-E213, SV-E214, SV-E204 |
 | `AnalysisResolver.EnsureAnalyses(tr, db, analyses, stored, cfg, volumeConfig)` | resolves sources, ensures and rebuilds one owned `TinVolumeSurface` per pair, writes factors; `AnalysisBinding.ToStored()` is what to persist | SV-E401 to E404, E412, E442 to E446, E803 |
 | `VolumeSourceAdapter.Open(tr, ownedId, cfg)` | `IVolumeSource`: raw cut/fill (P1 sign, P3 unadjusted), noise clamp, datum-method `Area2D` (P22) | SV-E402, SV-E403 |
 | `TriangleSourceAdapter.Read(tr, tinId, cfg, readWindowMin?, readWindowMax?)` | `ITriangleSource`: visible triangles (P23, E1013) cached once, grid-indexed window queries | SV-E402, SV-E403; SV-E1021 warning on reference/corridor surfaces |
+
+Stored references (`StoredRef(Name, Handle)`): a stored handle stands in for a missing name only while the run still asks for the name it was stored with, so editing a run to another or a misspelled name fails (SV-E442, SV-E213) instead of falling back to the old object.
 
 Lifetime: `AlignmentAdapter` and `VolumeSourceAdapter` hold objects opened in the caller's transaction and are valid only while it is open. `TriangleSourceAdapter` is a snapshot (build one per regen; one thread at a time).
 
 Settings: `AdapterConfig` (owned-surface style and layer, `RebuildSources`, noise clamp, datums, cross-check tolerances, ownership tag key, collision suffix). JSON in C2's shape (`FromJson`/`ToJson`). Style and layer defaults are PLACEHOLDERS (A7); a missing one is reported (SV-E443, SV-E444), never invented.
 
-Test-only scratch objects: aborting a transaction that created Civil 3D alignments crashed the Core Console (MEASURED, access violation), so the checks commit what they create and leave it in the scratch drawing.
+Rollback (MEASURED with `SVADAPTERS_ABORT`, one case per script `tools/scripts/adapters-abort-*.scr`): aborting the transaction after `EnsureAnalyses` created an owned surface removes it cleanly (surfaces 2 -> 2), and so does aborting after creating an alignment. Creating an alignment and erasing it in the same transaction, then aborting, crashed the Core Console (0xC0000005); the console loses its last buffered line, so whether the erase or the abort crashed is not isolated. The checks therefore commit their scratch objects.
 
 ## Headless check
 

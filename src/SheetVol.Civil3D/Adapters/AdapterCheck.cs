@@ -29,11 +29,15 @@ internal static class AdapterCheckSettings
     public const double T29Relative = 1e-9;                           // T29, E1012 on fixtures (6.15)
     public const string BrokenAlignment = "SV-A1-E214";
     public const string ErasedAlignment = "SV-A1-E213";
+    public const string ZigzagAlignment = "SV-A1-ZIGZAG";               // E204 fallback: mitres fold at +-100
+    public const int ZigzagTangents = 6;
+    public const double ZigzagTangentLength = 30.0, ZigzagDeflectionDeg = 20.0;
     public const string GridSurface = "SV-A1-GRID";
     public const string EmptySurface = "SV-A1-EMPTY";
     public const string OutOfDateSurface = "SV-A1-E404";
     public const string OutOfDateGroup = "SV-A1-E404";
     public const string RenamedSuffix = "-renamed-by-user";
+    public const string LockedLayer = "SV-A1-LOCKED";
     public const double UserVolumeCutFactor = 1.5;                    // E412: the untagged look-alike keeps this
     public static readonly (double X0, double Y0, double X1, double Y1) AroundP1 = (60, -60, 190, 60);
     public static readonly (double X0, double Y0, double X1, double Y1) HideOnFgA = (105, -20, 145, 20);

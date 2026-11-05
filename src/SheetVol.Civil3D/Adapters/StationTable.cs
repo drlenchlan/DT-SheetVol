@@ -24,7 +24,8 @@ internal sealed partial class StationTable
     private readonly Region[] _regions;
     private readonly double _tolerance;
 
-    [GeneratedRegex(@"^\s*([+-]?)(\d+)\+(\d+)(?:\.(\d*))?\s*$", RegexOptions.CultureInvariant)]
+    // [0-9], not \d: \d matches non-ASCII digits that double.Parse then rejects.
+    [GeneratedRegex(@"^\s*([+-]?)([0-9]+)\+([0-9]+)(?:\.([0-9]*))?\s*$", RegexOptions.CultureInvariant)]
     private static partial Regex PlusForm();
 
     private StationTable(Region[] regions, double plusBase, double tolerance, string formatEvidence)
@@ -147,12 +148,14 @@ internal sealed partial class StationTable
         }
 
         // Before the start or past the end: extrapolate so the planner reports the valid range (E305).
+        // When the last region counts down both ends can extrapolate; the nearer one is meant.
         var first = _regions[0];
         double before = first.RawFrom + first.Direction * (displayed - first.DisplayedFrom);
-        if (before < first.RawFrom) { raw = before; return true; }
         var last = _regions[^1];
         double after = last.RawFrom + last.Direction * (displayed - last.DisplayedFrom);
-        if (after > last.RawTo) { raw = after; return true; }
+        bool isBefore = before < first.RawFrom, isAfter = after > last.RawTo;
+        if (isBefore && (!isAfter || first.RawFrom - before <= after - last.RawTo)) { raw = before; return true; }
+        if (isAfter) { raw = after; return true; }
         error = $"Station {text} does not exist on this alignment: it falls in the gap of a station equation.";
         return false;
     }

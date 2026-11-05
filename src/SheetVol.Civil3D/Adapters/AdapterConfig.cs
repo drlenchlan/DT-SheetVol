@@ -75,6 +75,9 @@ public sealed record AdapterConfig
     /// <summary>Upper bound on grid cells in a triangle source's window index (memory guard).</summary>
     public int TriangleIndexMaxCells { get; init; } = 1 << 20;
 
+    /// <summary>A triangle whose bounding box covers more grid cells than this is kept in a list scanned on every window query instead of in every cell (memory guard against long hull slivers).</summary>
+    public int TriangleIndexOversizeCells { get; init; } = 64;
+
     /// <summary>Checks every setting; returns one SV-E446 error per bad value, or none.</summary>
     public IReadOnlyList<Problem> Validate()
     {
@@ -100,6 +103,7 @@ public sealed record AdapterConfig
         catch (FormatException) { Bad("collisionSuffixFormat", "is not a valid format with one argument."); }
         if (MaxCollisionSuffix < 2) Bad("maxCollisionSuffix", "must be at least 2.");
         if (TriangleIndexMaxCells < 1) Bad("triangleIndexMaxCells", "must be at least 1.");
+        if (TriangleIndexOversizeCells < 1) Bad("triangleIndexOversizeCells", "must be at least 1.");
         return p;
     }
 

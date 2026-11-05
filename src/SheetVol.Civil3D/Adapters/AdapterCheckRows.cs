@@ -44,7 +44,7 @@ public static partial class AdapterCheckCommands
         string h1;
         using (var tr = _db.TransactionManager.StartTransaction())
         {
-            var stored = new Dictionary<Guid, StoredAnalysisRefs> { [d.Id] = new(new SurfaceRef(N.EG, null), new SurfaceRef(N.FgD, null), h0) };
+            var stored = new Dictionary<Guid, StoredAnalysisRefs> { [d.Id] = new(new StoredRef(N.EG, null), new StoredRef(N.FgD, null), h0) };
             var o = AnalysisResolver.EnsureAnalyses(tr, _db, [d], stored, _cfg, VolCfg);
             Problems("E412 erased", o.Problems);
             h1 = o.Value[0].Owned.Handle;
@@ -56,7 +56,7 @@ public static partial class AdapterCheckCommands
         }
         using (var tr = _db.TransactionManager.StartTransaction())
         {
-            var stored = new Dictionary<Guid, StoredAnalysisRefs> { [d.Id] = new(new SurfaceRef(N.EG, null), new SurfaceRef(N.FgD, null), h1) };
+            var stored = new Dictionary<Guid, StoredAnalysisRefs> { [d.Id] = new(new StoredRef(N.EG, null), new StoredRef(N.FgD, null), h1) };
             var o = AnalysisResolver.EnsureAnalyses(tr, _db, [d], stored, _cfg, VolCfg);
             Problems("E412 renamed", o.Problems);
             string renamed = OwnedName(N.EG, N.FgD) + AdapterCheckSettings.RenamedSuffix;
@@ -83,13 +83,43 @@ public static partial class AdapterCheckCommands
             Check("E410 factors on the owned surface, raw from the adapter", vol.CutFactor == 1.25 && vol.FillFactor == 0.9 && Math.Abs(raw.Fill - 100000) < 1e-6
                 && Math.Abs(props.AdjustedFillVolume - props.UnadjustedFillVolume * 0.9) <= 1e-12 * props.UnadjustedFillVolume,
                 $"surface factors {R(vol.CutFactor)}/{R(vol.FillFactor)}; Adjusted fill {R(props.AdjustedFillVolume)} = 0.9 x Unadjusted {R(props.UnadjustedFillVolume)}; bounded fill over 500 x 200 still raw {R(raw.Fill)} (C2 applies the factor once)");
+            var spelled = new AnalysisDef(Guid.NewGuid(), "D lower case", N.EG.ToLowerInvariant(), N.FgD, 1.1, 1.0);
+            var o = AnalysisResolver.EnsureAnalyses(tr, _db, [d, spelled], null, _cfg, VolCfg);
+            Problems("E411 spellings", o.Problems);
+            Check("E411 two spellings of one pair share a surface and report its factors", o.Succeeded && o.Value[0].Owned.Id == o.Value[1].Owned.Id
+                && o.Value[0].Owned.CutFactor == o.Value[1].Owned.CutFactor && Has(o.Problems, VolumeCodes.SharedPairFactorMismatch, Severity.Warning),
+                o.Succeeded ? $"both on '{o.Value[0].Owned.Name}', both report cut factor {R(o.Value[0].Owned.CutFactor)}" : Codes(o.Problems));
             var reset = Ensure(tr, [d])[0];
             Say($"  factors reset to {R(reset.Owned.CutFactor)}/{R(reset.Owned.FillFactor)}");
             tr.Commit();
         }
+
+        // The owned surface on a locked layer is still SheetVol's to update (6.10).
+        ObjectId ownedD;
+        using (var tr = _db.TransactionManager.StartTransaction())
+        {
+            ownedD = Ensure(tr, [d])[0].Owned.Id;
+            var layers = (LayerTable)tr.GetObject(_db.LayerTableId, OpenMode.ForWrite);
+            var ltr = new LayerTableRecord { Name = AdapterCheckSettings.LockedLayer };
+            layers.Add(ltr);
+            tr.AddNewlyCreatedDBObject(ltr, true);
+            ((TinVolumeSurface)tr.GetObject(ownedD, OpenMode.ForWrite)).Layer = AdapterCheckSettings.LockedLayer;
+            ltr.IsLocked = true;
+            tr.Commit();
+        }
+        using (var tr = _db.TransactionManager.StartTransaction())
+        {
+            var o = AnalysisResolver.EnsureAnalyses(tr, _db, [d with { CutFactor = 1.2 }], null, _cfg, VolCfg);
+            Problems("locked layer", o.Problems);
+            var vol = (TinVolumeSurface)tr.GetObject(ownedD, OpenMode.ForRead);
+            Check("owned surface on a locked layer is still updated", o.Succeeded && o.Value[0].Owned.Id == ownedD && vol.CutFactor == 1.2,
+                $"'{vol.Name}' on locked layer '{vol.Layer}': factor now {R(vol.CutFactor)}, rebuilt");
+            Ensure(tr, [d]);
+            tr.Commit();
+        }
     }
 
-    /// <summary>E401, E402, E403, E442, E445, E803 through the resolver. The scratch grid and empty surfaces are committed (aborting Civil 3D creation crashed the Core Console, see StepAlignmentFailures).</summary>
+    /// <summary>E401, E402, E403, E442, E445, E803 through the resolver. The scratch grid and empty surfaces are committed and left in the scratch drawing.</summary>
     private static void StepSourceRows()
     {
         using var tr = _db.TransactionManager.StartTransaction();
@@ -117,19 +147,24 @@ public static partial class AdapterCheckCommands
         Problems("E403 triangles", emptyRead.Problems);
         Check("E403 triangle source on an empty surface", !emptyRead.Succeeded && Has(emptyRead.Problems, AdapterCodes.NoTriangles, Severity.Error), Codes(emptyRead.Problems));
 
-        ExpectSource("E442 surface not in the drawing", AnalysisResolver.ResolveSource(tr, _db, "NO-SUCH-SURFACE", "FFFFFF", "base surface", _cfg), AdapterCodes.SourceNotFound);
+        ExpectSource("E442 surface not in the drawing", AnalysisResolver.ResolveSource(tr, _db, "NO-SUCH-SURFACE", new StoredRef("NO-SUCH-SURFACE", "FFFFFF"), "base surface", _cfg), AdapterCodes.SourceNotFound);
 
         var eg = SurfaceByName<TinSurface>(tr, N.EG);
         var fgd = SurfaceByName<TinSurface>(tr, N.FgD);
-        var moved = AnalysisResolver.ResolveSource(tr, _db, N.FgD, eg.Handle.ToString(), "comparison surface", _cfg);
+        var moved = AnalysisResolver.ResolveSource(tr, _db, N.FgD, new StoredRef(N.FgD, eg.Handle.ToString()), "comparison surface", _cfg);
         Problems("E803 handle elsewhere", moved.Problems);
         Check("E803 matched by name, stored handle points elsewhere", moved.Succeeded && moved.Value.Id == fgd.ObjectId && Has(moved.Problems, AdapterCodes.SourceHandleChanged, Severity.Warning), Codes(moved.Problems));
-        var gone = AnalysisResolver.ResolveSource(tr, _db, N.FgD, "FFFFFF", "comparison surface", _cfg);
+        var gone = AnalysisResolver.ResolveSource(tr, _db, N.FgD, new StoredRef(N.FgD, "FFFFFF"), "comparison surface", _cfg);
         Problems("E803 handle gone", gone.Problems);
         Check("E803 matched by name, stored handle gone", gone.Succeeded && Has(gone.Problems, AdapterCodes.SourceHandleChanged, Severity.Warning), Codes(gone.Problems));
-        var renamed = AnalysisResolver.ResolveSource(tr, _db, "FG_D_OLD_NAME", fgd.Handle.ToString(), "comparison surface", _cfg);
+        var repicked = AnalysisResolver.ResolveSource(tr, _db, N.FgD, new StoredRef(N.FgA, "FFFFFF"), "comparison surface", _cfg);
+        Check("no E803 when the run now names another surface", repicked.Succeeded && repicked.Problems.Count == 0, $"run edited from FG_A to FG_D: {(repicked.Problems.Count == 0 ? "no warning" : Codes(repicked.Problems))}");
+        var renamed = AnalysisResolver.ResolveSource(tr, _db, "FG_D_OLD_NAME", new StoredRef("FG_D_OLD_NAME", fgd.Handle.ToString()), "comparison surface", _cfg);
         Problems("E445 renamed source", renamed.Problems);
         Check("E445 source renamed, matched by stored handle", renamed.Succeeded && renamed.Value.Name == N.FgD && Has(renamed.Problems, AdapterCodes.SourceRenamed, Severity.Warning), Codes(renamed.Problems));
+        var misspelled = AnalysisResolver.ResolveSource(tr, _db, "FG_D_MISSPELLED", new StoredRef(N.FgD, fgd.Handle.ToString()), "comparison surface", _cfg);
+        Problems("E442 edited name", misspelled.Problems);
+        Check("E442 edited run name never falls back to the previous surface's handle", !misspelled.Succeeded && Has(misspelled.Problems, AdapterCodes.SourceNotFound, Severity.Error), Codes(misspelled.Problems));
 
         var native = AnalysisResolver.ResolveSource(tr, _db, N.FgD, null, "comparison surface", _cfg);
         Check("E404/E1021 origin of a native surface", native.Succeeded && native.Value.Origin == SurfaceOrigin.Native && !native.Value.Rebuilt,

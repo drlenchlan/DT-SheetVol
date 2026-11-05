@@ -2,6 +2,7 @@
 
 using System.Diagnostics;
 using Autodesk.AutoCAD.DatabaseServices;
+using Autodesk.AutoCAD.Geometry;
 using Autodesk.Civil.ApplicationServices;
 using Autodesk.Civil.DatabaseServices;
 using SheetVol.Core;
@@ -34,11 +35,11 @@ public sealed class TriangleSourceAdapter : ITriangleSource
     private readonly double[] _minX, _minY, _maxX, _maxY;
     private readonly double _gx0, _gy0, _cell;
     private readonly int _nx, _ny;
-    private readonly int[] _cellStart = [], _cellItems = [];
+    private readonly int[] _cellStart = [], _cellItems = [], _oversize = [];
     private readonly int[] _stamp;
     private int _stampValue;
 
-    private TriangleSourceAdapter(string name, ObjectId id, SurfaceOrigin origin, Tri3[] tris, int visibleTotal, double seconds, IReadOnlyList<Problem> problems, int maxCells)
+    private TriangleSourceAdapter(string name, ObjectId id, SurfaceOrigin origin, Tri3[] tris, int visibleTotal, double seconds, IReadOnlyList<Problem> problems, int maxCells, int oversizeCells)
     {
         Name = name;
         Id = id;
@@ -69,19 +70,28 @@ public sealed class TriangleSourceAdapter : ITriangleSource
         _cell = Math.Max(_cell, Math.Max(w / _nx, h / _ny));
         _gx0 = x0; _gy0 = y0;
 
+        // A triangle whose box covers more than oversizeCells cells (a long hull sliver on a
+        // surface with no outer boundary) goes to a list scanned on every query instead of into
+        // every cell it covers, so the index stays near one entry per triangle.
         var counts = new int[_nx * _ny + 1];
+        var oversize = new List<int>();
+        var indexed = new bool[n];
         for (int i = 0; i < n; i++)
         {
             var (ix0, ix1, iy0, iy1) = Cells(_minX[i], _minY[i], _maxX[i], _maxY[i]);
+            if ((long)(ix1 - ix0 + 1) * (iy1 - iy0 + 1) > oversizeCells) { oversize.Add(i); continue; }
+            indexed[i] = true;
             for (int iy = iy0; iy <= iy1; iy++)
                 for (int ix = ix0; ix <= ix1; ix++) counts[iy * _nx + ix + 1]++;
         }
-        for (int c = 1; c < counts.Length; c++) counts[c] += counts[c - 1];
+        for (int c = 1; c < counts.Length; c++) counts[c] = checked(counts[c] + counts[c - 1]);
         _cellStart = counts;
         _cellItems = new int[counts[^1]];
+        _oversize = oversize.ToArray();
         var fill = new int[_nx * _ny];
         for (int i = 0; i < n; i++)
         {
+            if (!indexed[i]) continue;
             var (ix0, ix1, iy0, iy1) = Cells(_minX[i], _minY[i], _maxX[i], _maxY[i]);
             for (int iy = iy0; iy <= iy1; iy++)
                 for (int ix = ix0; ix <= ix1; ix++)
@@ -162,7 +172,10 @@ public sealed class TriangleSourceAdapter : ITriangleSource
             foreach (TinSurfaceTriangle t in tris)
             {
                 total++;
-                var a = t.Vertex1.Location; var b = t.Vertex2.Location; var c = t.Vertex3.Location;
+                Point3d a, b, c;
+                using (var v1 = t.Vertex1) a = v1.Location;
+                using (var v2 = t.Vertex2) b = v2.Location;
+                using (var v3 = t.Vertex3) c = v3.Location;
                 t.Dispose();
                 if (windowed && (Math.Max(a.X, Math.Max(b.X, c.X)) < wx0 || Math.Min(a.X, Math.Min(b.X, c.X)) > wx1
                               || Math.Max(a.Y, Math.Max(b.Y, c.Y)) < wy0 || Math.Min(a.Y, Math.Min(b.Y, c.Y)) > wy1)) continue;
@@ -179,7 +192,8 @@ public sealed class TriangleSourceAdapter : ITriangleSource
             problems.Add(new Problem(AdapterCodes.TriangleAccessUnverified, Severity.Warning,
                 $"Surface '{tin.Name}' is a {(origin == SurfaceOrigin.Reference ? "data-shortcut reference" : "corridor")} surface. Reading its triangles was not verified headless (probe P23); the integrator is checked against Civil 3D's bounded volume on every regen, so a bad read fails the run.",
                 Fix: "Nothing to do unless the integrator check fails; then report the drawing."));
-        return Outcome<TriangleSourceAdapter>.Ok(new TriangleSourceAdapter(tin.Name, surfaceId, origin, list.ToArray(), total, seconds, problems, cfg.TriangleIndexMaxCells), problems);
+        return Outcome<TriangleSourceAdapter>.Ok(new TriangleSourceAdapter(tin.Name, surfaceId, origin, list.ToArray(), total, seconds, problems,
+            cfg.TriangleIndexMaxCells, cfg.TriangleIndexOversizeCells), problems);
     }
 
     /// <inheritdoc />
@@ -207,8 +221,13 @@ public sealed class TriangleSourceAdapter : ITriangleSource
                 }
             }
         }
+        foreach (int i in _oversize)
+            if (_maxX[i] >= x0 && _minX[i] <= x1 && _maxY[i] >= y0 && _minY[i] <= y1) result.Add(_tris[i]);
         return result;
     }
+
+    /// <summary>Triangles kept out of the grid because their box covers too many cells; scanned on every query.</summary>
+    public int OversizeCount => _oversize.Length;
 
     /// <summary>Every cached triangle, for reports and tests.</summary>
     public IReadOnlyList<Tri3> All => _tris;

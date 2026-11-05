@@ -70,14 +70,10 @@ public sealed class VolumeSourceAdapter : IVolumeSource
         if (ownedSurfaceId.IsNull || ownedSurfaceId.IsErased || tr.GetObject(ownedSurfaceId, OpenMode.ForRead) is not TinVolumeSurface vol)
             return Outcome<VolumeSourceAdapter>.Fail(new Problem(AdapterCodes.NotTinSurface, Severity.Error,
                 $"Object {ownedSurfaceId.Handle} is not a TIN volume surface."));
-        VolumeSurfaceProperties props;
-        try { props = vol.GetVolumeProperties(); }
-        catch (InvalidOperationException)
-        {
+        if (!AnalysisResolver.TryVolumeProperties(vol, out var props))
             return Outcome<VolumeSourceAdapter>.Fail(new Problem(AdapterCodes.NoTriangles, Severity.Error,
                 $"Volume surface '{vol.Name}' has no triangles, so it has no volume."));
-        }
-        var totals = new RawVolume(Clean(props.UnadjustedCutVolume, cfg), Clean(props.UnadjustedFillVolume, cfg));
+        var totals = new RawVolume(Clean(props!.UnadjustedCutVolume, cfg), Clean(props.UnadjustedFillVolume, cfg));
         return Outcome<VolumeSourceAdapter>.Ok(new VolumeSourceAdapter(vol, cfg, totals));
     }
 
@@ -85,7 +81,8 @@ public sealed class VolumeSourceAdapter : IVolumeSource
     /// <exception cref="ArgumentException">The polygon is not closed, has 3 points or fewer, or has a non-finite coordinate.</exception>
     public RawVolume Bounded(IReadOnlyList<Pt> closedPolygon)
     {
-        var info = Call(ToPoints(closedPolygon), null);
+        using var pts = ToPoints(closedPolygon);
+        var info = Call(pts, null);
         return new RawVolume(Clean(info.Cut), Clean(info.Fill));
     }
 
@@ -93,7 +90,7 @@ public sealed class VolumeSourceAdapter : IVolumeSource
     /// <exception cref="ArgumentException">As for <see cref="Bounded"/>.</exception>
     public double Area2D(IReadOnlyList<Pt> closedPolygon)
     {
-        var pts = ToPoints(closedPolygon);
+        using var pts = ToPoints(closedPolygon);
         double d1 = _cfg.AreaDatumLow, d2 = _cfg.AreaDatumHigh;
         var low = Call(pts, d1);
         var high = Call(pts, d2);
@@ -103,7 +100,8 @@ public sealed class VolumeSourceAdapter : IVolumeSource
     /// <summary>One bounded call, raw, for reports: (Cut, Fill, Net) exactly as Civil 3D returns them.</summary>
     public (double Cut, double Fill, double Net) RawBounded(IReadOnlyList<Pt> closedPolygon, double? datum = null)
     {
-        var info = Call(ToPoints(closedPolygon), datum);
+        using var pts = ToPoints(closedPolygon);
+        var info = Call(pts, datum);
         return (info.Cut, info.Fill, info.Net);
     }
 
@@ -127,13 +125,10 @@ public sealed class VolumeSourceAdapter : IVolumeSource
             throw new ArgumentException($"A bounding polygon needs more than 3 points with the first repeated last; it has {polygon.Count}.", nameof(polygon));
         if (polygon[0] != polygon[^1])
             throw new ArgumentException("A bounding polygon must be closed: its first point must be repeated as its last.", nameof(polygon));
+        if (polygon.Any(p => !double.IsFinite(p.X) || !double.IsFinite(p.Y)))
+            throw new ArgumentException("A bounding polygon has a coordinate that is not a finite number.", nameof(polygon));
         var pts = new Point3dCollection();
-        foreach (var p in polygon)
-        {
-            if (!double.IsFinite(p.X) || !double.IsFinite(p.Y))
-                throw new ArgumentException("A bounding polygon has a coordinate that is not a finite number.", nameof(polygon));
-            pts.Add(new Point3d(p.X, p.Y, 0.0));
-        }
+        foreach (var p in polygon) pts.Add(new Point3d(p.X, p.Y, 0.0));
         return pts;
     }
 }

@@ -25,7 +25,7 @@ public static partial class AdapterCheckCommands
                 Say($"  {g.Kind,-6} raw {F6(g.StartStation)}..{F6(g.EndStation)} ({F6(g.Start.X)}, {F6(g.Start.Y)})->({F6(g.End.X)}, {F6(g.End.Y)}) StartDir {F6(Deg(g.StartDir))} deg EndDir {F6(Deg(g.EndDir))} deg"
                     + (g.Kind == SegKind.Arc ? $" Center ({F6(g.Center!.Value.X)}, {F6(g.Center.Value.Y)}) R {F6(g.Radius)} Clockwise={g.Clockwise}" : ""));
             var x = al.CrossCheck;
-            Say($"  cross-check: {x.Method}; offset +-{F(x.Offset)}; {x.AnalyticPoints} closed-form point(s), {x.PointAtPoints} spiral PointAt point(s), {x.MitrePointsSkipped} mitre vertex(es) skipped; max |computed - PointLocation| = {E(x.MaxDeviation)} {x.Worst}; max direction error {E(x.MaxDirectionError)} rad");
+            Say($"  cross-check: {x.Method}; offset +-{F(x.Offset)}; {x.AnalyticPoints} closed-form point(s), {x.PointAtPoints} spiral PointAt point(s), {x.JunctionPointsSkipped} kinked-junction vertex(es) skipped; max |computed - PointLocation| = {E(x.MaxDeviation)} {x.Worst}; max direction error {E(x.MaxDirectionError)} rad");
             Check($"E204 construction cross-check {name}", x.MaxDeviation <= _cfg.CrossCheckTolerance && x.AnalyticPoints > 0,
                 $"max {E(x.MaxDeviation)} <= {E(_cfg.CrossCheckTolerance)} over {x.AnalyticPoints} closed-form points");
 
@@ -127,17 +127,26 @@ public static partial class AdapterCheckCommands
 
     /// <summary>
     /// E213 (missing, erased) and E214 (disconnected). The test alignments are committed and left in
-    /// the scratch drawing: aborting a transaction that created Civil 3D alignments crashed the Core
-    /// Console (MEASURED 2026-11-05, access violation 0xC0000005 at the abort).
+    /// the scratch drawing. MEASURED 2026-11-05 (SVADAPTERS_ABORT): a transaction that created an
+    /// alignment, or an owned volume surface, aborts cleanly; one that created an alignment and
+    /// erased it crashed the Core Console (0xC0000005) at the erase or the abort.
     /// </summary>
     private static void StepAlignmentFailures()
     {
-        ObjectId erasedId, brokenId;
+        ObjectId erasedId, brokenId, zigId;
         using (var tr = _db.TransactionManager.StartTransaction())
         {
-            var missing = AlignmentAdapter.Find(tr, _db, "NO-SUCH-ALIGNMENT", "FFFFFF", _units, _cfg);
+            var missing = AlignmentAdapter.Find(tr, _db, "NO-SUCH-ALIGNMENT", new StoredRef("NO-SUCH-ALIGNMENT", "FFFFFF"), _units, _cfg);
             Problems("E213 missing", missing.Problems);
             Check("E213 alignment not in the drawing", !missing.Succeeded && missing.Problems.Any(p => p.Code == AdapterCodes.AlignmentNotFound), "fails at step 1 with SV-E213");
+
+            string sHandle = CivilAlignment(tr, N.AlignmentS, OpenMode.ForRead).Handle.ToString();
+            var renamed = AlignmentAdapter.Find(tr, _db, "S-OLD-NAME", new StoredRef("S-OLD-NAME", sHandle), _units, _cfg);
+            Problems("E445 alignment renamed", renamed.Problems);
+            Check("E445 alignment renamed, matched by stored handle", renamed.Succeeded && renamed.Value.Name == N.AlignmentS && renamed.Problems.Any(p => p.Code == AdapterCodes.SourceRenamed), $"opened '{(renamed.Succeeded ? renamed.Value.Name : "-")}'");
+            var edited = AlignmentAdapter.Find(tr, _db, "S-MISSPELLED", new StoredRef(N.AlignmentS, sHandle), _units, _cfg);
+            Problems("E213 edited name", edited.Problems);
+            Check("E213 edited run name never falls back to the previous alignment's handle", !edited.Succeeded && edited.Problems.Any(p => p.Code == AdapterCodes.AlignmentNotFound), "stored handle was stored for 'S', the run now asks for 'S-MISSPELLED'");
 
             var civ = CivilDocument.GetCivilDocument(_db);
             var erased = NewAlignment(tr, civ, AdapterCheckSettings.ErasedAlignment);
@@ -148,6 +157,19 @@ public static partial class AdapterCheckCommands
             broken.Entities.AddFixedLine(new Point3d(200, 2000, 0), new Point3d(300, 2000, 0));
             brokenId = broken.ObjectId;
             Say($"{broken.Name}: two fixed lines 100 apart; Entities.Count={broken.Entities.Count}, stations {R(broken.StartingStation)}..{R(broken.EndingStation)}");
+
+            // Short tangents with 20 degree angle points: at the +-100 cross-check offset C1's mitres
+            // fold (E205), so the adapter must fall back to the direct closed-form check and pass.
+            var zig = NewAlignment(tr, civ, AdapterCheckSettings.ZigzagAlignment);
+            var p = new Point3d(0, 3000, 0);
+            for (int i = 0; i < AdapterCheckSettings.ZigzagTangents; i++)
+            {
+                double dir = (i % 2 == 0 ? 1 : -1) * AdapterCheckSettings.ZigzagDeflectionDeg / 2 * Math.PI / 180;
+                var q = new Point3d(p.X + AdapterCheckSettings.ZigzagTangentLength * Math.Cos(dir), p.Y + AdapterCheckSettings.ZigzagTangentLength * Math.Sin(dir), 0);
+                zig.Entities.AddFixedLine(p, q);   // end to end, as FX builds K
+                p = q;
+            }
+            zigId = zig.ObjectId;
             tr.Commit();
         }
         using (var tr = _db.TransactionManager.StartTransaction())
@@ -163,6 +185,13 @@ public static partial class AdapterCheckCommands
             var gap = AlignmentAdapter.Open(tr, brokenId, _units, _cfg);
             Problems("E214", gap.Problems);
             Check("E214 disconnected entities", !gap.Succeeded && gap.Problems.Any(p => p.Code == AdapterCodes.AlignmentGap), gap.Problems.FirstOrDefault()?.Message ?? "no problem raised");
+
+            var zig = AlignmentAdapter.Open(tr, zigId, _units, _cfg);
+            Problems("E204 fallback", zig.Problems);
+            var zx = zig.Succeeded ? zig.Value.CrossCheck : null;
+            if (zx is not null) Say($"{AdapterCheckSettings.ZigzagAlignment}: {zig.Value.Segments.Count} tangents of {F(AdapterCheckSettings.ZigzagTangentLength)} with {F(AdapterCheckSettings.ZigzagDeflectionDeg)} deg angle points; cross-check: {zx.Method}; {zx.AnalyticPoints} closed-form point(s); max {E(zx.MaxDeviation)}");
+            Check("E204 direct-check fallback on a kinked alignment", zx is not null && zx.Method.StartsWith("direct", StringComparison.Ordinal) && zx.MaxDeviation <= _cfg.CrossCheckTolerance,
+                zx is null ? "adapter refused the alignment" : $"fallback ran and passed ({E(zx.MaxDeviation)})");
             tr.Commit();
         }
     }

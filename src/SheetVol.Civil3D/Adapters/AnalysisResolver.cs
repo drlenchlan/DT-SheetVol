@@ -23,11 +23,16 @@ public enum SurfaceOrigin
     Corridor,
 }
 
-/// <summary>A surface reference as persisted with a run (6.9: by handle and name).</summary>
-public sealed record SurfaceRef(string Name, string? Handle);
+/// <summary>
+/// A source reference as persisted with a run (6.9: by handle and name): the name the run used
+/// when the handle was stored. The handle stands in for a missing name only while the run still
+/// asks for that same name, so editing a run to another (or a misspelled) name never falls back to
+/// the previous object.
+/// </summary>
+public sealed record StoredRef(string Name, string? Handle);
 
 /// <summary>What the persistence store (A2) remembers for one analysis: its sources and the owned volume surface.</summary>
-public sealed record StoredAnalysisRefs(SurfaceRef? Base, SurfaceRef? Comparison, string? OwnedHandle);
+public sealed record StoredAnalysisRefs(StoredRef? Base, StoredRef? Comparison, string? OwnedHandle);
 
 /// <summary>A base or comparison surface that passed every check (E402, E403, E404).</summary>
 /// <param name="Id">The TIN surface.</param>
@@ -58,8 +63,8 @@ public sealed record AnalysisBinding(AnalysisDef Analysis, OwnedSurface Owned)
 {
     /// <summary>What to persist for this analysis after a successful regen.</summary>
     public StoredAnalysisRefs ToStored() => new(
-        new SurfaceRef(Owned.Sources.Base.Name, Owned.Sources.Base.Handle),
-        new SurfaceRef(Owned.Sources.Comparison.Name, Owned.Sources.Comparison.Handle),
+        new StoredRef(Owned.Sources.Base.Name, Owned.Sources.Base.Handle),
+        new StoredRef(Owned.Sources.Comparison.Name, Owned.Sources.Comparison.Handle),
         Owned.Handle);
 }
 
@@ -67,9 +72,10 @@ public sealed record AnalysisBinding(AnalysisDef Analysis, OwnedSurface Owned)
 /// Resolves an analysis's surfaces and keeps its owned volume surface (HANDOFF.md 6.5, 6.10
 /// step 3; rows E401 to E404, E411, E412, E803).
 /// <list type="bullet">
-/// <item>Sources are found by name, then by stored handle. Matched by name while the stored handle
-/// is gone or elsewhere: SV-E803 warning (re-referenced). Matched only by handle: SV-E445 warning
-/// (renamed). Neither: SV-E442 error.</item>
+/// <item>Sources are found by name, then by stored handle, and the stored handle counts only while
+/// it was stored for the name the run asks for (<see cref="StoredRef"/>). Matched by name while that
+/// handle is gone or elsewhere: SV-E803 warning (re-referenced). Matched only by handle: SV-E445
+/// warning (renamed). Neither: SV-E442 error.</item>
 /// <item>A source must be a TIN surface (grid and volume surfaces: SV-E402), have triangles
 /// (SV-E403), and be current (SV-E404: a native surface is rebuilt when
 /// <see cref="AdapterConfig.RebuildSources"/> is on, otherwise the run fails naming it; a stale or
@@ -82,7 +88,8 @@ public sealed record AnalysisBinding(AnalysisDef Analysis, OwnedSurface Owned)
 /// <item>On every call the owned surface gets the analysis factors and is rebuilt: probe P18
 /// showed <c>IsOutOfDate</c> stays false while a volume surface returns stale totals.</item>
 /// </list>
-/// All work runs in the caller's transaction; aborting it removes anything created here.
+/// All work runs in the caller's transaction. Aborting it removes an owned surface created here
+/// (MEASURED with SVADAPTERS_ABORT); rollback of a factor write or a rebuild was not measured.
 /// </summary>
 public static class AnalysisResolver
 {
@@ -122,6 +129,18 @@ public static class AnalysisResolver
             if (!owned.Succeeded) continue;
             foreach (var id in p.AnalysisIds) bindings.Add(new AnalysisBinding(analyses.First(a => a.Id == id), owned.Value));
         }
+
+        // C2 groups pairs by exact names; two spellings of the same surfaces ("EG" and "eg") resolve
+        // to one owned surface, which keeps the factors written last. Say so, and report those factors.
+        foreach (var shared in bindings.GroupBy(x => x.Owned.Id).Where(g => g.Select(x => (x.Analysis.BaseSurface, x.Analysis.ComparisonSurface)).Distinct().Count() > 1))
+        {
+            var final = shared.Last().Owned;
+            problems.Add(new Problem(VolumeCodes.SharedPairFactorMismatch, Severity.Warning,
+                $"Analyses {string.Join(", ", shared.Select(x => $"'{x.Analysis.Name}'").Distinct())} name the same surfaces with different spellings and share the owned surface '{final.Name}', which carries cut {final.CutFactor.ToString("R", CultureInfo.InvariantCulture)} / fill {final.FillFactor.ToString("R", CultureInfo.InvariantCulture)}.",
+                Fix: "Spell the surface names the same way in every analysis."));
+            for (int i = 0; i < bindings.Count; i++)
+                if (bindings[i].Owned.Id == final.Id) bindings[i] = bindings[i] with { Owned = bindings[i].Owned with { CutFactor = final.CutFactor, FillFactor = final.FillFactor } };
+        }
         return problems.Any(x => x.Severity == Severity.Error)
             ? Outcome<IReadOnlyList<AnalysisBinding>>.Fail(problems)
             : Outcome<IReadOnlyList<AnalysisBinding>>.Ok(bindings, problems);
@@ -129,13 +148,13 @@ public static class AnalysisResolver
 
     /// <summary>Resolves base and comparison and rejects a pair that is one surface (E401).</summary>
     public static Outcome<ResolvedPair> ResolvePair(Transaction tr, Database db, string baseName, string comparisonName,
-        SurfaceRef? storedBase, SurfaceRef? storedComparison, AdapterConfig cfg, string? analysisName = null)
+        StoredRef? storedBase, StoredRef? storedComparison, AdapterConfig cfg, string? analysisName = null)
     {
         string who = analysisName is null ? "" : $"Analysis '{analysisName}': ";
         if (string.Equals(baseName, comparisonName, StringComparison.Ordinal))
             return Outcome<ResolvedPair>.Fail(SameSurface(who, baseName));
-        var b = ResolveSource(tr, db, baseName, storedBase?.Handle, who + "base surface", cfg);
-        var c = ResolveSource(tr, db, comparisonName, storedComparison?.Handle, who + "comparison surface", cfg);
+        var b = ResolveSource(tr, db, baseName, storedBase, who + "base surface", cfg);
+        var c = ResolveSource(tr, db, comparisonName, storedComparison, who + "comparison surface", cfg);
         var problems = b.Problems.Concat(c.Problems).ToList();
         if (!b.Succeeded || !c.Succeeded) return Outcome<ResolvedPair>.Fail(problems);
         if (b.Value.Id == c.Value.Id)
@@ -152,11 +171,12 @@ public static class AnalysisResolver
     /// <param name="tr">The caller's transaction; a native surface that is out of date is opened for write and rebuilt.</param>
     /// <param name="db">The drawing.</param>
     /// <param name="name">Name from the run definition.</param>
-    /// <param name="storedHandle">Handle persisted with the run, or null.</param>
+    /// <param name="stored">Name and handle persisted with the run, or null; the handle is used only when its stored name is <paramref name="name"/> (case-insensitive).</param>
     /// <param name="who">How messages name it, for example "Analysis 'A': base surface".</param>
     /// <param name="cfg">Adapter settings (<see cref="AdapterConfig.RebuildSources"/>).</param>
-    public static Outcome<ResolvedSource> ResolveSource(Transaction tr, Database db, string name, string? storedHandle, string who, AdapterConfig cfg)
+    public static Outcome<ResolvedSource> ResolveSource(Transaction tr, Database db, string name, StoredRef? stored, string who, AdapterConfig cfg)
     {
+        string? storedHandle = stored is not null && string.Equals(stored.Name, name, StringComparison.OrdinalIgnoreCase) ? stored.Handle : null;
         var civ = CivilDocument.GetCivilDocument(db);
         if (civ is null) return Outcome<ResolvedSource>.Fail(new Problem(AdapterCodes.SourceNotFound, Severity.Error, "The drawing has no Civil 3D document."));
         var notes = new List<Problem>();
@@ -232,6 +252,10 @@ public static class AnalysisResolver
             if (!cfg.RebuildSources)
                 return Outcome<ResolvedSource>.Fail(notes.Append(new Problem(AdapterCodes.SourceOutOfDate, Severity.Error,
                     $"{who} '{tin.Name}' is out of date and RebuildSources is off.", Fix: "Rebuild the surface, or turn RebuildSources on, then regenerate.")));
+            if (tr.GetObject(tin.LayerId, OpenMode.ForRead) is LayerTableRecord { IsLocked: true } locked)
+                return Outcome<ResolvedSource>.Fail(notes.Append(new Problem(AdapterCodes.SourceOutOfDate, Severity.Error,
+                    $"{who} '{tin.Name}' is out of date and sits on locked layer '{locked.Name}'; SheetVol does not rebuild a surface it does not own on a locked layer.",
+                    Fix: "Rebuild the surface, or unlock its layer, then regenerate.")));
             tin.UpgradeOpen();
             tin.Rebuild();
             rebuilt = true;
@@ -341,13 +365,13 @@ public static class AnalysisResolver
             created = true;
         }
 
-        var vol = (TinVolumeSurface)tr.GetObject(chosen, OpenMode.ForWrite);
+        // The surface is SheetVol's own (tagged, or created just now): opened even on a locked layer (6.10).
+        var vol = (TinVolumeSurface)tr.GetObject(chosen, OpenMode.ForWrite, false, true);
         if (vol.CutFactor != cutFactor) vol.CutFactor = cutFactor;
         if (vol.FillFactor != fillFactor) vol.FillFactor = fillFactor;
         vol.Rebuild();   // P18: always; IsOutOfDate cannot be trusted on a volume surface
         int triangles = TinTriangles(vol);
-        bool props = true;
-        try { _ = vol.GetVolumeProperties(); } catch (InvalidOperationException) { props = false; }
+        bool props = TryVolumeProperties(vol, out _);
         if (triangles == 0 || !props)
             return Outcome<OwnedSurface>.Fail(notes.Append(new Problem(AdapterCodes.NoTriangles, Severity.Error,
                 $"The owned volume surface '{vol.Name}' has no triangles after a rebuild: {pair.Base.Name} and {pair.Comparison.Name} do not overlap anywhere.",
@@ -386,17 +410,30 @@ public static class AnalysisResolver
         return id;
     }
 
-    /// <summary>The surface really compares the pair: its volume properties name both, or (with no triangles yet) its tag carries both handles.</summary>
+    /// <summary>
+    /// The surface really compares the pair: its volume properties name both. A surface whose
+    /// properties cannot be read (no triangles) falls back to its tag's handles; it is then
+    /// rebuilt, and fails SV-E403 if it is still empty, so it can never yield a number.
+    /// </summary>
     private static bool SameSources(TinVolumeSurface v, OwnershipTag tag, ResolvedPair pair)
     {
-        try
+        if (TryVolumeProperties(v, out var p))
+            return p!.BaseSurface == pair.Base.Id && p.ComparisonSurface == pair.Comparison.Id;
+        return tag.BaseHandle == pair.Base.Handle && tag.ComparisonHandle == pair.Comparison.Handle;
+    }
+
+    /// <summary>
+    /// <c>GetVolumeProperties</c>, which throws on a volume surface with no triangles (5.1 names
+    /// <see cref="InvalidOperationException"/>; the exact type on this host is unprobed, so Civil and
+    /// AutoCAD exceptions are caught too).
+    /// </summary>
+    internal static bool TryVolumeProperties(TinVolumeSurface v, out VolumeSurfaceProperties? props)
+    {
+        try { props = v.GetVolumeProperties(); return true; }
+        catch (System.Exception ex) when (ex is InvalidOperationException or ArgumentException or Autodesk.AutoCAD.Runtime.Exception)
         {
-            var p = v.GetVolumeProperties();
-            return p.BaseSurface == pair.Base.Id && p.ComparisonSurface == pair.Comparison.Id;
-        }
-        catch (InvalidOperationException)
-        {
-            return tag.BaseHandle == pair.Base.Handle && tag.ComparisonHandle == pair.Comparison.Handle;
+            props = null;
+            return false;
         }
     }
 
