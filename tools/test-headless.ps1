@@ -102,8 +102,16 @@ if (-not (Test-Path (Join-Path $BuildDir 'SheetVol.Civil3D.dll'))) { throw "no S
 $leaf = Split-Path (Split-Path $PSScriptRoot -Parent) -Leaf
 $stage = Join-Path $env:APPDATA "Autodesk\ApplicationPlugins\SheetVol-dev-$leaf.bundle\Contents"
 New-Item -ItemType Directory -Force $stage | Out-Null
-Get-ChildItem $BuildDir -File | Where-Object { $_.Extension -in '.dll', '.pdb', '.json' } |
-    ForEach-Object { Copy-Item $_.FullName (Join-Path $stage $_.Name) -Force }
+# Subfolders too: Templates\ ships beside the DLL since C2, and A2 found it missing
+# from the stage (2026-11-05).
+$buildRoot = (Resolve-Path $BuildDir).Path.TrimEnd('\')
+Get-ChildItem $buildRoot -Recurse -File | Where-Object { $_.Extension -in '.dll', '.pdb', '.json' } |
+    ForEach-Object {
+        $rel  = $_.FullName.Substring($buildRoot.Length).TrimStart('\')
+        $dest = Join-Path $stage $rel
+        New-Item -ItemType Directory -Force (Split-Path $dest -Parent) | Out-Null
+        Copy-Item $_.FullName $dest -Force
+    }
 $dllPath = (Join-Path $stage 'SheetVol.Civil3D.dll') -replace '\\', '/'
 Write-Host "staged:        $stage"
 
