@@ -1,0 +1,34 @@
+(command "_.NETLOAD" (getenv "SHEETVOL_DLL"))
+(progn (vl-load-com) (setq a3dir (strcat (getenv "TEMP") "\\sheetvol")) (vl-mkdir a3dir) (setq a3tpl (strcat a3dir "\\a3-template.dwg") a3out (strcat a3dir "\\a3-out.dwg")) (foreach f (list a3tpl a3out (strcat a3dir "\\a3-t18.dwg")) (if (findfile f) (vl-file-delete f))) (princ))
+SVFIXTURE
+TEMPLATE
+SVWRITERSPAPER
+PREP
+(command "_.SAVEAS" "2018" a3tpl)
+(command "_.SAVEAS" "2018" a3out)
+SVWRITERSPAPER
+BUILD
+(setvar "CTAB" "T18-1")
+SVWRITERSPAPER
+ACTIVE
+_.MSPACE
+SVWRITERSPAPER
+TRANS
+_.PSPACE
+(setvar "CTAB" "T18-2")
+SVWRITERSPAPER
+ACTIVE
+_.MSPACE
+SVWRITERSPAPER
+TRANS
+_.PSPACE
+(setvar "CTAB" "E6-1")
+_.MSPACE
+SVWRITERSPAPER
+E611
+_.PSPACE
+SVWRITERSPAPER
+E611CHECK
+(setvar "CTAB" "Model")
+_.QUIT
+_Y
