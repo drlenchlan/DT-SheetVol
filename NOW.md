@@ -120,8 +120,8 @@ Filled as workers return. Status: TODO / IN PROGRESS / GREEN / MANUAL-OK / BLOCK
 | E7xx Frames | E701–E713 | TODO (L1) |
 | E8xx Regen | E801–E812 | Logic-level GREEN (C3: E804–E806, E811); H/M rows TODO (A4, L2) |
 | E9xx Dialog | E901–E917 | U rows GREEN (C4: E902, E903, E904, E907, E912u, E914, E916, E917; logic for E901, E905, E906, E911 too); M rows TODO (U2, Dan) |
-| E10xx OHWM | E1001–E1021 | TODO (C5, A1, A2) |
-| T1–T31 | | T15, T16, T17 GREEN; T14 fingerprint part and T19 logic part GREEN (C3); T11, T23 GREEN (C2); T22 GREEN (C4); rest TODO |
+| E10xx OHWM | E1001–E1021 | U rows GREEN (C5: E1001–E1011, E1019, E1020); H rows TODO (A1, A2, A4: E1012–E1018, E1021) |
+| T1–T31 | | T15, T16, T17 GREEN; T14 fingerprint part and T19 logic part GREEN (C3); T11, T23 GREEN (C2); T22 GREEN (C4); T25–T30 GREEN on generated triangles (C5); rest TODO |
 | P1–P24 | | P16 PASSED both hosts; P11, P12, P13, P17, P20, P24 ANSWERED headless (S2, docs/api-findings.md §B); P1–P10, P18, P19, P22, P23 TODO (S1); P14, P15, P21 TODO (S3) |
 
 ## Open items for Dan (HANDOFF.md section 13)
@@ -147,6 +147,7 @@ Filled as workers return. Status: TODO / IN PROGRESS / GREEN / MANUAL-OK / BLOCK
 | 2026-11-05 | wp/c2 (C2 volumes + output) | 23990f6 | build 0 errors; `dotnet test` 152/152 in the c2 worktree and on main; commit confined to Volumes/, Output/ and their tests; no TODO/FIXME/MUTATION residue |
 | 2026-11-05 | wp/fx (FX fixtures) | 6c69e2b | build 0 errors; fixtureA.scr re-run by orchestrator in the fx worktree: EG 2 tri, FG_A 52 tri, volume surface 68 tri, UnadjustedCut 5400.000000000002 UnadjustedFill 5400; commit confined to SelfTest/Fixture*.cs and tools/scripts/fixture*.scr. fixtureA.dwg left untracked (SVFIXTURE A rebuilds it in 6 s) |
 | 2026-11-05 | wp/c4 (C4 presentation) | b2857c3 | build 0 errors; `dotnet test` 71/71 in the c4 worktree, 328/328 on main after merge; commit confined to Presentation/ and its tests; no WPF or Autodesk types (ICommand is BCL) |
+| 2026-11-05 | wp/c5 (C5 integrator) | a410702 | build 0 errors; `dotnet test` 94/94 in the c5 worktree, 420/420 on main after merge; commit confined to Volumes/Integrator/ and its tests; no Autodesk references, no residue |
 
 ## Decisions pending Dan (raised by workers, not yet ruled)
 
@@ -160,6 +161,8 @@ Filled as workers return. Status: TODO / IN PROGRESS / GREEN / MANUAL-OK / BLOCK
 | D6 | C4 | Draw options (boundary polylines, table at each segment, summary table) have no home in `RunDefinition`; they never reach the engine | dialog-only until the contract review |
 | D7 | C4 | Does the cut factor apply to HCFCD row 9? Dialog shows unfactored `ImpactResult.CutVolume`; C2 defaulted `ImpactVolumesUseCutFactor = true`. The two disagree | needs one answer at G1 |
 | D8 | C4 | Per-segment offset fix beside a failing row (6.14) has no target: `SegmentOverrides` has no offset field | text only |
+| D9 | C5 | Noise snapping on the impact path only: a depth within a per-triangle forward error bound τ = 64·ε·(|z| + κ·|∇z|·(L + W)) of zero is treated as 0, and a base elevation within τ of OHWM as OHWM. Without it, rotated or differently-gridded surfaces counted 1e-13 noise as cut (T25 area 19,094 instead of 16,000). Band totals never adjusted. Goes beyond the literal 6.15 text; Dan should accept or reject | snapping on |
+| D10 | C5 | A triangle source with nothing in the window is SV-E403 Error (no numbers); two surfaces that do not overlap inside the boundary is SV-E405 Warning with zeros. A4 decides whether one E403 fails the whole run: a design surface covering part of the alignment raises it on every segment it does not reach | per-segment error, run continues |
 
 ## Facts for later workers (from merged packages)
 
@@ -206,3 +209,10 @@ Filled as workers return. Status: TODO / IN PROGRESS / GREEN / MANUAL-OK / BLOCK
 ### From C4
 
 - Labels in `DialogText` constants for `{x:Static}`; formats, unit factors, defaults in `PresentationConfig`. Rows show numbers only while GUID, station range, offsets, analysis and OHWM still match the last regen; totals hidden until every row has a result. Grid edits rewrite the break list and go through `Validate`; a run-level error with no `SegmentId` becomes an inline cell error and the last valid break list is kept. **C1 must confirm:** unedited breaks are written back as raw station numbers (ambiguous when station equations exist), and an unparseable or out-of-range station must come back as an Error with no `SegmentId`. Checkbox "Regenerate when..." = `AutoMode != Off`; Add station splits at the midpoint; Remove merges into the left neighbour; offsets shown as distances (left positive means `OffsetLeft = −value`); pending edits keyed by drawing, restored only when the run name matches; edits refused and Close disabled during a regen.
+
+### From C5
+
+- Entry points and codes in `src/SheetVol.Core/Volumes/Integrator/README.md`. Boundary is ear-clipped once (concave boundaries correct); pieces whose depth changes sign are split at d = 0 before exact linear integration. Station-of-point: closed form on lines and arcs, bracketed Illinois iteration through `PointAt` on spirals (each spiral lookup costs about length/1 ft samples plus 10–20 `PointAt` calls: A1's adapter speed matters). Boundary validation and ear clipping are O(n²) in vertex count: fine per segment, not for a 10,000-vertex whole-alignment polygon.
+- Fixture generators are public `ITriangleSource`s (`Integrator/Fixtures/FixtureSurfaces.cs`) with the exact triangulation in XML docs. **FX and C5 must agree on triangulation:** EG_H on FG_H's grid, transition diagonal from (1300, ±10) to (1310, ±16) gives T28 = 588.148 CY; the other diagonal gives 586.667 CY (both inside the handoff band). FX built H independently (12 / 48 triangles, cut 67,860 ft³ whole surface) while C5's whole-band cut is 67,880 ft³ over [0, 2000] ±100: the 20 ft³ difference is to be reconciled at G1 (likely the hidden sliver triangles FX reported, E1013).
+- Measured: Fixture H full extent in 1.6 ms (48 + 48 triangles); 1-ft cells (31,856 + 31,856) in 379 ms, same results. T7 on the arc gives the polygon area 62,831.393 (analytic 62,831.853 differs by 7e-6 from tessellation at 0.01 mid-ordinate).
+- Search-limit edge detection unverified for a break exactly on a mitred angle point (E205); raises a Warning that the check did not run rather than skipping silently. Fakes `C5Alignment`/`C5Boundaries` to consolidate with C1's.
