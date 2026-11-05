@@ -116,12 +116,12 @@ Filled as workers return. Status: TODO / IN PROGRESS / GREEN / MANUAL-OK / BLOCK
 | E3xx Segments | E301–E312 | TODO (C1) |
 | E4xx Volumes | E401–E421 | TODO (C2, A1) |
 | E5xx Tables | E501–E508 | TODO (C2, A2, A3) |
-| E6xx Layouts | E601–E615 | TODO (C3, A3) |
+| E6xx Layouts | E601–E615 | U rows GREEN (C3: E603, E606, E607, E610; E309, E310 too); H/M rows TODO (A3) |
 | E7xx Frames | E701–E713 | TODO (L1) |
-| E8xx Regen | E801–E812 | TODO (C3, A4, L2) |
+| E8xx Regen | E801–E812 | Logic-level GREEN (C3: E804–E806, E811); H/M rows TODO (A4, L2) |
 | E9xx Dialog | E901–E917 | TODO (C4, U2) |
 | E10xx OHWM | E1001–E1021 | TODO (C5, A1, A2) |
-| T1–T31 | | TODO |
+| T1–T31 | | T15, T16, T17 GREEN; T14 fingerprint part and T19 logic part GREEN (C3); rest TODO |
 | P1–P24 | | P16 PASSED in both hosts; rest TODO (S1, S2, S3) |
 
 ## Open items for Dan (HANDOFF.md section 13)
@@ -137,3 +137,22 @@ Filled as workers return. Status: TODO / IN PROGRESS / GREEN / MANUAL-OK / BLOCK
 | Run `SVPROBEUI` once | OPEN, during Wave 2 |
 | LAN sheet template with `SV-VPORT` viewport and table anchor block; table style and layer names | OPEN, before G3 |
 | Corrections to section 3 assumptions | none yet |
+
+## Merge log
+
+| When | Branch | Commit | Gate re-run by orchestrator |
+|---|---|---|---|
+| 2026-11-05 | wp/c3 (C3 views + tracking) | 83d5ec5 | build 0 errors; `dotnet test` 109/109 on main; diff confined to Views/, Tracking/ and their tests |
+
+## Decisions pending Dan (raised by workers, not yet ruled)
+
+| # | From | Question | Default in code until ruled |
+|---|---|---|---|
+| D1 | C3 | Should the viewport clip include the `ViewOverlap` strip, or the boundary only? | `ViewMathConfig.ClipIncludesOverlap = true` (overlap visible) |
+| D2 | C3 | "Largest scale that fits" in FitStandard: read as the most detailed scale (smallest model units per paper unit). T16 passes either way | most detailed |
+| D3 | C3 | Problem message wording lives in code; only number formats are in config. Does the settings-file rule cover message text? | wording in code |
+| D4 | C3 | Fingerprint covers more than 6.11 lists (analyses, view options, overrides, preset, area unit, OHWM, displayed end stations, manual polyline geometry); excludes `KnownSegments` and `AutoMode` | as described |
+
+## Facts for later workers (from merged packages)
+
+- C3: twist sign convention is paper = Rotate(model − center, twist) / scale; P12 (S2) must confirm AutoCAD's `TwistAngle` sign and A3 absorbs any difference. `ViewSpec.PaperWidth/Height` is the template viewport size fitted to, not the required size (`ViewResult.RequiredPaperWidth/Height`); A3 never resizes the viewport. Display polygon enters through `IDisplayPolygonSource`; A4 adapts C1's boundary builder. Auto-update wiring (L2) must raise `ToolCommandRunning` for dialog-started regens and pass CommandCancelled/CommandFailed as `CommandEnded`. Codes used: SV-E309, E606, E601, E304, E202, E603(Info). Test fakes `C3Alignment`/`C3BandSource` to consolidate with C1's `Fakes/` after C1 merges.
