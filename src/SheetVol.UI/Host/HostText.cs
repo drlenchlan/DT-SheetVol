@@ -12,7 +12,7 @@ internal static class HostText
 {
     /// <summary>SVDIALOG with no engine session: {0} variable name, {1} value that enables the design fixture.</summary>
     public const string NoEngineSessionFormat =
-        "SV-E900 The SheetVol engine session is not available in this build. Set {0}={1} before starting Civil 3D to open the dialog against the design fixture.";
+        "SV-E900 The SheetVol engine is not loaded: NETLOAD SheetVol.Civil3D.dll first (its startup installs the adapters and writers), or set {0}={1} before starting Civil 3D to open the dialog against the design fixture.";
 
     /// <summary>Strip at the top of the window in design-fixture mode.</summary>
     public const string DesignModeNote =

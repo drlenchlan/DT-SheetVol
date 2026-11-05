@@ -60,12 +60,17 @@ internal static class DialogHost
         }
     }
 
+    /// <summary>
+    /// The database-side session: the design fixture when <see cref="HostConfig.FakeSessionVariable"/>
+    /// asks for it (UI work without an engine), else a registered factory's, else A4's engine session
+    /// over the installed bindings (<c>SheetVol.Civil3D.Session.SheetVolSession</c>; its editor
+    /// members are never called, the <see cref="EditorSession"/> decorator implements them). A build
+    /// whose engine is not wired refuses with SV-E900 rather than opening on refusals.
+    /// </summary>
     private static ISheetVolSession? CreateInner(HostConfig config, out string? modeNote, out string? refusal)
     {
         modeNote = null;
         refusal = null;
-        if (SessionFactories.Registered is { } factory) return factory.Create();
-
         if (string.Equals(Environment.GetEnvironmentVariable(config.FakeSessionVariable), config.FakeSessionEnabledValue, StringComparison.Ordinal))
         {
             modeNote = HostText.DesignModeNote;
@@ -75,6 +80,10 @@ internal static class DialogHost
                 config.DesignRegenSteps,
                 config.DesignRegenStepDelay);
         }
+
+        if (SessionFactories.Registered is { } factory) return factory.Create();
+
+        if (Civil3D.Session.EngineBindings.Current.IsWired) return new Civil3D.Session.SheetVolSession();
 
         refusal = string.Format(HostText.NoEngineSessionFormat, config.FakeSessionVariable, config.FakeSessionEnabledValue);
         return null;
