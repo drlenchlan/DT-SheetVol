@@ -2,19 +2,11 @@ using System.Globalization;
 
 namespace SheetVol.Core.Volumes;
 
-/// <summary>The drawing's measurement system. Decides the volume unit (CY or m³) and which area units are offered.</summary>
-public enum UnitSystem
-{
-    /// <summary>Base length is the foot. Volume in cubic yards; area in SF or AC.</summary>
-    Imperial,
-
-    /// <summary>Base length is the metre. Volume in cubic metres; area in m² or ha.</summary>
-    Metric,
-}
-
 /// <summary>
 /// The drawing's linear unit as supplied by the adapter's unit detection. Core never infers it
-/// (HANDOFF.md 6.2, E606). <paramref name="BaseUnitsPerDrawingUnit"/> is feet per drawing unit
+/// (HANDOFF.md 6.2, E606). <paramref name="System"/> is the contract's <see cref="SheetVol.Core.UnitSystem"/>
+/// (rev 2): Imperial means the base length is the foot (CY; SF or AC), Metric the metre (m³; m² or ha).
+/// <paramref name="BaseUnitsPerDrawingUnit"/> is feet per drawing unit
 /// for <see cref="UnitSystem.Imperial"/> and metres per drawing unit for
 /// <see cref="UnitSystem.Metric"/>: 1 for a drawing in feet or metres.
 /// </summary>

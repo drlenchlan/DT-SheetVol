@@ -43,7 +43,7 @@ public class RunPersistenceTests
         Assert.Equal([20.0, 30, 40, 50, 60, 100], back.Views.StandardScales!);
         Assert.Equal(AreaUnit.Acres, back.AreaUnit);
         Assert.Equal(ReportPreset.HcfcdSegment, back.Preset);
-        Assert.Equal(1, loaded.StoredSchemaVersion);
+        Assert.Equal(2, loaded.StoredSchemaVersion);
     }
 
     [Fact]
@@ -52,7 +52,75 @@ public class RunPersistenceTests
         string json = RunPersistence.Serialize(SampleRun());
         Assert.All(json, c => Assert.True(c < 128, $"non-ASCII character U+{(int)c:X4}"));
         Assert.Contains("\"areaUnit\":\"Acres\"", json);
-        Assert.Contains("\"schemaVersion\":1", json);
+        Assert.Contains("\"schemaVersion\":2", json);
+    }
+
+    [Fact]
+    public void Plugin_schema_version_matches_the_contract_default()
+    {
+        var run = new RunDefinition("r", "a", SegmentDriver.Stations, "START..END@500", null, -1, 1, [], [], [],
+            new Dictionary<Guid, SegmentOverrides>(), new ViewOptions());
+        Assert.Equal(RunPersistence.PluginSchemaVersion, run.SchemaVersion);
+        Assert.Equal(2, RunPersistence.PluginSchemaVersion);
+    }
+
+    [Fact]
+    public void Rev2_draw_options_and_offset_overrides_round_trip()
+    {
+        var run = SampleRun();
+        var seg1 = run.KnownSegments[0].Id;
+        var seg2 = run.KnownSegments[1].Id;
+        run = run with
+        {
+            Draw = new DrawOptions(BoundaryPolylines: false, TableAtEachSegment: true, SummaryTable: false),
+            Overrides = new Dictionary<Guid, SegmentOverrides>
+            {
+                [seg1] = new SegmentOverrides(OffsetLeft: -80.5),                                    // one side only
+                [seg2] = new SegmentOverrides("C-102", 40, LockView: true, OffsetLeft: -90, OffsetRight: 75.25),
+            },
+        };
+
+        string json = RunPersistence.Serialize(run);
+        var loaded = RunPersistence.Deserialize(json);
+
+        Assert.True(loaded.CanModify, string.Join("; ", loaded.Problems.Select(p => p.Message)));
+        var back = loaded.Run!;
+        Assert.Equal(run.Draw, back.Draw);
+        Assert.Equal(run.Overrides[seg1], back.Overrides[seg1]);
+        Assert.Null(back.Overrides[seg1].OffsetRight);
+        Assert.Equal(run.Overrides[seg2], back.Overrides[seg2]);
+        Assert.Equal(json, RunPersistence.Serialize(back));
+        Assert.Contains("\"draw\":{\"boundaryPolylines\":false,\"tableAtEachSegment\":true,\"summaryTable\":false}", json);
+    }
+
+    [Fact]
+    public void A_schema_1_run_reads_as_schema_2_with_everything_drawn_and_no_offset_overrides()
+    {
+        // Schema 1 JSON: what this plugin wrote before contract rev 2. No "draw", no override offsets.
+        var node = JsonNode.Parse(RunPersistence.Serialize(SampleRun()))!.AsObject();
+        node["schemaVersion"] = 1;
+        Assert.True(node.Remove("draw"));
+        foreach (var (_, entry) in node["overrides"]!.AsObject())
+        {
+            Assert.True(entry!.AsObject().Remove("offsetLeft"));
+            Assert.True(entry.AsObject().Remove("offsetRight"));
+        }
+        string schema1 = node.ToJsonString();
+        Assert.DoesNotContain("draw", schema1);
+        Assert.DoesNotContain("offsetLeft\":null", schema1);
+
+        var loaded = RunPersistence.Deserialize(schema1);
+
+        Assert.True(loaded.CanModify, string.Join("; ", loaded.Problems.Select(p => p.Message)));
+        Assert.Empty(loaded.Problems);
+        Assert.Equal(1, loaded.StoredSchemaVersion);
+        var run = loaded.Run!;
+        Assert.Equal(RunPersistence.PluginSchemaVersion, run.SchemaVersion);   // upgraded in memory
+        Assert.Null(run.Draw);                                                 // contract: null = all on
+        Assert.Equal(new DrawOptions(true, true, true), run.Draw ?? new DrawOptions());
+        var only = Assert.Single(run.Overrides);
+        Assert.Equal(new SegmentOverrides("C-102", 40, LockView: true), only.Value);   // schema 1 fields kept, no offsets
+        Assert.Contains("\"schemaVersion\":2", RunPersistence.Serialize(run));
     }
 
     [Fact]
@@ -105,14 +173,14 @@ public class RunPersistenceTests
         Assert.Equal(OutputCodes.StoredSchemaNewer, p.Code);
         Assert.Equal(Severity.Error, p.Severity);
         Assert.Contains("schema version 3", p.Message);
-        Assert.Contains("version 1", p.Message);
+        Assert.Contains("reads version 2", p.Message);
     }
 
     [Fact]
     public void Serialize_stamps_the_plugin_schema_version()
     {
         string json = RunPersistence.Serialize(SampleRun() with { SchemaVersion = 0 });
-        Assert.Contains("\"schemaVersion\":1", json);
+        Assert.Contains("\"schemaVersion\":2", json);
     }
 
     [Theory]

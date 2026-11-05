@@ -10,7 +10,7 @@ public class T22DialogTests
     [Fact]
     public async Task T22_T2_breaks_give_four_rows_end_edit_moves_next_begin_and_E201_errors_row_2_and_hides_totals()
     {
-        var (session, host, _, vm) = Fixture.Open();
+        var (session, _, vm) = Fixture.Open();
         var rows = vm.Grid.Rows;
 
         // Grid shows 4 rows with lengths 500, 800, 500, 200.
@@ -28,8 +28,8 @@ public class T22DialogTests
         Assert.False(rows[1].EndStation.HasError);
         Assert.Equal(1200, rows[1].EndRaw);
         Assert.Equal(1200, rows[2].BeginRaw);
-        Assert.Equal(Fixture.Sta(host, 1200), rows[1].EndStation.Text);
-        Assert.Equal(Fixture.Sta(host, 1200), rows[2].BeginStation.Text);
+        Assert.Equal(Fixture.Sta(session, 1200), rows[1].EndStation.Text);
+        Assert.Equal(Fixture.Sta(session, 1200), rows[2].BeginStation.Text);
         Assert.Equal([500d, 700d, 600d, 200d], rows.Select(r => r.Length));
 
         // An offset wider than the curve radius puts row 2 in Error with the E201

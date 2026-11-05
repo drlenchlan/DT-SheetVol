@@ -12,7 +12,7 @@ public class DialogBehaviourTests
     [Fact]
     public void Every_edit_reruns_Validate_only_and_never_Regenerate()
     {
-        var (session, _, _, vm) = Fixture.Open();
+        var (session, _, vm) = Fixture.Open();
         var before = session.ValidateCalls;
 
         vm.SameOnBothSides = false;                         // a view setting, not a run edit
@@ -39,7 +39,7 @@ public class DialogBehaviourTests
     [Fact]
     public void Same_on_both_sides_mirrors_offsets_and_bad_text_is_refused_inline()
     {
-        var (_, _, _, vm) = Fixture.Open();
+        var (_, _, vm) = Fixture.Open();
         Assert.True(vm.SameOnBothSides);                     // loaded run is ±100
 
         vm.OffsetLeft.Text = "150";
@@ -63,14 +63,14 @@ public class DialogBehaviourTests
     [Fact]
     public async Task Pick_alignment_selects_the_picked_name_and_shows_its_station_range()
     {
-        var (session, host, _, vm) = Fixture.Open();
+        var (session, _, vm) = Fixture.Open();
         session.PickAlignmentResult = "C";
 
         await vm.PickAlignmentCommand.ExecuteAsync();
 
         Assert.Equal("C", vm.SelectedAlignment);
         Assert.Equal("C", vm.Run.AlignmentName);
-        Assert.Equal($"{Fixture.Sta(host, 0)} to {Fixture.Sta(host, 2000)}", vm.StationRangeText);
+        Assert.Equal($"{Fixture.Sta(session, 0)} to {Fixture.Sta(session, 2000)}", vm.StationRangeText);
 
         session.PickAlignmentResult = null;                  // Esc at the pick prompt
         await vm.PickAlignmentCommand.ExecuteAsync();
@@ -81,7 +81,7 @@ public class DialogBehaviourTests
     public void New_run_selects_the_only_alignment_but_never_guesses_surfaces()
     {
         var session = new FakeSheetVolSession { Alignments = ["S"] };
-        var vm = new DialogViewModel(session, new FakeDialogHost(), new PendingEdits(), Fixture.Config);
+        var vm = new DialogViewModel(session, new PendingEdits(), Fixture.Config);
 
         Assert.Equal("S", vm.SelectedAlignment);
         Assert.Equal(Fixture.Config.DefaultBreakSpecImperial, vm.Run.BreakSpec);
@@ -99,7 +99,7 @@ public class DialogBehaviourTests
     [Fact]
     public void Analyses_add_auto_name_factor_errors_and_remove()
     {
-        var (_, _, _, vm) = Fixture.Open();
+        var (_, _, vm) = Fixture.Open();
 
         vm.AddAnalysisCommand.Execute();
         var added = vm.Analyses[1];
@@ -136,7 +136,7 @@ public class DialogBehaviourTests
     [Fact]
     public void Fill_table_writes_an_interval_spec_and_reports_bad_input_inline()
     {
-        var (_, _, _, vm) = Fixture.Open();
+        var (_, _, vm) = Fixture.Open();
         Assert.False(vm.FillTableCommand.CanExecute());
 
         vm.IntervalEvery.Text = "400";
@@ -168,14 +168,47 @@ public class DialogBehaviourTests
     [Fact]
     public void Draw_options_are_dialog_state_and_count_as_pending_edits()
     {
-        var (_, _, _, vm) = Fixture.Open();
+        var (_, _, vm) = Fixture.Open();
+        Assert.Null(vm.Run.Draw);                                // the stored run has none: draw everything
         Assert.True(vm.DrawBoundaryPolylines && vm.DrawTableAtEachSegment && vm.DrawSummaryTable);
 
         vm.DrawBoundaryPolylines = false;
 
         Assert.False(vm.Draw.BoundaryPolylines);
+        Assert.Equal(new DrawOptions(BoundaryPolylines: false), vm.Run.Draw);   // D6: the checkbox is RunDefinition.Draw
         Assert.True(vm.IsDirty);
         Assert.Equal(DialogText.StaleEdits, vm.StaleBannerText);
+    }
+
+    [Fact]
+    public async Task D6_draw_options_reach_the_engine_on_the_run_and_all_on_equals_no_draw_options()
+    {
+        var (session, _, vm) = Fixture.Open();
+
+        vm.DrawBoundaryPolylines = false;
+        vm.DrawBoundaryPolylines = true;                         // back to all on: same as Draw = null
+        Assert.False(vm.IsDirty);
+
+        vm.DrawSummaryTable = false;
+        vm.DrawTableAtEachSegment = false;
+        await vm.RegenerateCommand.ExecuteAsync();
+
+        Assert.Equal(new DrawOptions(BoundaryPolylines: true, TableAtEachSegment: false, SummaryTable: false), session.LastRegenerated!.Draw);
+        Assert.Equal(session.LastRegenerated.Draw, session.Runs["Run1"].Draw);
+        Assert.False(vm.IsDirty);
+    }
+
+    [Fact]
+    public void D6_a_new_run_takes_the_configured_draw_options()
+    {
+        var session = new FakeSheetVolSession { Alignments = ["S"] };
+        var config = Fixture.Config with { DefaultDrawOptions = new DrawOptions(SummaryTable: false) };
+
+        var vm = new DialogViewModel(session, new PendingEdits(), config);
+
+        Assert.Equal(new DrawOptions(SummaryTable: false), vm.Run.Draw);
+        Assert.False(vm.DrawSummaryTable);
+        Assert.False(vm.IsDirty);
     }
 
     // ---- Footer --------------------------------------------------------------------------
@@ -183,7 +216,7 @@ public class DialogBehaviourTests
     [Fact]
     public void Regenerate_on_change_checkbox_maps_to_AutoMode()
     {
-        var (_, _, _, vm) = Fixture.Open();
+        var (_, _, vm) = Fixture.Open();
         Assert.True(vm.RegenerateOnChange);                  // A4 default Views
 
         vm.RegenerateOnChange = false;
@@ -191,36 +224,62 @@ public class DialogBehaviourTests
         vm.RegenerateOnChange = true;
         Assert.Equal(AutoMode.Views, vm.Run.AutoMode);
 
-        var (_, _, _, all) = Fixture.Open(Fixture.T2Run() with { AutoMode = AutoMode.All });
+        var (_, _, all) = Fixture.Open(Fixture.T2Run() with { AutoMode = AutoMode.All });
         all.RegenerateOnChange = false;
         all.RegenerateOnChange = true;
         Assert.Equal(AutoMode.All, all.Run.AutoMode);        // the run's own mode comes back
 
-        var (_, _, _, off) = Fixture.Open(Fixture.T2Run() with { AutoMode = AutoMode.Off });
+        var (_, _, off) = Fixture.Open(Fixture.T2Run() with { AutoMode = AutoMode.Off });
         Assert.False(off.RegenerateOnChange);
         off.RegenerateOnChange = true;
         Assert.Equal(Fixture.Config.AutoModeWhenChecked, off.Run.AutoMode);
     }
 
     [Fact]
-    public async Task Export_csv_asks_the_host_after_a_regen_and_not_while_edits_are_pending()
+    public async Task Export_csv_asks_the_session_after_a_regen_and_not_while_edits_are_pending()
     {
-        var (_, host, _, vm) = Fixture.Open();
+        var (session, _, vm) = Fixture.Open();
         Assert.False(vm.ExportCsvCommand.CanExecute());
 
         await vm.RegenerateCommand.ExecuteAsync();
         Assert.True(vm.ExportCsvCommand.CanExecute());
-        vm.ExportCsvCommand.Execute();
-        Assert.Equal(["Run1"], host.ExportRequests);
+        await vm.ExportCsvCommand.ExecuteAsync();
+        Assert.Equal(["Run1"], session.ExportRequests);
+        Assert.Equal("run.csv", vm.ExportCsvPath);                 // the paths the session's export returned
+        Assert.Equal("run.json", vm.ExportJsonPath);
+        Assert.Equal("Exported run.csv and run.json.", vm.StatusMessage);
 
         vm.OffsetLeft.Text = "90";
         Assert.False(vm.ExportCsvCommand.CanExecute());
     }
 
     [Fact]
+    public async Task Export_without_a_result_or_with_nothing_written_says_so()
+    {
+        var (session, _, vm) = Fixture.Open();
+        await vm.RegenerateCommand.ExecuteAsync();
+
+        session.ExportFactory = _ => null;                          // the session has no result for the run
+        await vm.ExportCsvCommand.ExecuteAsync();
+        Assert.Equal(DialogText.ExportNoResult, vm.StatusMessage);
+        Assert.Null(vm.ExportCsvPath);
+
+        var skipped = new Problem("SV-E506", Severity.Warning, "The CSV folder is read-only.");
+        session.ExportFactory = _ => vm.LastResult! with { CsvPath = null, JsonPath = null, Problems = [skipped] };
+        await vm.ExportCsvCommand.ExecuteAsync();
+        Assert.Equal("Export did not write a file: The CSV folder is read-only.", vm.StatusMessage);
+        Assert.Null(vm.ExportCsvPath);
+        Assert.Null(vm.ExportJsonPath);
+
+        session.ExportFactory = _ => throw new IOException("disk full");
+        await vm.ExportCsvCommand.ExecuteAsync();
+        Assert.Equal("Export stopped: disk full", vm.StatusMessage);
+    }
+
+    [Fact]
     public void Close_clears_the_highlight_unsubscribes_and_raises_CloseRequested()
     {
-        var (session, _, _, vm) = Fixture.Open();
+        var (session, _, vm) = Fixture.Open();
         var closed = false;
         vm.CloseRequested += (_, _) => closed = true;
         vm.Grid.SelectedRow = vm.Grid.Rows[0];
@@ -236,15 +295,15 @@ public class DialogBehaviourTests
     [Fact]
     public void Active_editor_command_disables_regenerate()
     {
-        var (_, host, _, vm) = Fixture.Open();
+        var (session, _, vm) = Fixture.Open();
         Assert.True(vm.CanRegenerate);
 
-        host.IsCommandActive = true;
+        session.IsCommandActive = true;
         vm.RefreshCommandState();
         Assert.False(vm.RegenerateCommand.CanExecute());
         Assert.Equal(DialogText.BlockedCommandActive, vm.RegenerateBlockedReason);
 
-        host.IsCommandActive = false;
+        session.IsCommandActive = false;
         vm.RefreshCommandState();
         Assert.True(vm.RegenerateCommand.CanExecute());
     }
@@ -252,8 +311,7 @@ public class DialogBehaviourTests
     [Fact]
     public void No_drawing_disables_the_dialog_with_a_one_line_reason_and_rebinds_when_one_opens()
     {
-        var host = new FakeDialogHost { ActiveDrawing = null };
-        var (session, _, _, vm) = Fixture.Open(host: host);
+        var (session, _, vm) = Fixture.Open(session: new FakeSheetVolSession { ActiveDrawing = null });
 
         Assert.False(vm.IsDrawingOpen);
         Assert.False(vm.CanEdit);
@@ -262,7 +320,7 @@ public class DialogBehaviourTests
         Assert.Empty(vm.Grid.Rows);
         Assert.Equal(0, session.ValidateCalls);
 
-        host.ActiveDrawing = new(@"C:\proj\T2.dwg", UnitSystem.Imperial);
+        session.ActiveDrawing = new(@"C:\proj\T2.dwg", UnitSystem.Imperial);
         session.RaiseSourcesChanged();
         Assert.True(vm.IsDrawingOpen);
         Assert.Equal(4, vm.Grid.Rows.Count);
@@ -273,7 +331,7 @@ public class DialogBehaviourTests
     [Fact]
     public async Task Regenerate_shows_progress_and_cancel_leaves_the_previous_values()
     {
-        var (session, _, _, vm) = Fixture.Open();
+        var (session, _, vm) = Fixture.Open();
         await vm.RegenerateCommand.ExecuteAsync();
         var first = vm.LastResult;
         session.Gate = new TaskCompletionSource();
@@ -303,7 +361,7 @@ public class DialogBehaviourTests
     [Fact]
     public async Task Successful_regenerate_reports_elapsed_time_and_values()
     {
-        var (session, _, _, vm) = Fixture.Open();
+        var (session, _, vm) = Fixture.Open();
 
         await vm.RegenerateCommand.ExecuteAsync();
 
@@ -317,7 +375,7 @@ public class DialogBehaviourTests
     [Fact]
     public async Task Stale_banner_follows_edits_and_clears_after_regenerate()
     {
-        var (_, _, _, vm) = Fixture.Open();
+        var (_, _, vm) = Fixture.Open();
         Assert.Equal(DialogText.StaleNoResult, vm.StaleBannerText);
 
         await vm.RegenerateCommand.ExecuteAsync();
@@ -337,7 +395,7 @@ public class DialogBehaviourTests
     [Fact]
     public async Task Failed_regenerate_keeps_previous_values_and_shows_the_row_problem()
     {
-        var (session, _, _, vm) = Fixture.Open();
+        var (session, _, vm) = Fixture.Open();
         await vm.RegenerateCommand.ExecuteAsync();
         var first = vm.LastResult;
         session.FailNextRegen = true;
@@ -360,7 +418,7 @@ public class DialogBehaviourTests
     [Fact]
     public void Hcfcd_preset_switches_labels_columns_chart_and_unit_and_needs_an_OHWM()
     {
-        var (_, _, _, vm) = Fixture.Open();
+        var (_, _, vm) = Fixture.Open();
 
         vm.SelectedPreset = vm.Presets.Single(p => p.Preset == ReportPreset.HcfcdSegment);
 
@@ -401,7 +459,7 @@ public class DialogBehaviourTests
             AreaUnit = AreaUnit.Acres,
             Ohwm = new OhwmSpec(100, new Dictionary<Guid, double>()),
         };
-        var (_, _, _, vm) = Fixture.Open(run, session);
+        var (_, _, vm) = Fixture.Open(run, session);
 
         await vm.RegenerateCommand.ExecuteAsync();
 
@@ -431,7 +489,7 @@ public class DialogBehaviourTests
             ImpactFactory = (i, s) => new ImpactResult(s.Id, "SEDIMENT", 0, 0, 0, [], 0, 0, TouchesSearchLimit: i == 1),
         };
         var run = Fixture.T2Run() with { Preset = ReportPreset.HcfcdSegment, AreaUnit = AreaUnit.Acres, Ohwm = new OhwmSpec(95, new Dictionary<Guid, double>()) };
-        var (_, _, _, vm) = Fixture.Open(run, session);
+        var (_, _, vm) = Fixture.Open(run, session);
 
         await vm.RegenerateCommand.ExecuteAsync();
 
@@ -450,7 +508,7 @@ public class DialogBehaviourTests
             ImpactFactory = (_, s) => new ImpactResult(s.Id, "SEDIMENT", 500, 16_000, 26_000, [], 0, 0, false),
         };
         var run = Fixture.T2Run() with { Preset = ReportPreset.HcfcdSegment, AreaUnit = AreaUnit.Acres, Ohwm = new OhwmSpec(100, new Dictionary<Guid, double>()) };
-        var (_, _, _, vm) = Fixture.Open(run, session);
+        var (_, _, vm) = Fixture.Open(run, session);
         await vm.RegenerateCommand.ExecuteAsync();
         var row2 = vm.Grid.Rows[1];
 
@@ -467,12 +525,117 @@ public class DialogBehaviourTests
         Assert.Equal("100.00", row2.Ohwm.Text);
     }
 
+    // ---- Per-segment offset fix beside a failing row (6.14, D8) -----------------------------
+
+    [Fact]
+    public async Task D8_offset_fix_beside_a_failing_row_is_stored_on_the_run_on_Apply_and_revalidated()
+    {
+        var (session, _, vm) = Fixture.Open();
+        vm.OffsetRight.Text = "350";                             // same on both sides: ±350 reaches the curve radius on row 2
+        var row2 = vm.Grid.Rows[1];
+        Assert.True(row2.IsError);
+        Assert.True(row2.ShowOffsetFix);
+        Assert.False(row2.OffsetIsOverride);
+        Assert.False(vm.Grid.Rows[0].ShowOffsetFix);              // only a failing row offers the fix
+        Assert.Equal(("350", "350"), (row2.OffsetFixLeft.Text, row2.OffsetFixRight.Text));
+        Assert.True(row2.ApplyOffsetFixCommand.CanExecute());
+        var validates = session.ValidateCalls;
+
+        row2.OffsetFixLeft.Text = "250";
+        row2.OffsetFixRight.Text = "250";
+        Assert.Empty(vm.Run.Overrides);                           // typing writes nothing
+        Assert.Equal(validates, session.ValidateCalls);
+        row2.ApplyOffsetFixCommand.Execute();
+
+        var expected = new SegmentOverrides(OffsetLeft: -250, OffsetRight: 250);
+        Assert.Equal(validates + 1, session.ValidateCalls);                         // Apply re-runs Validate
+        Assert.Equal(expected, vm.Run.Overrides[row2.SegmentId]);                  // stored on the run (D8)
+        Assert.Equal(expected, session.LastValidated!.Overrides[row2.SegmentId]);  // and handed to Validate
+        Assert.Equal((-350d, 350d), (vm.Run.OffsetLeft, vm.Run.OffsetRight));      // the run's offsets are untouched
+        Assert.Null(row2.OffsetFixError);
+        Assert.False(row2.IsError);                               // this fake plans with the override; C1's Planner does not yet
+        Assert.True(row2.ShowOffsetFix);                          // still shown: the override can be changed or cleared
+        Assert.True(row2.OffsetIsOverride);
+        Assert.Equal(("250", "250"), (row2.OffsetFixLeft.Text, row2.OffsetFixRight.Text));
+        Assert.True(vm.CanRegenerate);
+
+        await vm.RegenerateCommand.ExecuteAsync();
+        Assert.Equal(expected, session.LastRegenerated!.Overrides[row2.SegmentId]);
+        Assert.Equal(expected, session.Runs["Run1"].Overrides[row2.SegmentId]);
+        Assert.False(vm.IsDirty);
+    }
+
+    [Fact]
+    public void D8_a_side_equal_to_the_run_or_blank_carries_no_override_and_bad_input_is_refused()
+    {
+        var (_, _, vm) = Fixture.Open();
+        vm.OffsetRight.Text = "350";
+        var row2 = vm.Grid.Rows[1];
+        var id = row2.SegmentId;
+
+        row2.OffsetFixRight.Text = "250";                        // left stays 350, the run's
+        row2.ApplyOffsetFixCommand.Execute();
+        Assert.Equal(new SegmentOverrides(OffsetRight: 250), vm.Run.Overrides[id]);
+
+        row2.OffsetFixLeft.Text = "wide";
+        Assert.Equal(DialogText.NotANumber, row2.OffsetFixLeft.Error);
+        Assert.Equal(DialogText.BlockedFieldErrors, vm.RegenerateBlockedReason);
+        row2.ApplyOffsetFixCommand.Execute();
+        Assert.Equal(DialogText.NotANumber, row2.OffsetFixError);
+        Assert.Equal(new SegmentOverrides(OffsetRight: 250), vm.Run.Overrides[id]);   // unchanged
+
+        row2.OffsetFixLeft.Text = "-300";                        // 300 right of the alignment, past the right edge at 250
+        row2.ApplyOffsetFixCommand.Execute();
+        Assert.Equal(DialogText.OffsetFixNoWidth, row2.OffsetFixError);
+        Assert.Equal(new SegmentOverrides(OffsetRight: 250), vm.Run.Overrides[id]);
+
+        row2.OffsetFixLeft.Text = string.Empty;
+        row2.OffsetFixRight.Text = string.Empty;
+        row2.ApplyOffsetFixCommand.Execute();
+        Assert.Null(row2.OffsetFixError);
+        Assert.False(vm.Run.Overrides.ContainsKey(id));          // nothing else overridden: the entry goes
+        Assert.False(row2.OffsetIsOverride);
+        Assert.Equal(("350", "350"), (row2.OffsetFixLeft.Text, row2.OffsetFixRight.Text));
+    }
+
+    [Fact]
+    public async Task D8_an_overridden_row_offers_the_fix_and_a_new_override_invalidates_only_that_row()
+    {
+        var session = new FakeSheetVolSession();
+        var plan = session.Plan(Fixture.T2Run());
+        var seg2 = plan.Segments[1].Id;
+        var stored = Fixture.T2Run() with
+        {
+            KnownSegments = plan.Segments,
+            Overrides = new Dictionary<Guid, SegmentOverrides> { [seg2] = new SegmentOverrides("C-102", OffsetLeft: -80, OffsetRight: 80) },
+        };
+        var (_, _, vm) = Fixture.Open(stored, session);
+        await vm.RegenerateCommand.ExecuteAsync();
+        var row2 = vm.Grid.Rows[1];
+        Assert.False(row2.IsError);
+        Assert.True(row2.ShowOffsetFix);                          // not failing, but its offsets are overridden
+        Assert.True(row2.OffsetIsOverride);
+        Assert.Equal(("80", "80"), (row2.OffsetFixLeft.Text, row2.OffsetFixRight.Text));
+        Assert.Equal("128,000", row2.Area2DText);                 // 800 × 160: the segment's own band
+        Assert.All(vm.Grid.Rows, r => Assert.True(r.HasValues));
+
+        row2.OffsetFixLeft.Text = "90";
+        row2.OffsetFixRight.Text = "90";
+        row2.ApplyOffsetFixCommand.Execute();
+
+        Assert.Equal(new SegmentOverrides("C-102", OffsetLeft: -90, OffsetRight: 90), vm.Run.Overrides[seg2]);   // the layout override is kept
+        Assert.False(row2.HasValues);                             // its band changed: the old value no longer applies
+        Assert.True(vm.Grid.Rows[0].HasValues);
+        Assert.True(vm.Grid.Rows[2].HasValues);
+        Assert.True(vm.IsDirty);
+    }
+
     // ---- Grid toolbar ---------------------------------------------------------------------
 
     [Fact]
     public void Add_station_splits_the_selected_segment_at_its_middle()
     {
-        var (session, _, _, vm) = Fixture.Open();
+        var (session, _, vm) = Fixture.Open();
         Assert.False(vm.Grid.AddStationCommand.CanExecute());
 
         vm.Grid.SelectedRow = vm.Grid.Rows[1];
@@ -487,7 +650,7 @@ public class DialogBehaviourTests
     [Fact]
     public async Task Pick_in_drawing_inserts_a_break_at_the_picked_station()
     {
-        var (session, _, _, vm) = Fixture.Open();
+        var (session, _, vm) = Fixture.Open();
         session.PickStationResult = 250;
 
         await vm.Grid.PickStationCommand.ExecuteAsync();
@@ -503,7 +666,7 @@ public class DialogBehaviourTests
     [Fact]
     public void Remove_merges_the_selected_segment_into_a_neighbour()
     {
-        var (_, _, _, vm) = Fixture.Open();
+        var (_, _, vm) = Fixture.Open();
 
         vm.Grid.SelectedRow = vm.Grid.Rows[2];
         vm.Grid.RemoveCommand.Execute();
@@ -524,7 +687,7 @@ public class DialogBehaviourTests
     [Fact]
     public void Remove_after_a_skip_merges_right_and_keeps_the_skip()
     {
-        var (_, _, _, vm) = Fixture.Open(Fixture.T2Run("0, 500, skip 500..800, 800, 1300, 2000"));
+        var (_, _, vm) = Fixture.Open(Fixture.T2Run("0, 500, skip 500..800, 800, 1300, 2000"));
         Assert.Equal(3, vm.Grid.Rows.Count);
 
         vm.Grid.SelectedRow = vm.Grid.Rows[1];                  // 800..1300: a gap on its left, a neighbour on its right
@@ -537,7 +700,7 @@ public class DialogBehaviourTests
     [Fact]
     public void Remove_an_isolated_segment_joins_the_skips_around_it()
     {
-        var (_, _, _, vm) = Fixture.Open(Fixture.T2Run("0, 500, skip 500..800, 800, 1300, skip 1300..1500, 1500, 2000"));
+        var (_, _, vm) = Fixture.Open(Fixture.T2Run("0, 500, skip 500..800, 800, 1300, skip 1300..1500, 1500, 2000"));
         Assert.Equal(3, vm.Grid.Rows.Count);
 
         vm.Grid.SelectedRow = vm.Grid.Rows[1];                  // 800..1300, gaps on both sides
@@ -550,7 +713,7 @@ public class DialogBehaviourTests
     [Fact]
     public void Selection_highlights_in_the_drawing_and_zoom_to_reaches_the_session()
     {
-        var (session, _, _, vm) = Fixture.Open();
+        var (session, _, vm) = Fixture.Open();
         var row = vm.Grid.Rows[3];
         Assert.False(vm.Grid.ZoomToCommand.CanExecute());
 

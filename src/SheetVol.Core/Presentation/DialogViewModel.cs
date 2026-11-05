@@ -6,28 +6,27 @@ namespace SheetVol.Core.Presentation;
 /// <summary>
 /// View model of the SVDIALOG window (HANDOFF.md 6.14). It edits the same
 /// <see cref="RunDefinition"/> as SVDEFINE and reaches the engine only through
-/// <see cref="ISheetVolSession"/> plus the <see cref="IDialogHost"/> port.
+/// <see cref="ISheetVolSession"/>, the one door between UI and engine (contract rev 2).
 /// <para>
 /// Every edit re-runs <see cref="ISheetVolSession.Validate"/> and nothing else (live
-/// validation). Volumes come only from Regenerate, or from a regen the host reports
-/// through <see cref="IDialogHost.GetRunStatus"/> (E912). Edits not yet regenerated are
+/// validation). Volumes come only from Regenerate, or from a regen the session reports
+/// through <see cref="ISheetVolSession.GetRunStatus"/> (E912). Edits not yet regenerated are
 /// kept per drawing in <see cref="PendingEdits"/> and restored on reopen (E907).
 /// </para>
 /// </summary>
 public sealed class DialogViewModel : ObservableObject, IGridOwner, IDisposable
 {
+    private static readonly DrawOptions DrawEverything = new();   // RunDefinition.Draw == null means all on
+
     private readonly ISheetVolSession _session;
-    private readonly IDialogHost _host;
     private readonly PendingEdits _pending;
     private readonly PresentationConfig _config;
     private readonly string _runName;
 
     private DrawingInfo? _drawing;
     private DisplayFormatter _fmt;
-    private RunDefinition _run;                 // what the dialog edits
+    private RunDefinition _run;                 // what the dialog edits, draw options and overrides included
     private RunDefinition _baseline;            // as stored in the drawing, or as last regenerated
-    private DrawOptions _draw;
-    private DrawOptions _baselineDraw;
     private ValidationResult? _validation;      // last accepted validation of _run
     private RunDefinition? _regenRun;           // definition _lastResult was computed from
     private RegenResult? _lastResult;           // last successful regen, ours or external
@@ -38,6 +37,9 @@ public sealed class DialogViewModel : ObservableObject, IGridOwner, IDisposable
     private IReadOnlyList<AreaUnitOption> _areaUnits = [];
     private Guid? _selectedId;
     private CancellationTokenSource? _cts;
+    private CancellationTokenSource? _exportCts;
+    private string? _exportCsvPath;
+    private string? _exportJsonPath;
     private bool _isBusy;
     private double _progress;
     private string? _statusMessage;
@@ -46,21 +48,18 @@ public sealed class DialogViewModel : ObservableObject, IGridOwner, IDisposable
     private bool _sourcesChangedWhileBusy;
     private bool _disposed;
 
-    /// <summary>Creates the view model and binds it to the host's active drawing.</summary>
-    /// <param name="session">The engine door (frozen contract).</param>
-    /// <param name="host">What the session does not carry: drawing identity and units, station text, tracker status, export.</param>
+    /// <summary>Creates the view model and binds it to the session's active drawing.</summary>
+    /// <param name="session">The engine door (frozen contract): object lists, validation, regen, export, drawing identity and units, station text, tracker status.</param>
     /// <param name="pendingEdits">Session-lifetime store of edits not yet regenerated (E907).</param>
     /// <param name="config">Formats and defaults; <see cref="PresentationConfig.Default"/> when null.</param>
     /// <param name="runName">Run to edit; <see cref="PresentationConfig.DefaultRunName"/> when null.</param>
     public DialogViewModel(
         ISheetVolSession session,
-        IDialogHost host,
         PendingEdits pendingEdits,
         PresentationConfig? config = null,
         string? runName = null)
     {
         _session = session ?? throw new ArgumentNullException(nameof(session));
-        _host = host ?? throw new ArgumentNullException(nameof(host));
         _pending = pendingEdits ?? throw new ArgumentNullException(nameof(pendingEdits));
         _config = config ?? PresentationConfig.Default;
         _runName = runName ?? _config.DefaultRunName;
@@ -85,7 +84,7 @@ public sealed class DialogViewModel : ObservableObject, IGridOwner, IDisposable
         FillTableCommand = new RelayCommand(FillTable, () => CanEditStations && IntervalLength() is > 0);
         RegenerateCommand = new AsyncRelayCommand(RegenerateAsync, () => CanRegenerate);
         CancelCommand = new RelayCommand(() => _cts?.Cancel(), () => IsBusy);
-        ExportCsvCommand = new RelayCommand(() => _host.RequestExport(_runName),
+        ExportCsvCommand = new AsyncRelayCommand(ExportAsync,
             () => IsDrawingOpen && !IsBusy && _lastResult is not null && !_isDirty);
         CloseCommand = new RelayCommand(Close, () => !IsBusy);
 
@@ -200,7 +199,7 @@ public sealed class DialogViewModel : ObservableObject, IGridOwner, IDisposable
         get
         {
             if (_drawing is null || string.IsNullOrEmpty(_run.AlignmentName)) return string.Empty;
-            return _host.StationRange(_run.AlignmentName) is (double start, double end)
+            return _session.StationRange(_run.AlignmentName) is (double start, double end)
                 ? string.Format(_fmt.Culture, DialogText.StationRangeFormat, FormatStation(start), FormatStation(end))
                 : string.Empty;
         }
@@ -276,19 +275,19 @@ public sealed class DialogViewModel : ObservableObject, IGridOwner, IDisposable
     /// <summary>Replaces the break list with FROM..TO@EVERY.</summary>
     public RelayCommand FillTableCommand { get; }
 
-    // ---- Draw options ---------------------------------------------------------------
+    // ---- Draw options (RunDefinition.Draw, D6) -----------------------------------------
 
     /// <summary>Draw boundary polylines.</summary>
-    public bool DrawBoundaryPolylines { get => _draw.BoundaryPolylines; set => SetDraw(_draw with { BoundaryPolylines = value }); }
+    public bool DrawBoundaryPolylines { get => Draw.BoundaryPolylines; set => SetDraw(Draw with { BoundaryPolylines = value }); }
 
     /// <summary>Draw a table at each segment.</summary>
-    public bool DrawTableAtEachSegment { get => _draw.TableAtEachSegment; set => SetDraw(_draw with { TableAtEachSegment = value }); }
+    public bool DrawTableAtEachSegment { get => Draw.TableAtEachSegment; set => SetDraw(Draw with { TableAtEachSegment = value }); }
 
     /// <summary>Draw the summary table.</summary>
-    public bool DrawSummaryTable { get => _draw.SummaryTable; set => SetDraw(_draw with { SummaryTable = value }); }
+    public bool DrawSummaryTable { get => Draw.SummaryTable; set => SetDraw(Draw with { SummaryTable = value }); }
 
-    /// <summary>The draw options as edited.</summary>
-    public DrawOptions Draw => _draw;
+    /// <summary>The run's draw options as edited; a run with no draw options (<c>Draw = null</c>) draws everything.</summary>
+    public DrawOptions Draw => _run.Draw ?? DrawEverything;
 
     // ---- Report preset, OHWM, area unit ----------------------------------------------
 
@@ -358,8 +357,18 @@ public sealed class DialogViewModel : ObservableObject, IGridOwner, IDisposable
         }
     }
 
-    /// <summary>Asks the host to export the run's CSV. Enabled after a regen when nothing is pending.</summary>
-    public RelayCommand ExportCsvCommand { get; }
+    /// <summary>
+    /// Exports the run's CSV and JSON through <see cref="ISheetVolSession.ExportAsync"/> (SVEXPORT, no
+    /// drawing writes). Enabled after a regen when nothing is pending. The written paths land in
+    /// <see cref="ExportCsvPath"/> and <see cref="ExportJsonPath"/> and the status line.
+    /// </summary>
+    public AsyncRelayCommand ExportCsvCommand { get; }
+
+    /// <summary>CSV file written by the last export from this dialog; null when none was written.</summary>
+    public string? ExportCsvPath { get => _exportCsvPath; private set => SetProperty(ref _exportCsvPath, value); }
+
+    /// <summary>JSON file written by the last export from this dialog; null when none was written.</summary>
+    public string? ExportJsonPath { get => _exportJsonPath; private set => SetProperty(ref _exportJsonPath, value); }
 
     /// <summary>Closes the dialog; pending edits are kept for the drawing (E907).</summary>
     public RelayCommand CloseCommand { get; }
@@ -390,7 +399,7 @@ public sealed class DialogViewModel : ObservableObject, IGridOwner, IDisposable
         {
             if (_drawing is null) return DialogText.NoDrawingOpen;
             if (IsEmptyState) return EmptyStateText;
-            if (_host.IsCommandActive) return DialogText.BlockedCommandActive;
+            if (_session.IsCommandActive) return DialogText.BlockedCommandActive;
             if (string.IsNullOrEmpty(_run.AlignmentName)) return DialogText.BlockedNoAlignment;
             if (_run.Analyses.Count == 0) return DialogText.BlockedNoAnalysis;
             if (_run.Analyses.Any(a => string.IsNullOrEmpty(a.BaseSurface) || string.IsNullOrEmpty(a.ComparisonSurface)))
@@ -407,7 +416,7 @@ public sealed class DialogViewModel : ObservableObject, IGridOwner, IDisposable
 
     // ---- Public operations -------------------------------------------------------------
 
-    /// <summary>Re-queries command state; the host calls it when an editor command starts or ends (E905).</summary>
+    /// <summary>Re-queries command state; the host calls it when <see cref="ISheetVolSession.IsCommandActive"/> changes (E905).</summary>
     public void RefreshCommandState()
     {
         OnPropertiesChanged(nameof(RegenerateBlockedReason), nameof(CanRegenerate));
@@ -424,21 +433,22 @@ public sealed class DialogViewModel : ObservableObject, IGridOwner, IDisposable
         CloseRequested?.Invoke(this, EventArgs.Empty);
     }
 
-    /// <summary>Unsubscribes from the session and cancels a running regen. Does not save pending edits; <see cref="Close"/> does.</summary>
+    /// <summary>Unsubscribes from the session and cancels a running regen or export. Does not save pending edits; <see cref="Close"/> does.</summary>
     public void Dispose()
     {
         if (_disposed) return;
         _disposed = true;
         _session.SourcesChanged -= OnSourcesChanged;
         _cts?.Cancel();
+        _exportCts?.Cancel();
     }
 
     // ---- Binding and refresh -------------------------------------------------------------
 
-    [MemberNotNull(nameof(_fmt), nameof(_run), nameof(_baseline), nameof(_draw), nameof(_baselineDraw))]
+    [MemberNotNull(nameof(_fmt), nameof(_run), nameof(_baseline))]
     private void Bind()
     {
-        _drawing = _host.ActiveDrawing;
+        _drawing = _session.ActiveDrawing;
         var units = _drawing?.Units ?? UnitSystem.Imperial;
         _fmt = new DisplayFormatter(_config, units);
         _areaUnits = DisplayFormatter.OfferedAreaUnits(units)
@@ -450,21 +460,18 @@ public sealed class DialogViewModel : ObservableObject, IGridOwner, IDisposable
         _failedAttempt = null;
         _externalStale = false;
         _selectedId = null;
-        _baselineDraw = _config.DefaultDrawOptions;
-        _draw = _baselineDraw;
+        ExportCsvPath = null;
+        ExportJsonPath = null;
         RefreshSourceLists();
 
         var stored = _drawing is null ? null : _session.LoadRun(_runName);
         _baseline = stored ?? NewRun(units);
         _run = _baseline;
         if (_drawing is not null && _pending.TryGet(_drawing.Name, out var pending) && pending.Run.Name == _runName)
-        {
             _run = pending.Run;
-            _draw = pending.Draw;
-        }
         _run = FitAreaUnitToDrawing(_run, units);
         _lastAutoMode = _run.AutoMode != AutoMode.Off ? _run.AutoMode : _config.AutoModeWhenChecked;
-        if (_drawing is not null) AdoptStatus(_host.GetRunStatus(_runName), stored);
+        if (_drawing is not null) AdoptStatus(_session.GetRunStatus(_runName), stored);
 
         LoadFieldsFromRun();
         Revalidate();
@@ -480,7 +487,7 @@ public sealed class DialogViewModel : ObservableObject, IGridOwner, IDisposable
             return;
         }
 
-        var drawing = _host.ActiveDrawing;
+        var drawing = _session.ActiveDrawing;
         if (!Equals(drawing, _drawing))
         {
             SavePending();
@@ -504,7 +511,7 @@ public sealed class DialogViewModel : ObservableObject, IGridOwner, IDisposable
             }
             _baseline = stored;
         }
-        AdoptStatus(_host.GetRunStatus(_runName), stored);
+        AdoptStatus(_session.GetRunStatus(_runName), stored);
         Revalidate();
         Refresh();
     }
@@ -562,7 +569,7 @@ public sealed class DialogViewModel : ObservableObject, IGridOwner, IDisposable
 
     private void Refresh()
     {
-        _isDirty = _drawing is not null && (!RunComparison.SameDefinition(_run, _baseline) || _draw != _baselineDraw);
+        _isDirty = _drawing is not null && !RunComparison.SameDefinition(_run, _baseline);
         Grid.SyncComparisons(_run.Analyses);
         var rows = BuildRowModels();
         var ctx = new GridContext(_fmt, FormatStation, _run.Preset, _run.AreaUnit, _lastResult, _selectedId, IsBusy);
@@ -629,15 +636,19 @@ public sealed class DialogViewModel : ObservableObject, IGridOwner, IDisposable
                 worst ??= MostSevere(values.Problems);
             }
 
-            var sheet = _run.Overrides.TryGetValue(segment.Id, out var overrides) && overrides.TargetLayout is not null
-                ? overrides.TargetLayout
-                : segment.TargetLayout;
+            _run.Overrides.TryGetValue(segment.Id, out var overrides);
+            var sheet = overrides?.TargetLayout ?? segment.TargetLayout;
+            var isManual = manual.Contains(segment.Id);
+            var offsetIsOverride = overrides is { OffsetLeft: not null } or { OffsetRight: not null };
+            var (offsetLeft, offsetRight) = RunComparison.EffectiveOffsets(_run, segment.Id);
             rows.Add(new RowModel(
                 segment, number,
-                StationsEditable: CanEditStations && !manual.Contains(segment.Id),
+                StationsEditable: CanEditStations && !isManual,
                 values, status, worst, sheet,
                 RunComparison.EffectiveOhwm(_run, segment.Id),
-                _run.Ohwm?.BySegment.ContainsKey(segment.Id) == true));
+                _run.Ohwm?.BySegment.ContainsKey(segment.Id) == true,
+                OffsetFixAvailable: !isManual && (status == SegmentStatus.Error || offsetIsOverride),
+                offsetLeft, offsetRight, offsetIsOverride));
         }
         return rows;
     }
@@ -717,7 +728,7 @@ public sealed class DialogViewModel : ObservableObject, IGridOwner, IDisposable
     private void SavePending()
     {
         if (_drawing is null) return;
-        if (_isDirty) _pending.Save(_drawing.Name, new PendingEdit(_run, _draw));
+        if (_isDirty) _pending.Save(_drawing.Name, new PendingEdit(_run));
         else _pending.Clear(_drawing.Name);
     }
 
@@ -737,7 +748,8 @@ public sealed class DialogViewModel : ObservableObject, IGridOwner, IDisposable
             new Dictionary<Guid, SegmentOverrides>(),
             new ViewOptions(),
             ReportPreset.Standard,
-            DisplayFormatter.DefaultAreaUnit(units, ReportPreset.Standard));
+            DisplayFormatter.DefaultAreaUnit(units, ReportPreset.Standard),
+            Draw: _config.DefaultDrawOptions);
     }
 
     /// <summary>A stored unit from the other system is mapped to its counterpart (SF and m², AC and ha) so the dropdown always shows a choice the drawing offers (E917).</summary>
@@ -749,7 +761,7 @@ public sealed class DialogViewModel : ObservableObject, IGridOwner, IDisposable
     private string FormatStation(double raw)
         => _drawing is null || string.IsNullOrEmpty(_run.AlignmentName)
             ? _fmt.SpecNumber(raw)
-            : _host.FormatStation(_run.AlignmentName, raw);
+            : _session.FormatStation(_run.AlignmentName, raw);
 
     private bool HasFieldError
         => OffsetLeft.HasError || OffsetRight.HasError || (IsHcfcd && Ohwm.HasError)
@@ -815,9 +827,8 @@ public sealed class DialogViewModel : ObservableObject, IGridOwner, IDisposable
 
     private void SetDraw(DrawOptions draw)
     {
-        if (draw == _draw || IsBusy) return;
-        _draw = draw;
-        Refresh();
+        if (draw == Draw) return;
+        TryApply(_run with { Draw = draw });       // refused while busy, like every other edit
     }
 
     private AnalysisEditorViewModel CreateEditor(AnalysisDef definition, bool nameIsAuto)
@@ -870,7 +881,6 @@ public sealed class DialogViewModel : ObservableObject, IGridOwner, IDisposable
     {
         if (!CanRegenerate) return;
         var run = _run;
-        var draw = _draw;
         // Not disposed: Cancel can run this method's continuation synchronously inside
         // its own callback, and a source with no timer or linked token holds nothing
         // that needs disposal.
@@ -888,7 +898,6 @@ public sealed class DialogViewModel : ObservableObject, IGridOwner, IDisposable
                 _lastResult = result;
                 _regenRun = run;
                 _baseline = run;
-                _baselineDraw = draw;
                 _externalStale = false;
                 _failedAttempt = null;
                 StatusMessage = string.Format(_fmt.Culture, DialogText.RegenSucceededFormat,
@@ -928,6 +937,52 @@ public sealed class DialogViewModel : ObservableObject, IGridOwner, IDisposable
     private sealed class InlineProgress(Action<double> report) : IProgress<double>
     {
         public void Report(double value) => report(value);
+    }
+
+    // ---- Export -------------------------------------------------------------------------------
+
+    private async Task ExportAsync()
+    {
+        var cts = new CancellationTokenSource();
+        _exportCts = cts;
+        StatusMessage = null;
+        ExportCsvPath = null;
+        ExportJsonPath = null;
+        try
+        {
+            var result = await _session.ExportAsync(_run, cts.Token);
+            if (_disposed) return;
+            if (result is null)
+            {
+                StatusMessage = DialogText.ExportNoResult;
+                return;
+            }
+            ExportCsvPath = result.CsvPath;
+            ExportJsonPath = result.JsonPath;
+            var written = new[] { result.CsvPath, result.JsonPath }.OfType<string>().ToList();
+            if (written.Count > 0)
+            {
+                StatusMessage = string.Format(_fmt.Culture, DialogText.ExportDoneFormat, string.Join(DialogText.ExportPathSeparator, written));
+                return;
+            }
+            // Both paths null: the export was skipped (E506, E507); the session's problems say why.
+            var reasons = result.Problems.Where(p => p.Severity != Severity.Info).Select(p => p.Message).ToList();
+            StatusMessage = reasons.Count > 0
+                ? string.Format(_fmt.Culture, DialogText.ExportNothingWrittenFormat, string.Join(Environment.NewLine, reasons))
+                : DialogText.ExportNothingWritten;
+        }
+        catch (OperationCanceledException)
+        {
+            if (!_disposed) StatusMessage = DialogText.ExportCancelled;
+        }
+        catch (Exception ex)
+        {
+            if (!_disposed) StatusMessage = string.Format(_fmt.Culture, DialogText.ExportErrorFormat, ex.Message);
+        }
+        finally
+        {
+            if (ReferenceEquals(_exportCts, cts)) _exportCts = null;
+        }
     }
 
     // ---- Grid owner (toolbar and cell edits) ---------------------------------------------------
@@ -973,6 +1028,43 @@ public sealed class DialogViewModel : ObservableObject, IGridOwner, IDisposable
             else bySegment[segmentId] = elevation;
         }
         return TryApply(_run with { Ohwm = _run.Ohwm with { BySegment = bySegment } });
+    }
+
+    /// <summary>
+    /// The per-segment offset fix beside a failing row (6.14, D8): writes
+    /// <see cref="SegmentOverrides.OffsetLeft"/> and <see cref="SegmentOverrides.OffsetRight"/> for the
+    /// segment and re-runs Validate. Texts are distances like the left panel (left positive means
+    /// <c>OffsetLeft = −value</c>). A blank side, or one equal to the run's offset, carries no override;
+    /// when nothing else is overridden the segment's entry is removed.
+    /// </summary>
+    string? IGridOwner.ApplyOffsetOverride(Guid segmentId, string leftText, string rightText)
+    {
+        if (IsBusy) return DialogText.BusyRefused;
+        if (!IsDrawingOpen || !StationSegments().Any(s => s.Id == segmentId)) return DialogText.OffsetFixNotApplicable;
+        if (!TryParseDistance(leftText, out var leftDistance) || !TryParseDistance(rightText, out var rightDistance))
+            return DialogText.NotANumber;
+
+        var tolerance = _config.StationTolerance;
+        double? left = leftDistance is double l && Math.Abs(-l - _run.OffsetLeft) > tolerance ? -l : null;
+        double? right = rightDistance is double r && Math.Abs(r - _run.OffsetRight) > tolerance ? r : null;
+        if ((right ?? _run.OffsetRight) - (left ?? _run.OffsetLeft) <= tolerance) return DialogText.OffsetFixNoWidth;
+
+        _run.Overrides.TryGetValue(segmentId, out var existing);
+        var updated = (existing ?? new SegmentOverrides()) with { OffsetLeft = left, OffsetRight = right };
+        var overrides = new Dictionary<Guid, SegmentOverrides>(_run.Overrides);
+        if (updated == new SegmentOverrides()) overrides.Remove(segmentId);
+        else overrides[segmentId] = updated;
+        return TryApply(_run with { Overrides = overrides });
+    }
+
+    /// <summary>Blank is no value (use the run's offset); otherwise a number in the configured culture.</summary>
+    private bool TryParseDistance(string? text, out double? distance)
+    {
+        distance = null;
+        if (string.IsNullOrWhiteSpace(text)) return true;
+        if (!_fmt.TryParse(text, out var value)) return false;
+        distance = value;
+        return true;
     }
 
     void IGridOwner.AddStation(Guid segmentId)
@@ -1026,6 +1118,8 @@ public sealed class DialogViewModel : ObservableObject, IGridOwner, IDisposable
     void IGridOwner.FieldErrorChanged() => RefreshCommandState();
 
     bool IGridOwner.CanEditStations => CanEditStations;
+
+    bool IGridOwner.CanEditOffsets => CanEdit;
 
     bool IGridOwner.CanPickStation => CanEditStations && !string.IsNullOrEmpty(_run.AlignmentName);
 

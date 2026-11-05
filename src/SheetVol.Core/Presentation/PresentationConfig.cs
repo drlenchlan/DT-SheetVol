@@ -118,7 +118,10 @@ public sealed record PresentationConfig
     /// </summary>
     public AutoMode AutoModeWhenChecked { get; init; } = AutoMode.Views;
 
-    /// <summary>Draw options for a new dialog session.</summary>
+    /// <summary>
+    /// Draw options written to <see cref="RunDefinition.Draw"/> of a run the dialog creates. A stored
+    /// run with no draw options (<c>Draw = null</c>, schema 1) draws everything, per the contract.
+    /// </summary>
     public DrawOptions DefaultDrawOptions { get; init; } = new(BoundaryPolylines: true, TableAtEachSegment: true, SummaryTable: true);
 
     /// <summary>Name given to an analysis once both surfaces are picked: {0} base, {1} comparison (6.8 shows "EG vs FG").</summary>

@@ -10,6 +10,10 @@ namespace SheetVol.Core.Presentation;
 /// <param name="SheetLayout">Layout that receives the segment's table (A14), or null.</param>
 /// <param name="OhwmEffective">OHWM elevation that applies to the segment, or null.</param>
 /// <param name="OhwmIsOverride">True when the segment overrides the run's OHWM.</param>
+/// <param name="OffsetFixAvailable">True when the row shows the per-segment offset fix: a station segment in Error, or one that already overrides the offsets (6.14, D8).</param>
+/// <param name="OffsetLeftEffective">Signed left offset that applies to the segment: its override, else the run's.</param>
+/// <param name="OffsetRightEffective">Signed right offset that applies to the segment: its override, else the run's.</param>
+/// <param name="OffsetIsOverride">True when <see cref="SegmentOverrides.OffsetLeft"/> or <see cref="SegmentOverrides.OffsetRight"/> is set for the segment.</param>
 internal sealed record RowModel(
     SegmentDef Segment,
     int Number,
@@ -19,7 +23,11 @@ internal sealed record RowModel(
     Problem? Problem,
     string? SheetLayout,
     double? OhwmEffective,
-    bool OhwmIsOverride);
+    bool OhwmIsOverride,
+    bool OffsetFixAvailable,
+    double OffsetLeftEffective,
+    double OffsetRightEffective,
+    bool OffsetIsOverride);
 
 /// <summary>Display context shared by the grid and the chart for one refresh.</summary>
 internal sealed record GridContext(
@@ -36,6 +44,7 @@ internal interface IGridOwner
 {
     string? EditStation(Guid segmentId, bool isEnd, string text);
     string? EditOhwm(Guid segmentId, string text);
+    string? ApplyOffsetOverride(Guid segmentId, string leftText, string rightText);
     void AddStation(Guid segmentId);
     Task PickStationAsync();
     void RemoveSegment(Guid segmentId);
@@ -44,6 +53,7 @@ internal interface IGridOwner
     void ComparisonChanged();
     void FieldErrorChanged();
     bool CanEditStations { get; }
+    bool CanEditOffsets { get; }
     bool CanPickStation { get; }
     bool CanRemove(Guid segmentId);
     bool CanZoom { get; }

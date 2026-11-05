@@ -44,7 +44,7 @@ public sealed class SegmentsGridViewModel : ObservableObject
     /// <summary>True when every segment has a result and none is in error (6.14).</summary>
     public bool TotalsVisible { get => _totalsVisible; private set => SetProperty(ref _totalsVisible, value); }
 
-    /// <summary>The one reconciliation line under the grid.</summary>
+    /// <summary>The one reconciliation line under the grid, for the selected analysis (E916).</summary>
     public string ReconciliationText { get => _reconciliationText; private set => SetProperty(ref _reconciliationText, value); }
 
     /// <summary>True when the HCFCD column set is shown.</summary>
@@ -213,6 +213,7 @@ public sealed class SegmentsGridViewModel : ObservableObject
         PickStationCommand.RaiseCanExecuteChanged();
         RemoveCommand.RaiseCanExecuteChanged();
         ZoomToCommand.RaiseCanExecuteChanged();
+        foreach (var row in Rows) row.RefreshCommands();
     }
 
     private string Reconciliation(GridContext ctx)
@@ -227,7 +228,10 @@ public sealed class SegmentsGridViewModel : ObservableObject
                 fmt.Volume(Total.CutVolume), fmt.VolumeUnit);
         }
 
-        var outside = ctx.Result?.OutsideLimits is RawVolume o
+        // RegenResult.OutsideLimits holds one entry per analysis above tolerance (contract rev 2);
+        // the line shows the one for the analysis the selector drives (E916).
+        var selected = SelectedAnalysisId is Guid id ? ctx.Result?.OutsideLimits.FirstOrDefault(o => o.AnalysisId == id) : null;
+        var outside = selected is { Raw: var o }
             ? string.Format(fmt.Culture, DialogText.OutsideLimitsFormat,
                 fmt.Volume(fmt.VolumeFromCubicDrawingUnits(o.Cut)),
                 fmt.Volume(fmt.VolumeFromCubicDrawingUnits(o.Fill)),

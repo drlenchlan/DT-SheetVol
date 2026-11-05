@@ -133,6 +133,12 @@ public static class DialogText
     public const string RemoveSegment = "Remove";
     /// <summary>Grid toolbar.</summary>
     public const string ZoomTo = "Zoom to";
+    /// <summary>Per-segment offset fix beside a failing row (6.14, D8): left distance field.</summary>
+    public const string OffsetFixLeft = "Left offset for this segment";
+    /// <summary>Per-segment offset fix: right distance field.</summary>
+    public const string OffsetFixRight = "Right offset for this segment";
+    /// <summary>Per-segment offset fix: button that writes the override and re-validates.</summary>
+    public const string ApplyOffsetFix = "Apply";
     /// <summary>Status chip.</summary>
     public const string StatusCurrent = "Current";
     /// <summary>Status chip.</summary>
@@ -224,6 +230,20 @@ public static class DialogText
     public const string RegenErrorFormat = "Regenerate stopped: {0}";
     /// <summary>Status line when a pick threw: {0} message.</summary>
     public const string PickFailedFormat = "Pick did not complete: {0}";
+    /// <summary>Status line after an export: {0} the files written, joined by <see cref="ExportPathSeparator"/>.</summary>
+    public const string ExportDoneFormat = "Exported {0}.";
+    /// <summary>Joins the exported file paths in <see cref="ExportDoneFormat"/>.</summary>
+    public const string ExportPathSeparator = " and ";
+    /// <summary>Status line when the session has no result to export.</summary>
+    public const string ExportNoResult = "Nothing to export yet. Press Regenerate first.";
+    /// <summary>Status line when the export was skipped and the session gave no reason.</summary>
+    public const string ExportNothingWritten = "Export did not write a file.";
+    /// <summary>Status line when the export was skipped (E506, E507): {0} the session's reasons.</summary>
+    public const string ExportNothingWrittenFormat = "Export did not write a file: {0}";
+    /// <summary>Status line after a cancelled export.</summary>
+    public const string ExportCancelled = "Export cancelled.";
+    /// <summary>Status line when the export threw: {0} message.</summary>
+    public const string ExportErrorFormat = "Export stopped: {0}";
     /// <summary>Row note when ground below OHWM reaches the search limit (E1002).</summary>
     public const string WidenOffsets = "Ground below OHWM reaches the edge of the band. Widen the offsets.";
 
@@ -247,6 +267,10 @@ public static class DialogText
     public const string BusyRefused = "Wait for Regenerate to finish.";
     /// <summary>Inline error on a station of a segment the break list does not drive.</summary>
     public const string StationsNotEditable = "These stations come from a view frame or a drawn polyline.";
+    /// <summary>Per-segment offset fix on a segment that has no offsets (a drawn polyline) or no longer exists.</summary>
+    public const string OffsetFixNotApplicable = "Offsets apply to station segments only.";
+    /// <summary>Per-segment offset fix whose offsets leave no band.</summary>
+    public const string OffsetFixNoWidth = "The band has no width: the left and right offsets must add up to more than zero.";
 
     // ---- Why Regenerate is disabled -------------------------------------------------
 
