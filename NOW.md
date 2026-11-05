@@ -111,13 +111,13 @@ Filled as workers return. Status: TODO / IN PROGRESS / GREEN / MANUAL-OK / BLOCK
 | E1xx Platform | E101–E105 | E101 manual: dev seat verified; E105 GREEN (C2); E102–E104 TODO |
 | E2xx Geometry | E201–E219 | U rows GREEN (C1: E201–E211, E214c, E215, E216, E218); H rows TODO (A1, A4: E212, E213, E217); E219 M |
 | E3xx Segments | E301–E312 | U rows GREEN (C1: E301–E308 planning level, E311c, E312; E309, E310 by C3); H halves TODO (A2, A3, A4) |
-| E4xx Volumes | E401–E421 | U rows GREEN (C2: E405c, E408c, E409, E410c, E411c, E413, E414, E418, E420, E421c; c = Core half); H rows TODO (A1, A4) |
+| E4xx Volumes | E401–E421 | U rows GREEN (C2); H rows with printed evidence (A1): E401–E404, E407, E408, E410, E411, E412, E421; E405 inputs only; E415 OPEN (Dan fixture); E416 M |
 | E5xx Tables | E501–E508 | E508 GREEN (C2); E505 Core half GREEN; H rows TODO (A2, A3) |
 | E6xx Layouts | E601–E615 | U rows GREEN (C3: E603, E606, E607, E610; E309, E310 too); H/M rows TODO (A3) |
 | E7xx Frames | E701–E713 | TODO (L1) |
 | E8xx Regen | E801–E812 | Logic-level GREEN (C3: E804–E806, E811); H/M rows TODO (A4, L2) |
 | E9xx Dialog | E901–E917 | U rows GREEN (C4: E902, E903, E904, E907, E912u, E914, E916, E917; logic for E901, E905, E906, E911 too); M rows TODO (U2, Dan) |
-| E10xx OHWM | E1001–E1021 | U rows GREEN (C5: E1001–E1011, E1019, E1020); H rows TODO (A1, A2, A4: E1012–E1018, E1021) |
+| E10xx OHWM | E1001–E1021 | U rows GREEN (C5); H with evidence: E1012, E1013 (A1), E1015–E1018 (A2); E1014 M; E1021 OPEN (Dan fixture) |
 | T1–T31 | | T15, T16, T17 GREEN; T14 fingerprint part and T19 logic part GREEN (C3); T11, T23 GREEN (C2); T22 GREEN (C4); T25–T30 GREEN on generated triangles (C5); T7, T8, T9, T10 Core half GREEN (C1); rest TODO |
 | P1–P24 | | ANSWERED with evidence: P1–P5, P7–P13, P16–P20, P22 (docs/api-findings.md §A, §B). PARTLY: P6 (data-shortcut reference needs Dan's fixture pair; steps in §A.9), P23 (reference and corridor surfaces not measurable headless). TODO: P14, P15, P21 (S3, Wave 2) |
 
@@ -151,6 +151,7 @@ Filled as workers return. Status: TODO / IN PROGRESS / GREEN / MANUAL-OK / BLOCK
 | 2026-11-05 | wp/rev2b (revision 2 follow-up) | fa43108 | build 0 errors; `dotnet test` 586/586 on the branch and on main; Planning/, Geometry/, Tracking/ and tests only; C3Fakes.cs gone, one Fakes/ set |
 | 2026-11-05 | wp/a2 (A2 model writers) | 1c765e4 | build 0 errors; writersModel.scr re-run by orchestrator in the a2 worktree, exit 0, 5 s, 55 PASS lines; diff confined to WritersModel/ and writersModel.scr |
 | 2026-11-05 | wp/s3 (S3 probes C) | 24ecd5d | build 0 errors; probeC-events.scr re-run by orchestrator in the s3 worktree, exit 0, 5 s, "0 public event(s)" and "Idle one-shot fired 0 time(s)" reproduced; diff confined to ProbeC*.cs, UI/Probe/, probeC*.scr, api-findings.md §C, dan-probe-steps.md |
+| 2026-11-05 | wp/a1 (A1 adapters) | 8d073ad | build 0 errors; adapters.scr re-run by orchestrator in the a1 worktree, exit 0, 11 s, 85 + 2 PASS, 0 FAIL; Fixture H reconciled at 67,860 ft³ in that run; diff confined to Adapters/ and adapters*.scr |
 
 ## Decisions pending Dan (raised by workers, not yet ruled)
 
@@ -172,6 +173,7 @@ Filled as workers return. Status: TODO / IN PROGRESS / GREEN / MANUAL-OK / BLOCK
 | D14 | A2 | Missing configured layers (boundary, outline, match) fail the run under the E501 rule rather than being created; a drawing not started from the LAN template fails until they exist | fail, no create-missing switch |
 | D15 | rev2b | When the run's own offsets are invalid (run-level E210), a segment with a usable override still builds; the run is invalid anyway | builds |
 | D16 | rev2b | Where every neighbour has different offsets the partition check degrades to "each segment counted once" (each band piece is one segment). A stepped union ring per stretch would be stronger | per-piece check |
+| D17 | A1 | `RebuildSources` defaults to true (handoff names the setting, gives no default) | true |
 
 ## Facts for later workers (from merged packages)
 
@@ -261,7 +263,7 @@ Criteria from HANDOFF.md section 10 and what proved them:
 3. `docs/api-findings.md` answers P1–P13 and P16–P20 with evidence: all answered except P6, which is as far as headless can go (data-shortcut references need Dan's fixture pair; §A.9 lists the steps). **Carry 1: P6.** Stop condition 12.2 is not triggered: nothing has shown a volume surface cannot be built from references.
 4. Fixture A totals 200 CY cut and 200 CY fill after the documented mapping: S1's T1/T2 table, re-run by the orchestrator (band 200.000 / 200.000, outside-limits 0).
 
-**Carry 2: Fixture H reconciliation** (FX whole-surface cut 67,860 ft³ vs C5 integrator 67,880 ft³ over the band; FX reported two sliver triangles hidden by Civil 3D). Resolved at the A1 merge when the integrator runs against `ITriangleSource` from the real surface (T29, E1012, E1013).
+**Carry 2: Fixture H reconciliation. CLOSED at the A1 merge** (see "From A1": one transition cell triangulated differently; Civil 3D 67,860 ft³ is the product number; T29 agrees to 4.7e-15).
 
 Contract review at G1 (stop condition 12.6 applies from here on): see "Contract revision 2" below.
 
@@ -292,3 +294,14 @@ Changes to `Contracts.cs`, each tied to a decision above: `ISheetVolSession` gai
 - **P21 (coded, waiting for Dan's one `SVPROBEUI` run):** `SVPROBEUI` in `SheetVol.UI/Probe` exercises four write routes from a modeless button (no lock as the control, `LockDocument`, `ExecuteInCommandContextAsync`, `SendStringToExecute`), colour theme and three change signals, command-active tracking, highlight and transient outline, DPI and window size, compiled XAML from a NETLOADed DLL; logs to `%TEMP%\sheetvol\probeUI.log`. `Application.ShowModelessWindow(Window)` binds to the AcCoreMgd overload inherited by AcMgd's `Application`.
 - **P14 (coded, waiting for Dan's drawings):** `SVPROBEFRAMES` enumerates groups, frames, match lines, logs every `Explode` primitive, solves each frame two ways (the 5.2 guess with a holds / does-not-hold verdict, and independently from the alignment direction), compares with the sheet viewport's twist and scale, and logs viewport XData and extension dictionaries to find how Create Sheets marks a Plan viewport. `SVPROBEC_SOLVECHECK` passes on 3 known rectangles. Once `frames-src.dwg`, `frames-sheets.dwg`, `frames-ref.dwg` are in `tools/fixtures/`, P14 runs headless.
 - Runner now also stages `SheetVol.UI.dll` into the dev bundle after S3 found it missing (Dan's step 0 copy lines are no longer needed).
+
+### From A1 (evidence in `%TEMP%\sheetvol\adapters.log` after a run; entry points in `src/SheetVol.Civil3D/Adapters/README.md`)
+
+- **Fixture H carry CLOSED (MEASURED):** Civil 3D's volume surface, the owned surface's totals, `GetBoundedVolumes` over the band, and C5's integrator on the adapter's triangles all give 67,860 ft³; C5's generated triangles give 67,880. The 20 ft³ is one transition cell (x 1300–1310, |y| 10–16, corner depths 2, 0, 0, 0) where Civil 3D picks the diagonal away from the depth-2 corner on the +y side and C5's generator picks the depth-2 diagonal on both sides. Neither is wrong; the product number is Civil 3D's because the integrator on Civil 3D's own triangles equals the API (T29, 9 of 9 polygons per fixture within 4.7e-15 relative).
+- T1/T2 through adapter → C1 planner → `VolumeSourceAdapter` → C2 reconciler: PASS on all 8 segments, partition and band totals 200/200 CY. T10: API bounded volume equals C1's polygon area on K and SP to 5.5e-16 (lines, arcs and spirals alike; the 2e-5 shortfall against the exact band is C1's 0.01 mid-ordinate tessellation). T24: 2D area 62,829.81 SF (rel −3.25e-5 to analytic, PASS at 2e-4); off-edge band coverage 57.7 %, SV-E419. The integrator's plan area matched the datum-method 2D area on every polygon to 4.4e-15: this is the evidence for the unbuilt 6.5 cross-check (C2 note), which A4 can now implement with a 1e-9 relative tolerance.
+- E1013: hide boundary on FG_A: visible-only integrator 1574.074 vs API 1574.074; including hidden triangles gives 2700. P23 scale: 999,698 triangles read in 0.71 s; band window kept 142,814; 27 segment-window queries 11.7 ms.
+- Sign and units in one place: `Cut` real cut, raw cubic drawing units, |x| < 1e-6 clamped to 0 (saw 5.4e-11 noise), Civil unit Feet used while `INSUNITS` says Inches. Polygon rule: open or 3-point polygon throws `ArgumentException`.
+- Lifecycle: owned surfaces tagged (`OwnershipTag` Xrecord); erased → recreated; renamed → new surface, old left in place with a Warning; user's untagged surface of the same name keeps its factors and the owned one gets a `-2` suffix (E412); a stored handle is used only while the run still names the same object (an edited or misspelled name fails rather than silently using the old surface; E803 is a Warning, SV-E213 when the alignment is missing, SV-E445 when found by handle under a new name). E404: `RebuildSources` on → rebuild with Info, off → Error; a source on a locked layer that needs a rebuild fails naming the layer; the owned surface is updated even on a locked layer.
+- **New facts:** `IsOutOfDate` is set on a point-group surface only after the command that moved the point ends; a TIN defined by a 3D-polyline breakline did not flag after its vertex moved. Aborting a regen transaction after `EnsureAnalyses` created an owned surface removes it cleanly; aborting after creating an alignment is clean; **creating an alignment, erasing it in the same transaction, then aborting crashed Core Console (0xC0000005)**: A4 never erases an object it created in the same transaction before an abort (create-then-erase is replaced by not creating).
+- For A4: the E1012 fail-the-run rule (max(0.5 ft³, 1e-4 × total) on project data) lives in the pipeline, A1 provides both numbers; embed `AdapterConfig` in the settings file; persist `AnalysisBinding.ToStored()` and the alignment's `StoredRef`. New codes SV-E442 (not found), E443/E444 (style/layer missing, both fire on `blank-c3d.dwg`), E445 (renamed source), E446 (bad config). Placeholders (A7): style `SV-No Display`, layer `SV-VOLUME`.
+- Open: reference and corridor surfaces (E415, E1021; stop conditions 12.2 and 12.9) still need Dan's fixture pair; the reference branch of E404 has no fixture.
