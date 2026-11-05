@@ -1,0 +1,81 @@
+<!-- SheetVol light theme: the same keys as DarkTheme.xaml with light values (E908).
+     SheetVol's own palette: no Autodesk colours, templates, icons or fonts. -->
+<ResourceDictionary x:Class="SheetVol.UI.Dialog.Themes.LightTheme"
+                    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <!-- Surfaces -->
+    <SolidColorBrush x:Key="SV.Brush.WindowBackground" Color="#F3F4F6"/>
+    <SolidColorBrush x:Key="SV.Brush.PanelBackground" Color="#ECEEF1"/>
+    <SolidColorBrush x:Key="SV.Brush.CardBackground" Color="#FFFFFF"/>
+    <SolidColorBrush x:Key="SV.Brush.CardBorder" Color="#D5D9DF"/>
+    <SolidColorBrush x:Key="SV.Brush.Separator" Color="#DDE1E6"/>
+
+    <!-- Text -->
+    <SolidColorBrush x:Key="SV.Brush.Text" Color="#1E2329"/>
+    <SolidColorBrush x:Key="SV.Brush.TextMuted" Color="#5B6572"/>
+    <SolidColorBrush x:Key="SV.Brush.TextDisabled" Color="#9AA3AE"/>
+
+    <!-- Inputs -->
+    <SolidColorBrush x:Key="SV.Brush.ControlBackground" Color="#FFFFFF"/>
+    <SolidColorBrush x:Key="SV.Brush.ControlBorder" Color="#B8BFC9"/>
+    <SolidColorBrush x:Key="SV.Brush.ControlHoverBorder" Color="#8C96A3"/>
+    <SolidColorBrush x:Key="SV.Brush.ControlReadOnlyBackground" Color="#F1F3F5"/>
+    <SolidColorBrush x:Key="SV.Brush.FocusBorder" Color="#1F6FB2"/>
+    <SolidColorBrush x:Key="SV.Brush.Selection" Color="#B9D6F0"/>
+    <SolidColorBrush x:Key="SV.Brush.ItemHover" Color="#E9EEF4"/>
+
+    <!-- Buttons -->
+    <SolidColorBrush x:Key="SV.Brush.ButtonBackground" Color="#F7F8FA"/>
+    <SolidColorBrush x:Key="SV.Brush.ButtonHover" Color="#E9ECF0"/>
+    <SolidColorBrush x:Key="SV.Brush.ButtonPressed" Color="#DDE1E6"/>
+    <SolidColorBrush x:Key="SV.Brush.ButtonBorder" Color="#B8BFC9"/>
+    <SolidColorBrush x:Key="SV.Brush.Accent" Color="#1F6FB2"/>
+    <SolidColorBrush x:Key="SV.Brush.AccentHover" Color="#2A7FC6"/>
+    <SolidColorBrush x:Key="SV.Brush.AccentPressed" Color="#195C94"/>
+    <SolidColorBrush x:Key="SV.Brush.AccentText" Color="#FFFFFF"/>
+
+    <!-- States -->
+    <SolidColorBrush x:Key="SV.Brush.Error" Color="#C62E3A"/>
+    <SolidColorBrush x:Key="SV.Brush.ErrorBackground" Color="#FBE7E9"/>
+    <SolidColorBrush x:Key="SV.Brush.ErrorRowTint" Color="#FBE7E9"/>
+    <SolidColorBrush x:Key="SV.Brush.Warning" Color="#8A5A00"/>
+    <SolidColorBrush x:Key="SV.Brush.WarningBackground" Color="#FFF4D6"/>
+    <SolidColorBrush x:Key="SV.Brush.WarningBorder" Color="#E8C66A"/>
+    <SolidColorBrush x:Key="SV.Brush.InfoBackground" Color="#E1ECF7"/>
+    <SolidColorBrush x:Key="SV.Brush.InfoBorder" Color="#B5CDE6"/>
+
+    <!-- Status chips -->
+    <SolidColorBrush x:Key="SV.Brush.ChipCurrentBackground" Color="#E3F4E8"/>
+    <SolidColorBrush x:Key="SV.Brush.ChipCurrentText" Color="#1E7B3A"/>
+    <SolidColorBrush x:Key="SV.Brush.ChipOutOfDateBackground" Color="#FFF4D6"/>
+    <SolidColorBrush x:Key="SV.Brush.ChipOutOfDateText" Color="#8A5A00"/>
+    <SolidColorBrush x:Key="SV.Brush.ChipErrorBackground" Color="#FBE7E9"/>
+    <SolidColorBrush x:Key="SV.Brush.ChipErrorText" Color="#C62E3A"/>
+
+    <!-- Grid -->
+    <SolidColorBrush x:Key="SV.Brush.GridBackground" Color="#FFFFFF"/>
+    <SolidColorBrush x:Key="SV.Brush.GridRow" Color="#FFFFFF"/>
+    <SolidColorBrush x:Key="SV.Brush.GridRowHover" Color="#F1F4F8"/>
+    <SolidColorBrush x:Key="SV.Brush.GridRowSelected" Color="#D6E6F5"/>
+    <SolidColorBrush x:Key="SV.Brush.GridLine" Color="#E3E6EA"/>
+    <SolidColorBrush x:Key="SV.Brush.GridHeaderBackground" Color="#ECEEF1"/>
+    <SolidColorBrush x:Key="SV.Brush.GridHeaderText" Color="#3A434E"/>
+    <SolidColorBrush x:Key="SV.Brush.GridTotalBackground" Color="#ECEEF1"/>
+
+    <!-- Chart -->
+    <SolidColorBrush x:Key="SV.Brush.ChartPlotBackground" Color="#FFFFFF"/>
+    <SolidColorBrush x:Key="SV.Brush.ChartFill" Color="#2F7FC1"/>
+    <SolidColorBrush x:Key="SV.Brush.ChartCut" Color="#D2702A"/>
+    <SolidColorBrush x:Key="SV.Brush.ChartAxis" Color="#6B7480"/>
+    <SolidColorBrush x:Key="SV.Brush.ChartLabel" Color="#5B6572"/>
+    <SolidColorBrush x:Key="SV.Brush.ChartSelection" Color="#1E2329"/>
+    <SolidColorBrush x:Key="SV.Brush.ChartCutMark" Color="#D2702A"/>
+    <SolidColorBrush x:Key="SV.Brush.ChartHollow" Color="#9AA3AE"/>
+
+    <!-- Scroll bars and tool tips -->
+    <SolidColorBrush x:Key="SV.Brush.ScrollThumb" Color="#C3C9D1"/>
+    <SolidColorBrush x:Key="SV.Brush.ScrollThumbHover" Color="#A3ABB6"/>
+    <SolidColorBrush x:Key="SV.Brush.ToolTipBackground" Color="#FFFFFF"/>
+    <SolidColorBrush x:Key="SV.Brush.ToolTipBorder" Color="#B8BFC9"/>
+</ResourceDictionary>
