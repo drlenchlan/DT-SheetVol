@@ -9,6 +9,7 @@
 //           so a regen with nothing changed writes nothing (E811, T19).
 
 using Autodesk.AutoCAD.DatabaseServices;
+using SheetVol.Civil3D.Ownership;
 using SheetVol.Core;
 using SheetVol.Core.Tracking;
 
@@ -26,10 +27,17 @@ public abstract class OwnedWriter<TSpec, TEntity> where TEntity : Entity
     private ChangeSet? _changes;
 
     /// <summary>Starts a writer in the caller's context.</summary>
-    protected OwnedWriter(ModelWriteContext ctx) => Ctx = ctx;
+    protected OwnedWriter(ModelWriteContext ctx)
+    {
+        Ctx = ctx;
+        RunId = ctx.RunId;
+    }
 
     /// <summary>The caller's context.</summary>
     protected ModelWriteContext Ctx { get; }
+
+    /// <summary>The run id written into and matched against owner tags.</summary>
+    protected Guid RunId { get; }
 
     /// <summary>The caller's transaction.</summary>
     protected Transaction Tr => Ctx.Transaction;
@@ -96,7 +104,7 @@ public abstract class OwnedWriter<TSpec, TEntity> where TEntity : Entity
             if (!id.IsNull && Tr.GetObject(id, OpenMode.ForRead) is TEntity e)
             {
                 var tag = OwnerTag.Read(Tr, e, Ctx.Config.OwnerTagKey);
-                if (tag is not null && tag.Matches(Ctx.RunName, s.Key)) entity = e;
+                if (tag is not null && tag.Matches(RunId, s.Key)) entity = e;
             }
             if (entity is null)
             {
@@ -141,7 +149,7 @@ public abstract class OwnedWriter<TSpec, TEntity> where TEntity : Entity
                     if (_skipCreate.Contains(key)) continue;
                     var spec = specs[key];
                     TEntity e = Create(key, spec, guard, notes);
-                    new OwnerTag(Ctx.RunName, key, TagRowKeys(spec)).Write(Tr, e, Ctx.Config.OwnerTagKey);
+                    new OwnerTag(RunId, key, "", TagRowKeys(spec)).Write(Tr, e, Ctx.Config.OwnerTagKey);
                     string handle = Handles.Of(e.ObjectId);
                     if (_recreate.Contains(key))
                         notes.Add(new Problem(RecreatedCode, Severity.Info,

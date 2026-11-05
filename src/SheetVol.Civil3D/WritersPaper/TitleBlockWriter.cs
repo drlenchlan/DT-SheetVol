@@ -8,6 +8,7 @@
 // TitleAttributes, qualifier = its block name).
 
 using Autodesk.AutoCAD.DatabaseServices;
+using SheetVol.Civil3D.Ownership;
 using SheetVol.Core;
 using SheetVol.Core.Tracking;
 
@@ -47,7 +48,7 @@ internal sealed class TitleBlockWriter(PaperConfig config)
                 found.Add(att.Tag);
                 written[att.Tag] = value;
                 if (att.TextString == value) continue;
-                att = OwnerTags.OpenForWrite<AttributeReference>(tr, attId);
+                att = OwnerTag.OpenForWrite<AttributeReference>(tr, attId);
                 writes.Add();
                 att.TextString = value;
                 if (att.Justify != AttachmentPoint.BaseLeft) att.AdjustAlignment(db);
@@ -60,12 +61,12 @@ internal sealed class TitleBlockWriter(PaperConfig config)
             string qualifier = blockName.Length <= 200 ? blockName : "sha256:" + CanonicalWriter.Hash(blockName);
             var tag = new OwnerTag(runId, segmentId, OwnedRole.TitleAttributes, qualifier,
                 ContentSignatures.OfTexts(written.Select(kv => $"{kv.Key}={kv.Value}")), []);
-            bool hadTag = OwnerTags.Read(tr, br, config.OwnerTagKey) is not null;
-            if (!OwnerTags.Matches(tr, br, config.OwnerTagKey, tag))
+            bool hadTag = OwnerTag.Read(tr, br, config.OwnerTagKey) is not null;
+            if (!OwnerTag.Matches(tr, br, config.OwnerTagKey, tag))
             {
-                var w = OwnerTags.OpenForWrite<BlockReference>(tr, id);
+                var w = OwnerTag.OpenForWrite<BlockReference>(tr, id);
                 writes.Add();
-                OwnerTags.Write(tr, w, config.OwnerTagKey, tag);
+                OwnerTag.Write(tr, w, config.OwnerTagKey, tag);
                 changedHere = true;
             }
             if (changedHere)

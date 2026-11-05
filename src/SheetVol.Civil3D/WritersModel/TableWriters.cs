@@ -7,6 +7,7 @@
 // config; a missing style or layer is SV-E501 before anything is written (E501).
 
 using Autodesk.AutoCAD.DatabaseServices;
+using SheetVol.Civil3D.Ownership;
 using SheetVol.Core;
 using SheetVol.Core.Output;
 using SheetVol.Core.Tracking;
@@ -117,7 +118,7 @@ public sealed class ModelTableWriter : OwnedWriter<ModelTableSpec, Table>
     {
         string planned = TableRenderer.Signature(spec.Model);
         if (live is null) return (planned, null);
-        var rowKeys = OwnerTag.Read(Tr, live, Ctx.Config.OwnerTagKey)?.RowKeys ?? [];
+        var rowKeys = OwnerTag.Read(Tr, live, Ctx.Config.OwnerTagKey)?.Extras ?? [];
         _liveRowKeys[key] = rowKeys;
         return (planned, TableRenderer.Signature(live, rowKeys, spec.Model));
     }
@@ -154,7 +155,7 @@ public sealed class ModelTableWriter : OwnedWriter<ModelTableSpec, Table>
             notes.Add(new Problem(ModelWriterCodes.TableResized, Severity.Info,
                 $"Table {Describe(key)} ({t.Handle}) updated in place: {stats.RowsInserted} row(s) inserted, {stats.RowsDeleted} deleted.",
                 TablePlacements.SegmentOf(key)));
-        if (!oldKeys.SequenceEqual(newKeys)) new OwnerTag(Ctx.RunName, key, newKeys).Write(Tr, t, Ctx.Config.OwnerTagKey);
+        if (!oldKeys.SequenceEqual(newKeys)) new OwnerTag(RunId, key, "", newKeys).Write(Tr, t, Ctx.Config.OwnerTagKey);
     }
 }
 

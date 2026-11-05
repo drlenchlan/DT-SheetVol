@@ -174,13 +174,17 @@ public sealed record StoredObjectRef(Guid SegmentId, OwnedRole Role, string Qual
 /// <summary>The drawing and settings the writers work in. The transaction belongs to the caller (A4), who commits or aborts it.</summary>
 /// <param name="Transaction">The caller's open transaction (6.10 step 5).</param>
 /// <param name="Database">The drawing.</param>
-/// <param name="RunName">Run name, written into every ownership tag.</param>
+/// <param name="RunName">Run name; its <see cref="RunId"/> is written into every ownership tag.</param>
 /// <param name="Config">A2 config.</param>
 /// <param name="Report">C2 config: table styles, layers, text heights, anchor block name, formats.</param>
 /// <param name="Units">Drawing units from the adapter, for HCFCD values.</param>
 public sealed record ModelWriteContext(
     Transaction Transaction, Database Database, string RunName,
-    ModelWritersConfig Config, ReportConfig Report, DrawingUnits Units);
+    ModelWritersConfig Config, ReportConfig Report, DrawingUnits Units)
+{
+    /// <summary>The run id in every owner tag (<see cref="Ownership.RunIds.For"/>), the same id the paper writers use.</summary>
+    public Guid RunId => Ownership.RunIds.For(RunName);
+}
 
 /// <summary>Result of one apply.</summary>
 /// <param name="Succeeded">False when an error stopped the apply before any write.</param>
