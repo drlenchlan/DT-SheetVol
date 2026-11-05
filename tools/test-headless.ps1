@@ -61,6 +61,7 @@ if (-not $Drawing) {
     if (Test-Path $blank) { $Drawing = $blank }
 }
 if ($Drawing -and -not (Test-Path $Drawing)) { throw "drawing not found: $Drawing" }
+if ($Drawing) { $Drawing = (Resolve-Path $Drawing).Path }   # the worker runs in another directory
 
 if (-not $LogPath) {
     $dir = Join-Path $env:TEMP 'sheetvol'
