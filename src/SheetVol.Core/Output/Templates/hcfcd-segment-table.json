@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "name": "hcfcd-segment-table",
+  "placeholder": true,
+  "note": "PLACEHOLDER layout until Dan supplies the HCFCD segment table as it should look in CAD (HANDOFF.md section 13). Rows 6 to 9 (1-based) are the bound rows of A13; every other row is fixed text the tool never rewrites. Tokens {volumeUnit}, {lengthUnit}, {areaUnit} and {averageUnit} are resolved once, when the table is first created.",
+  "columns": 3,
+  "labelColumn": 0,
+  "rows": [
+    ["HCFCD SEGMENT IMPACTS", "", ""],
+    ["CENTER COORDINATES (N, E)", "", ""],
+    ["OTHER AQUATIC FEATURES", "", ""],
+    ["WETLANDS", "", ""],
+    ["OPEN WATER", "", ""],
+    ["TOTAL IMPACTED LENGTH (BELOW OHWM)", "", ""],
+    ["TOTAL IMPACTED AREA (BELOW OHWM)", "", ""],
+    ["TOTAL CUT MATERIAL", "VOLUME ({volumeUnit})", "AVERAGE ({averageUnit})"]
+  ],
+  "merges": [
+    { "row": 0, "firstColumn": 0, "lastColumn": 2 },
+    { "row": 1, "firstColumn": 1, "lastColumn": 2 },
+    { "row": 2, "firstColumn": 0, "lastColumn": 2 }
+  ],
+  "bindings": [
+    { "quantity": "ImpactedLength", "labelPrefix": "TOTAL IMPACTED LENGTH (BELOW OHWM)", "valueColumn": 1, "unitColumn": 2 },
+    { "quantity": "ImpactedArea", "labelPrefix": "TOTAL IMPACTED AREA (BELOW OHWM)", "valueColumn": 1, "unitColumn": 2 }
+  ],
+  "materials": {
+    "headerLabelPrefix": "TOTAL CUT MATERIAL",
+    "cutVolumeColumn": 1,
+    "averageColumn": 2
+  }
+}
