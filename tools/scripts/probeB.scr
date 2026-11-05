@@ -1,0 +1,43 @@
+(command "_.NETLOAD" (getenv "SHEETVOL_DLL"))
+SVPROBEB_P11
+SVPROBEB_P12
+SVPROBEB_P13
+SVPROBEB_P17
+SVPROBEB_P24
+SVPROBEB_SAVE
+SVPROBEB_VERIFY
+(setvar "CTAB" "SV-P12A")
+_.MSPACE
+SVPROBEB_P12TRANS
+(if (> (getvar "CVPORT") 1) (progn (print (trans (trans '(5000.0 3000.0 0.0) 0 2) 2 3)) (print (trans (trans '(5100.0 3000.0 0.0) 0 2) 2 3))) (princ "\nP12 LISP trans skipped: CVPORT=1"))
+(setvar "CTAB" "SV-P12B")
+_.MSPACE
+SVPROBEB_P12TRANS
+(if (> (getvar "CVPORT") 1) (progn (print (trans (trans '(5000.0 3000.0 0.0) 0 2) 2 3)) (print (trans (trans '(5100.0 3000.0 0.0) 0 2) 2 3))) (princ "\nP12 LISP trans skipped: CVPORT=1"))
+(setvar "CTAB" "SV-P12B2")
+_.MSPACE
+SVPROBEB_P12TRANS
+(if (> (getvar "CVPORT") 1) (progn (print (trans (trans '(5000.0 3000.0 0.0) 0 2) 2 3)) (print (trans (trans '(5100.0 3000.0 0.0) 0 2) 2 3))) (princ "\nP12 LISP trans skipped: CVPORT=1"))
+(setvar "CTAB" "SV-P12C")
+SVPROBEB_P12TRANS
+_.MSPACE
+SVPROBEB_P12TRANS
+(if (> (getvar "CVPORT") 1) (progn (print (trans (trans '(5000.0 3000.0 0.0) 0 2) 2 3)) (print (trans (trans '(5100.0 3000.0 0.0) 0 2) 2 3))) (princ "\nP12 LISP trans skipped: CVPORT=1"))
+(setvar "CTAB" "SV-P12N")
+SVPROBEB_P12TRANS
+(setvar "CTAB" "SV-P11-0")
+SVPROBEB_P12TRANS
+(setvar "CTAB" "SV-P11-1")
+SVPROBEB_P12TRANS
+(setvar "CTAB" "SV-P11-W")
+SVPROBEB_P12TRANS
+(setvar "CTAB" "SV-P17")
+SVPROBEB_P12TRANS
+(setvar "CTAB" "Model")
+SVPROBEB_P20A
+SVPROBEB_P20B
+_.UNDO
+1
+SVPROBEB_P20C
+_.QUIT
+_Y
