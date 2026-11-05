@@ -212,7 +212,7 @@ public sealed record RegenResult(
 
 // ----------------------------------------------------------------------------
 // Rev 2 (G1 contract review, 2026-11-05): what the dialog needs from the host.
-// C4 parked these behind IDialogHost in Presentation/; they belong in the one
+// C4 parked these behind a Presentation-side host interface; they belong in the one
 // door between UI and engine (6.14), so they move here. Database-side members
 // are implemented in Civil3D/Session, editor-side ones in UI/Host.
 // ----------------------------------------------------------------------------
@@ -243,7 +243,7 @@ public interface ISheetVolSession
     Task<double?> PickStationAsync(string alignmentName);
     event EventHandler SourcesChanged;                // active document, object lists, staleness
 
-    // Rev 2 (from C4's IDialogHost)
+    // Rev 2 (dialog host members)
     DrawingInfo? ActiveDrawing { get; }                                   // null when no drawing is open (E901); re-read on SourcesChanged
     string FormatStation(string alignmentName, double rawStation);        // honors station equations (E208)
     (double Start, double End)? StationRange(string alignmentName);       // raw; null when the alignment is not found

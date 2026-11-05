@@ -5,7 +5,7 @@ what is true; HANDOFF.md wins on method. Every figure is MEASURED unless marked 
 
 ## Position
 
-**G0 and G1 passed 2026-11-05 (evidence under Gates). Contract revision 2 is on branch `contract/rev2` with adoption running on `wp/rev2-adopt`; main stays at revision 1 until that merges green. Wave 2 in progress since 2026-11-05: A1, A2, A3, S3 dispatched from main in worktrees `C:/LAN-DT-build/sheetvol-wt/<wp>`; A4 and U2 wait for the revision 2 merge because they implement `ISheetVolSession` and build `RegenResult`.**
+**G0 and G1 passed 2026-11-05 (evidence under Gates). Contract revision 2 is merged on main (stop condition 12.6 applies from here). Wave 2 in progress since 2026-11-05: A1, A2, A3, S3 dispatched from main in worktrees `C:/LAN-DT-build/sheetvol-wt/<wp>`; A4, U2 and a revision-2 follow-up (Planner reads per-segment offsets; fingerprints cover Draw and offset overrides) dispatched from main after the merge.**
 
 ## Corrections to HANDOFF.md (Dan or measurement overrides the plan)
 
@@ -147,6 +147,7 @@ Filled as workers return. Status: TODO / IN PROGRESS / GREEN / MANUAL-OK / BLOCK
 | 2026-11-05 | wp/c5 (C5 integrator) | a410702 | build 0 errors; `dotnet test` 94/94 in the c5 worktree, 420/420 on main after merge; commit confined to Volumes/Integrator/ and its tests; no Autodesk references, no residue |
 | 2026-11-05 | wp/c1 (C1 planning + geometry) | d601c47 | build 0 errors; `dotnet test` 130/130 in the c1 worktree, 548/548 on main after merge; diff confined to Planning/, Geometry/, tests and Fakes/; no residue |
 | 2026-11-05 | wp/s1 (S1 probes A) | 7541b16 | build 0 errors; probeA.scr re-run by orchestrator in the s1 worktree, exit 0, 38 s: T1 and T2 PASS on all 8 segments, partition diff 0, band 200/200 CY, outside-limits 0; diff confined to ProbeA*.cs, probeA*.scr, api-findings.md §A, test-headless.ps1 (header + opt-in -ExtraArgs) |
+| 2026-11-05 | contract/rev2 + wp/rev2-adopt (revision 2) | 8e09bcb | build 0 errors; `dotnet test` 558/558 on the adoption branch and on main; adoption confined to Presentation/, Output/, Volumes/ and tests; schema 1 JSON loads as schema 2 |
 
 ## Decisions pending Dan (raised by workers, not yet ruled)
 
@@ -256,3 +257,7 @@ Criteria from HANDOFF.md section 10 and what proved them:
 **Carry 2: Fixture H reconciliation** (FX whole-surface cut 67,860 ft³ vs C5 integrator 67,880 ft³ over the band; FX reported two sliver triangles hidden by Civil 3D). Resolved at the A1 merge when the integrator runs against `ITriangleSource` from the real surface (T29, E1012, E1013).
 
 Contract review at G1 (stop condition 12.6 applies from here on): see "Contract revision 2" below.
+
+## Contract revision 2 (G1 review, 2026-11-05)
+
+Changes to `Contracts.cs`, each tied to a decision above: `ISheetVolSession` gains `ActiveDrawing`, `FormatStation`, `StationRange`, `GetRunStatus`, `IsCommandActive`, `ExportAsync` (D5: C4's host interface folded into the one door); `UnitSystem`, `DrawingInfo`, `RunStatus` records in `SheetVol.Core` (C2's duplicate `Volumes.UnitSystem` removed); `RunDefinition.Draw : DrawOptions?` and `SchemaVersion = 2` (D6; null = all on; schema 1 JSON loads with Draw null); `SegmentOverrides.OffsetLeft/OffsetRight` (D8); `RegenResult.OutsideLimits : IReadOnlyList<OutsideLimits>` one per analysis (C2's per-analysis `ReconcileResult`; A4 builds the mapping). Follow-ups dispatched: C1's `SegmentPlanner`/`BoundaryBuilder` must use per-segment offset overrides with per-segment E210; C3's `DefinitionSignature` must hash `Draw` and the offset overrides (else a typed SVDEFINE changing only those is not stale, E912). The adoption re-pinned C3's `Fingerprint_is_stable_across_runs` because `SchemaVersion` is hashed and moved 1 → 2; the format itself is unchanged.
