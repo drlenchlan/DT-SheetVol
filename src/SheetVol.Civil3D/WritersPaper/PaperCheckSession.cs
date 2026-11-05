@@ -24,6 +24,7 @@
 
 using Autodesk.AutoCAD.DatabaseServices;
 using Autodesk.AutoCAD.Geometry;
+using SheetVol.Civil3D.Ownership;
 using SheetVol.Core;
 using SheetVol.Core.Tracking;
 using SheetVol.Core.Views;
@@ -60,7 +61,7 @@ public static partial class PaperCheckCommands
         var layoutId = lm.GetLayoutId(lm.CurrentLayout);
         using var tr = db.TransactionManager.StartTransaction();
         var key = CheckPlans.Config().OwnerTagKey;
-        var tag = OwnerTags.Read(tr, tr.GetObject(layoutId, OpenMode.ForRead), key);
+        var tag = OwnerTag.Read(tr, tr.GetObject(layoutId, OpenMode.ForRead), key);
         if (tag is null || tag.RunId != CheckPlans.RunT18) { tr.Commit(); return null; }
         var vp = PaperWriter.FindOwned(tr, db, key, CheckPlans.RunT18).Single(o => o.Role == OwnedRole.Viewport && o.SegmentId == tag.SegmentId);
         tr.Commit();

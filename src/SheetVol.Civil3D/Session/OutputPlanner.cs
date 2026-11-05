@@ -1,23 +1,35 @@
-// A4 work package (HANDOFF.md section 10, Wave 2). Owner: A4.
+// A4 work package (HANDOFF.md section 10, Wave 2). Owner: A4; reshaped at the Wave 2
+// integration to hand A2 and A3 their own specs.
 //
 // Step 4 of the regen (6.10), after the views: what the run should own once applied.
 // Pure: reads the plan, the reconciled volumes, the views and the drawing's layout list,
-// writes nothing. Each planned object carries the signature C3's ChangeSet compares with
-// the live object, so step 5 writes only what changed (E811).
+// writes nothing. Model-space objects carry A2's specs (boundaries, MatchMarkPlanner marks,
+// ImpactOutlines, ModelTableSpec, HcfcdTableSpec); paper objects carry what A3's sheet
+// request needs (name parts, view, table model, LockView). Each object also carries the
+// signature the fake writers compare, so the self-test's fakes and the real writers are
+// driven by one plan.
 //
 // Placement rules (6.7, 6.8, 6.16, A14):
 //   - boundary polyline per station segment when Draw.BoundaryPolylines;
-//   - match marks at shared breaks when modelOutput.matchMarks;
-//   - with regen.generateLayouts: one layout per station segment from the template, named
-//     by C3's LayoutNamer and renumbered with a two-pass plan (E307, E603), its plan
-//     viewport (LockView keeps it, E608) and title attributes;
-//   - one table per segment: on the segment's TargetLayout when it names one (missing:
-//     E1017, kept where it is, never re-created elsewhere), else on its generated layout,
-//     else in model space at the segment when Draw.TableAtEachSegment;
-//   - the master table when Draw.SummaryTable, in model space or modelOutput.masterTableLayout.
+//   - match marks at shared breaks when modelWriters.matchMarks.enabled (A2's planner);
+//   - impacted-area outlines per station segment for the HcfcdSegment preset when
+//     modelWriters.drawImpactOutline;
+//   - with regen.generateLayouts: one layout per station segment from the template, named by
+//     C3's LayoutNamer (E307, E603), its plan viewport (LockView keeps it, E608) and title
+//     attributes; A3 renames and creates the layouts itself from the same name parts;
+//   - Standard per-sheet table: on the segment's TargetLayout when it names one (A2, placed at
+//     that layout's anchor; a missing layout is A2's E1017, never re-created elsewhere), else
+//     on its generated layout (A3), else in model space at the segment when
+//     Draw.TableAtEachSegment (A2);
+//   - HCFCD table (6.16): on the TargetLayout when set, else in model space at the segment
+//     when Draw.TableAtEachSegment (A2); never on a generated sheet;
+//   - the master table when Draw.SummaryTable, in model space beside the run or on
+//     modelOutput.masterTableLayout (A2; a missing layout is A2's E601 before any write).
 
-using System.Globalization;
+using SheetVol.Civil3D.WritersModel;
+using SheetVol.Civil3D.WritersPaper;
 using SheetVol.Core;
+using SheetVol.Core.Geometry;
 using SheetVol.Core.Output;
 using SheetVol.Core.Planning;
 using SheetVol.Core.Tracking;
@@ -39,22 +51,23 @@ public sealed record OutputInputs(
     RunRecord? Prior,
     HcfcdTemplate? Hcfcd,
     QuantityFormatter? Formatter,
-    double DrawingUnitsPerFoot,
-    SheetVolSettings Settings,
-    Func<OwnedKey, bool> LiveExists);   // a stored object still exists in the drawing (writer Inspect)
+    GeometryOptions Geometry,
+    SheetVolSettings Settings);
 
 /// <summary>What the run will own after step 5.</summary>
-/// <param name="Objects">Planned objects in apply order.</param>
-/// <param name="Locked">Keys whose existing object is kept as is (LockView, missing target layout).</param>
-/// <param name="Renames">Layout rename plan, or null when layouts are not generated.</param>
-/// <param name="SegmentLayoutHandles">Stored layout handle per segment for the renames.</param>
-/// <param name="Problems">Notes and warnings (E603, E1017).</param>
+/// <param name="Objects">Planned objects.</param>
+/// <param name="Renames">Layout rename plan, or null when layouts are not generated (the fake paper writer applies it; A3 plans its own from the same names).</param>
+/// <param name="SegmentLayoutHandles">Stored layout handle per segment.</param>
+/// <param name="Problems">Notes and warnings (E603, impacted-area outlines not drawn).</param>
 public sealed record OutputPlan(
     IReadOnlyList<OwnedObject> Objects,
-    IReadOnlySet<OwnedKey> Locked,
     LayoutRenamePlan? Renames,
     IReadOnlyDictionary<Guid, string> SegmentLayoutHandles,
-    IReadOnlyList<Problem> Problems);
+    IReadOnlyList<Problem> Problems)
+{
+    /// <summary>A plan that owns nothing.</summary>
+    public static OutputPlan Empty { get; } = new([], null, new Dictionary<Guid, string>(), []);
+}
 
 /// <summary>Builds the planned owned objects for one run.</summary>
 public static class OutputPlanner
@@ -68,14 +81,14 @@ public static class OutputPlanner
         var alignment = input.Alignment;
         var problems = new List<Problem>();
         var objects = new List<OwnedObject>();
-        var locked = new HashSet<OwnedKey>();
         var stationSegs = input.Plan.Segments.OrderBy(x => x.StartStation).ToList();
         var boundaries = input.Plan.Boundaries.ToDictionary(b => b.SegmentId);
-        double tol = s.Planning.StationToleranceFeet * input.DrawingUnitsPerFoot;
         string Fmt(double raw) => double.IsFinite(raw) ? alignment.FormatStation(raw) : s.ModelOutput.ManualStationText;
+        double ScaleOf(Guid id) => input.Views.TryGetValue(id, out var v) ? v.ModelUnitsPerPaperUnit
+            : run.Overrides.TryGetValue(id, out var ov) && ov.ModelUnitsPerPaperUnit is { } sc ? sc
+            : run.Views.ModelUnitsPerPaperUnit;
         var priorOwned = (input.Prior?.Owned ?? []).ToDictionary(o => o.Key, o => o.Handle);
         var layoutByHandle = input.Layouts.ToDictionary(l => l.Handle, l => l, StringComparer.OrdinalIgnoreCase);
-        var layoutNames = new HashSet<string>(input.Layouts.Select(l => l.Name), StringComparer.OrdinalIgnoreCase);
 
         // Boundaries.
         if (draw.BoundaryPolylines)
@@ -83,21 +96,24 @@ public static class OutputPlanner
                 if (boundaries.TryGetValue(seg.Id, out var b))
                     objects.Add(new BoundaryObject(new OwnedKey(seg.Id, OwnedRole.Boundary), b));
 
-        // Match marks at shared breaks.
-        if (s.ModelOutput.MatchMarks)
+        // Match marks at shared breaks (A2's planner: the segment's own offsets, its own view scale).
+        var valid = stationSegs.Where(x => boundaries.ContainsKey(x.Id)).ToList();
+        foreach (var mark in MatchMarkPlanner.Plan(valid, alignment, ScaleOf, s.ModelWriters, input.Geometry.StationTolerance, s.Report.TableCulture()))
         {
-            double height = s.ModelOutput.MatchMarkTextHeight * run.Views.ModelUnitsPerPaperUnit;
-            for (int i = 0; i + 1 < stationSegs.Count; i++)
+            objects.Add(new MatchMarkObject(mark.LineKey, mark));
+            objects.Add(new MatchMarkObject(mark.TextKey, mark));
+        }
+
+        // Impacted-area outlines (HcfcdSegment preset).
+        var rec = input.Reconcile;
+        if (run.Preset == ReportPreset.HcfcdSegment && s.ModelWriters.DrawImpactOutline && rec is not null)
+        {
+            var impacts = rec.Analyses.SelectMany(a => a.Rows).Select(r => r.Impact).OfType<ImpactResult>().ToList();
+            foreach (var seg in valid)
             {
-                var a = stationSegs[i];
-                var c = stationSegs[i + 1];
-                if (Math.Abs(a.EndStation - c.StartStation) > tol) continue;
-                double station = a.EndStation;
-                Pt from = alignment.PointAt(station, Math.Min(a.OffsetLeft, c.OffsetLeft));
-                Pt to = alignment.PointAt(station, Math.Max(a.OffsetRight, c.OffsetRight));
-                string F(string label) => string.Format(CultureInfo.InvariantCulture, s.ModelOutput.MatchMarkTextTemplate, Fmt(station), label);
-                objects.Add(new MatchMarkObject(new OwnedKey(a.Id, OwnedRole.MatchMark, MarkQualifiers.End), from, to, F(c.Label), height));
-                objects.Add(new MatchMarkObject(new OwnedKey(c.Id, OwnedRole.MatchMark, MarkQualifiers.Start), from, to, F(a.Label), height));
+                var (outlines, outlineProblems) = ImpactOutlines.Build(alignment, seg, impacts, input.Geometry);
+                problems.AddRange(outlineProblems);
+                foreach (var o in outlines) objects.Add(new ImpactOutlineObject(o.Key, o));
             }
         }
 
@@ -108,11 +124,14 @@ public static class OutputPlanner
         if (input.Template is not null)
         {
             var namer = new LayoutNamer(s.LayoutNames);
+            bool renumber = s.Paper.RenumberLayouts;
             var owned = new List<OwnedLayout>();
             var plannedCurrent = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var parts = new Dictionary<Guid, LayoutNameParts>();
             for (int i = 0; i < stationSegs.Count; i++)
             {
                 var seg = stationSegs[i];
+                parts[seg.Id] = Parts(run, i + 1, seg, Fmt);
                 string? current = null;
                 if (priorOwned.TryGetValue(new OwnedKey(seg.Id, OwnedRole.Layout), out var h) && layoutByHandle.TryGetValue(h, out var lr))
                 {
@@ -120,15 +139,13 @@ public static class OutputPlanner
                     segmentLayoutHandles[seg.Id] = lr.Handle;
                     plannedCurrent.Add(current);
                 }
-                string requested = s.Regen.RenumberLayouts || current is null
-                    ? namer.FormatName(Parts(run, i + 1, seg, Fmt))
-                    : current;
+                string requested = renumber || current is null ? namer.FormatName(parts[seg.Id]) : current;
                 owned.Add(new OwnedLayout(seg.Id, current, requested));
             }
             var foreign = input.Layouts.Select(l => l.Name).Where(n => !plannedCurrent.Contains(n)).ToList();
             // LayoutNamer de-duplicates in list order. With renumbering off an existing layout keeps
             // its name, so existing layouts go first and a new layout never takes a kept name.
-            if (!s.Regen.RenumberLayouts) owned = [.. owned.Where(o => o.CurrentName is not null), .. owned.Where(o => o.CurrentName is null)];
+            if (!renumber) owned = [.. owned.Where(o => o.CurrentName is not null), .. owned.Where(o => o.CurrentName is null)];
             renames = namer.PlanRenames(owned, foreign);
             problems.AddRange(renames.Problems);
             var finalBySegment = owned.Select((o, i) => (o.SegmentId, renames.Assignments[i].Final)).ToDictionary(t => t.SegmentId, t => t.Final);
@@ -138,132 +155,88 @@ public static class OutputPlanner
                 var seg = stationSegs[i];
                 string name = finalBySegment[seg.Id];
                 segmentLayout[seg.Id] = name;
-                objects.Add(new LayoutObject(new OwnedKey(seg.Id, OwnedRole.Layout), name, i + 1));
+                objects.Add(new LayoutObject(new OwnedKey(seg.Id, OwnedRole.Layout), name, i + 1, parts[seg.Id]));
                 if (input.Views.TryGetValue(seg.Id, out var view))
                 {
-                    var key = new OwnedKey(seg.Id, OwnedRole.Viewport);
-                    objects.Add(new ViewportObject(key, name, view));
-                    if (run.Overrides.TryGetValue(seg.Id, out var ov) && ov.LockView) locked.Add(key);
+                    bool lockView = run.Overrides.TryGetValue(seg.Id, out var ov) && ov.LockView;
+                    objects.Add(new ViewportObject(new OwnedKey(seg.Id, OwnedRole.Viewport), name, view, lockView));
                 }
-                var attributes = s.Template.TitleAttributes ?? new Dictionary<string, string>();
+                var attributes = s.Paper.TitleAttributes ?? new Dictionary<string, string>();
                 if (attributes.Count > 0)
                 {
-                    var parts = Parts(run, i + 1, seg, Fmt);
                     var values = attributes.ToDictionary(kv => kv.Key,
-                        kv => LayoutNamer.FormatPattern(kv.Value, parts, s.LayoutNames.SheetNumberFormat), StringComparer.Ordinal);
+                        kv => LayoutNamer.FormatPattern(kv.Value, parts[seg.Id], s.Paper.SheetNumberFormat), StringComparer.Ordinal);
                     objects.Add(new TitleAttributesObject(new OwnedKey(seg.Id, OwnedRole.TitleAttributes), name, values));
                 }
             }
         }
 
         // Tables.
-        var rec = input.Reconcile;
         if (rec is not null && rec.Analyses.Count > 0)
         {
+            bool hcfcd = run.Preset == ReportPreset.HcfcdSegment && input.Hcfcd is not null && input.Formatter is not null;
             foreach (var seg in stationSegs.Concat(input.ManualSegments))
             {
-                TablePlacement? placement = null;
-                bool keepOnly = false;
-                if (!string.IsNullOrWhiteSpace(seg.TargetLayout))
+                if (!boundaries.TryGetValue(seg.Id, out var boundary)) continue;
+                string? target = string.IsNullOrWhiteSpace(seg.TargetLayout) ? null : seg.TargetLayout;
+                if (hcfcd)
                 {
-                    if (layoutNames.Contains(seg.TargetLayout))
-                        placement = new TablePlacement(seg.TargetLayout, null, 1.0);
-                    else
-                    {
-                        // Live check, not the record: a deleted layout took its table with it, and a
-                        // locked plan for a missing object would be re-created (E1017 forbids that).
-                        bool exists = input.LiveExists(new OwnedKey(seg.Id, OwnedRole.PaperTable));
-                        problems.Add(new Problem(PipelineCodes.TargetLayoutMissing, Severity.Warning,
-                            $"Sheet {seg.Label}: layout '{seg.TargetLayout}' is not in the drawing. "
-                            + (exists ? "Its table stays where it is and is not updated." : "No table is placed; it is never re-created elsewhere."),
-                            seg.Id, "Restore or rename the layout, or change the segment's target layout with SVDEFINE."));
-                        if (!exists) continue;
-                        placement = new TablePlacement(seg.TargetLayout, null, 1.0);
-                        keepOnly = true;
-                    }
+                    WritersModel.TablePlacement? hp = target is not null ? WritersModel.TablePlacement.InLayout(target)
+                        : draw.TableAtEachSegment ? ModelTablePlacement.AtSegment(boundary, ScaleOf(seg.Id), s.ModelWriters)
+                        : null;
+                    if (hp is not null) objects.Add(Hcfcd(seg, rec, input, hp));
+                    continue;
                 }
-                else if (segmentLayout.TryGetValue(seg.Id, out var generated))
-                    placement = new TablePlacement(generated, null, 1.0);
-                else if (draw.TableAtEachSegment)
-                    placement = new TablePlacement(null, ModelPoint(seg, boundaries, alignment, s, input.DrawingUnitsPerFoot), run.Views.ModelUnitsPerPaperUnit);
-                if (placement is null) continue;
 
-                var key = new OwnedKey(seg.Id, placement.LayoutName is null ? OwnedRole.ModelTable : OwnedRole.PaperTable);
-                objects.Add(SegmentTable(key, seg, rec, input, placement, Fmt));
-                if (keepOnly) locked.Add(key);
+                var table = SegmentTableBuilder.Build(rec, seg.Id, run.AreaUnit, Fmt, s.Report);
+                if (!table.Succeeded) throw new InvalidOperationException("Segment table refused a reconciled result: " + string.Join(" | ", table.Problems.Select(p => p.Message)));
+                if (target is not null)
+                    objects.Add(Model(ModelTableSpec.ForSegment(table.Value, WritersModel.TablePlacement.InLayout(target))));
+                else if (segmentLayout.TryGetValue(seg.Id, out var generated))
+                    objects.Add(new PaperTableObject(new OwnedKey(seg.Id, OwnedRole.PaperTable, PaperTableWriter.Qualifier(table.Value)), generated, table.Value));
+                else if (draw.TableAtEachSegment)
+                    objects.Add(Model(ModelTableSpec.ForSegment(table.Value, ModelTablePlacement.AtSegment(boundary, ScaleOf(seg.Id), s.ModelWriters))));
             }
 
             if (draw.SummaryTable)
             {
-                TablePlacement? placement = null;
-                if (s.ModelOutput.MasterTableLayout is { } ml)
-                {
-                    if (layoutNames.Contains(ml)) placement = new TablePlacement(ml, null, 1.0);
-                    else problems.Add(new Problem(PipelineCodes.TargetLayoutMissing, Severity.Warning,
-                        $"The master table layout '{ml}' is not in the drawing; the master table is not placed.",
-                        Fix: "Create the layout or change modelOutput.masterTableLayout."));
-                }
-                else
-                {
-                    double gap = s.ModelOutput.ModelTableGapFeet * input.DrawingUnitsPerFoot;
-                    placement = new TablePlacement(null, alignment.PointAt(alignment.StartStation, run.OffsetLeft - gap), run.Views.ModelUnitsPerPaperUnit);
-                }
+                WritersModel.TablePlacement? placement = s.ModelOutput.MasterTableLayout is { } ml
+                    ? WritersModel.TablePlacement.InLayout(ml)
+                    : boundaries.Count > 0 ? ModelTablePlacement.MasterInModel(boundaries.Values, run.Views.ModelUnitsPerPaperUnit, s.ModelWriters) : null;
                 if (placement is not null)
                 {
                     var master = MasterTableBuilder.Build(rec, run.AreaUnit, Fmt, s.Report);
                     if (!master.Succeeded) throw new InvalidOperationException("Master table refused a reconciled result: " + string.Join(" | ", master.Problems.Select(p => p.Message)));
-                    objects.Add(new TableObject(new OwnedKey(Guid.Empty, OwnedRole.MasterTable), master.Value, placement));
+                    objects.Add(Model(ModelTableSpec.ForMaster(master.Value, placement)));
                 }
             }
         }
 
-        return new OutputPlan(objects, locked, renames, segmentLayoutHandles, problems);
+        return new OutputPlan(objects, renames, segmentLayoutHandles, problems);
+
+        static ModelTableObject Model(ModelTableSpec spec) => new(spec.Key, spec);
     }
 
-    private static OwnedObject SegmentTable(OwnedKey key, SegmentDef seg, ReconcileResult rec, OutputInputs input, TablePlacement placement, Func<double, string> fmt)
+    private static HcfcdTableObject Hcfcd(SegmentDef seg, ReconcileResult rec, OutputInputs input, WritersModel.TablePlacement placement)
     {
         var run = input.Run;
         var s = input.Settings;
-        if (run.Preset == ReportPreset.HcfcdSegment && input.Hcfcd is { } template && input.Formatter is { } formatter)
+        var template = input.Hcfcd!;
+        var formatter = input.Formatter!;
+        var values = new List<HcfcdMaterial>();
+        foreach (var a in rec.Analyses)
         {
-            var values = new List<HcfcdMaterial>();
-            foreach (var a in rec.Analyses)
-            {
-                var row = a.Rows.FirstOrDefault(r => r.SegmentId == seg.Id);
-                if (row?.Impact is { } impact) values.Add(new HcfcdMaterial(a.Analysis.Id, a.Analysis.Name, impact, a.Analysis.CutFactor));
-            }
-            var created = template.CreateTable(seg.Id, run.Analyses, run.AreaUnit, formatter.Units, s.Report);
-            if (!created.Succeeded) throw new InvalidOperationException("HCFCD template refused the run's materials: " + string.Join(" | ", created.Problems.Select(p => p.Message)));
-            var cells = created.Value.Rows.Select(r => (IReadOnlyList<string>)r.Cells).ToList();
-            var bind = template.Bind(cells, seg.Id, values, run.AreaUnit, formatter, s.Report);
-            return new HcfcdTableObject(key, template, run.Analyses, values, run.AreaUnit, formatter, placement, OwnedSignatures.OfBound(bind.Bound));
+            var row = a.Rows.FirstOrDefault(r => r.SegmentId == seg.Id);
+            if (row?.Impact is { } impact) values.Add(new HcfcdMaterial(a.Analysis.Id, a.Analysis.Name, impact, a.Analysis.CutFactor));
         }
-
-        var table = SegmentTableBuilder.Build(rec, seg.Id, run.AreaUnit, fmt, s.Report);
-        if (!table.Succeeded) throw new InvalidOperationException("Segment table refused a reconciled result: " + string.Join(" | ", table.Problems.Select(p => p.Message)));
-        return new TableObject(key, table.Value, placement);
-    }
-
-    private static Pt ModelPoint(SegmentDef seg, IReadOnlyDictionary<Guid, Boundary> boundaries, IAlignmentGeometry alignment, SheetVolSettings s, double unitsPerFoot)
-    {
-        double gap = s.ModelOutput.ModelTableGapFeet * unitsPerFoot;
-        if (double.IsFinite(seg.StartStation)) return alignment.PointAt(seg.StartStation, seg.OffsetRight + gap);
-        // Manual segment: no station; beside the polyline's highest-right vertex.
-        var ring = boundaries.TryGetValue(seg.Id, out var b) ? b.Tessellated : [];
-        if (ring.Count == 0) return new Pt(0, 0);
-        double x = ring.Max(p => p.X), y = ring.Max(p => p.Y);
-        return new Pt(x + gap, y);
+        var created = template.CreateTable(seg.Id, run.Analyses, run.AreaUnit, formatter.Units, s.Report);
+        if (!created.Succeeded) throw new InvalidOperationException("HCFCD template refused the run's materials: " + string.Join(" | ", created.Problems.Select(p => p.Message)));
+        var cells = created.Value.Rows.Select(r => (IReadOnlyList<string>)r.Cells).ToList();
+        var bind = template.Bind(cells, seg.Id, values, run.AreaUnit, formatter, s.Report);
+        var spec = new HcfcdTableSpec(seg.Id, template, run.Analyses, values, run.AreaUnit, placement);
+        return new HcfcdTableObject(spec.Key, spec, OwnedSignatures.OfBound(bind.Bound));
     }
 
     private static LayoutNameParts Parts(RunDefinition run, int sheet, SegmentDef seg, Func<double, string> fmt) =>
         new(run.Name, sheet, seg.Label, fmt(seg.StartStation), fmt(seg.EndStation), run.AlignmentName);
-}
-
-/// <summary>Qualifiers of <see cref="OwnedRole.MatchMark"/> keys.</summary>
-public static class MarkQualifiers
-{
-    /// <summary>Mark at the segment's start station.</summary>
-    public const string Start = "start";
-    /// <summary>Mark at the segment's end station.</summary>
-    public const string End = "end";
 }

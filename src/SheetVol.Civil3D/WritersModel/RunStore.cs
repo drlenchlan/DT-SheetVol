@@ -54,7 +54,8 @@ public sealed record SourceRef(string Kind, string Name, string Handle);
 /// <param name="Qualifier">Qualifier.</param>
 /// <param name="Handle">Handle.</param>
 /// <param name="Name">Layout name when known, for the listing.</param>
-public sealed record OrphanRef(Guid SegmentId, OwnedRole Role, string Qualifier, string Handle, string? Name)
+/// <param name="SinceUtc">When it became an orphan, for SVSTATUS; null in records written before the Wave 2 integration.</param>
+public sealed record OrphanRef(Guid SegmentId, OwnedRole Role, string Qualifier, string Handle, string? Name, DateTimeOffset? SinceUtc = null)
 {
     /// <summary>The owned key.</summary>
     [JsonIgnore] public OwnedKey Key => new(SegmentId, Role, Qualifier);
@@ -65,13 +66,15 @@ public sealed record OrphanRef(Guid SegmentId, OwnedRole Role, string Qualifier,
 /// <param name="Objects">Every owned object's handle: the model writers' and A3's.</param>
 /// <param name="Sources">Source references by handle and name.</param>
 /// <param name="Orphans">Objects left behind by removed segments (E612).</param>
-/// <param name="Fingerprint">Last source fingerprint (6.11), or null before the first regen.</param>
+/// <param name="Fingerprint">Last source fingerprint (6.11) as text (A4 writes C3's RunFingerprint as JSON through RunRecordCodec), or null before the first regen.</param>
+/// <param name="LastProblems">The last regen's warnings, for SVSTATUS (Wave 2 integration); null in older records.</param>
 public sealed record RunRecord(
     RunDefinition Run,
     IReadOnlyList<StoredObjectRef> Objects,
     IReadOnlyList<SourceRef> Sources,
     IReadOnlyList<OrphanRef> Orphans,
-    string? Fingerprint);
+    string? Fingerprint,
+    IReadOnlyList<Problem>? LastProblems = null);
 
 /// <summary>Result of reading a run from the store.</summary>
 /// <param name="Record">The record; null when there is none or it was refused.</param>
@@ -253,11 +256,12 @@ public static class RunStore
         IReadOnlyList<StoredObjectRef> Objects,
         IReadOnlyList<SourceRef> Sources,
         IReadOnlyList<OrphanRef> Orphans,
-        string? Fingerprint);
+        string? Fingerprint,
+        IReadOnlyList<Problem>? LastProblems = null);
 
     private static List<TypedValue> Content(RunRecord record, int chunkLength)
     {
-        var state = new StoredState(SchemaVersion, record.Objects, record.Sources, record.Orphans, record.Fingerprint);
+        var state = new StoredState(SchemaVersion, record.Objects, record.Sources, record.Orphans, record.Fingerprint, record.LastProblems);
         var list = new List<TypedValue> { new(MarkerCode, Marker), new(VersionCode, SchemaVersion) };
         list.AddRange(RunPersistence.Chunk(RunPersistence.Serialize(record.Run), chunkLength).Select(c => new TypedValue(RunChunkCode, c)));
         list.AddRange(RunPersistence.Chunk(JsonSerializer.Serialize(state, StateOptions), chunkLength).Select(c => new TypedValue(StateChunkCode, c)));
@@ -307,7 +311,7 @@ public static class RunStore
         }
         if (state is null) return Refused(version, $"Store record {key}: the state JSON is empty.");
         if (state.SchemaVersion > SchemaVersion) return new RunStoreReadResult(null, false, state.SchemaVersion, stamp, [Newer(state.SchemaVersion)]);
-        return new RunStoreReadResult(new RunRecord(run.Run, state.Objects, state.Sources, state.Orphans, state.Fingerprint), true, version, stamp, []);
+        return new RunStoreReadResult(new RunRecord(run.Run, state.Objects, state.Sources, state.Orphans, state.Fingerprint, state.LastProblems), true, version, stamp, []);
     }
 
     private static DBDictionary? Dictionary(Transaction tr, Database db, ReportConfig report, bool forWrite)

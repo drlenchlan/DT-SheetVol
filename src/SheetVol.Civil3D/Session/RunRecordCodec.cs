@@ -95,6 +95,18 @@ public static class RunRecordCodec
         return new StoredRunLoad(true, record, load.CanModify, load.Problems);
     }
 
+    /// <summary>C3's fingerprint as the text A2's store keeps in its <c>fingerprint</c> member (6.9, 6.11). Null stays null.</summary>
+    public static string? FingerprintToText(RunFingerprint? fingerprint) =>
+        fingerprint is null ? null : JsonSerializer.Serialize(fingerprint, Options);
+
+    /// <summary>Reads <see cref="FingerprintToText"/>'s text back. Text that is not a fingerprint reads as none, so the run is stale and the next regen writes a fresh one.</summary>
+    public static RunFingerprint? FingerprintFromText(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return null;
+        try { return JsonSerializer.Deserialize<RunFingerprint>(text, Options); }
+        catch (JsonException) { return null; }
+    }
+
     /// <summary>
     /// Signature of a record without its timestamp and last problems (C3 ChangeSet "record
     /// changed"): definition, fingerprint, owned keys and handles, sources, orphans.

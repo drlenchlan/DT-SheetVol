@@ -28,75 +28,9 @@ public static class Handles
     }
 }
 
-/// <summary>
-/// The ownership tag: an Xrecord on the entity's extension dictionary naming the run, the
-/// segment GUID, the role and qualifier, and for generated tables the row keys that let a
-/// table grow or shrink in place (E505). A copy of the entity in another drawing carries the
-/// tag as inert data and is a plain object there (E810).
-/// </summary>
-public sealed record OwnerTag(string RunName, OwnedKey Key, IReadOnlyList<string> RowKeys)
-{
-    private const string Marker = "SHEETVOL-OWNER";
-    private const int Version = 1;
-    private const int MarkerCode = 1, VersionCode = 90, RunCode = 300, SegmentCode = 301, RoleCode = 302, QualifierCode = 303, RowKeyCode = 304;
-
-    /// <summary>True when this tag names the given run and key.</summary>
-    public bool Matches(string runName, OwnedKey key) => string.Equals(RunName, runName, StringComparison.Ordinal) && Key == key;
-
-    /// <summary>Reads the tag, or null when the entity carries none or it is malformed.</summary>
-    public static OwnerTag? Read(Transaction tr, DBObject obj, string tagKey)
-    {
-        if (obj.ExtensionDictionary.IsNull) return null;
-        var dict = (DBDictionary)tr.GetObject(obj.ExtensionDictionary, OpenMode.ForRead);
-        if (!dict.Contains(tagKey)) return null;
-        if (tr.GetObject(dict.GetAt(tagKey), OpenMode.ForRead) is not Xrecord xr || xr.Data is null) return null;
-        string? marker = null, run = null, seg = null, role = null, qual = null;
-        int? version = null;
-        var rows = new List<string>();
-        foreach (TypedValue tv in xr.Data)
-        {
-            switch (tv.TypeCode)
-            {
-                case MarkerCode: marker = tv.Value as string; break;
-                case VersionCode: version = tv.Value is int v ? v : null; break;
-                case RunCode: run = tv.Value as string; break;
-                case SegmentCode: seg = tv.Value as string; break;
-                case RoleCode: role = tv.Value as string; break;
-                case QualifierCode: qual = tv.Value as string; break;
-                case RowKeyCode: rows.Add(tv.Value as string ?? ""); break;
-            }
-        }
-        if (marker != Marker || version is null || version > Version || run is null || qual is null
-            || !Guid.TryParse(seg, out Guid segId) || !Enum.TryParse(role, out OwnedRole r)) return null;
-        return new OwnerTag(run, new OwnedKey(segId, r, qual), rows);
-    }
-
-    /// <summary>Writes or replaces the tag. The entity must be open for write and in the database.</summary>
-    public void Write(Transaction tr, DBObject obj, string tagKey)
-    {
-        if (obj.ExtensionDictionary.IsNull) obj.CreateExtensionDictionary();
-        var dict = (DBDictionary)tr.GetObject(obj.ExtensionDictionary, OpenMode.ForWrite);
-        var data = new ResultBuffer(
-            new TypedValue(MarkerCode, Marker),
-            new TypedValue(VersionCode, Version),
-            new TypedValue(RunCode, RunName),
-            new TypedValue(SegmentCode, Key.SegmentId.ToString("D")),
-            new TypedValue(RoleCode, Key.Role.ToString()),
-            new TypedValue(QualifierCode, Key.Qualifier));
-        foreach (string row in RowKeys) data.Add(new TypedValue(RowKeyCode, row));
-        if (dict.Contains(tagKey))
-        {
-            var xr = (Xrecord)tr.GetObject(dict.GetAt(tagKey), OpenMode.ForWrite);
-            xr.Data = data;
-        }
-        else
-        {
-            var xr = new Xrecord { Data = data };
-            dict.SetAt(tagKey, xr);
-            tr.AddNewlyCreatedDBObject(xr, true);
-        }
-    }
-}
+// The ownership tag every created object carries is Ownership.OwnerTag, shared with the paper
+// writers (Wave 2 integration): run id, segment GUID, role, qualifier, and for generated tables
+// the row keys that let a table grow or shrink in place (E505).
 
 /// <summary>
 /// Unlocks a locked layer for the duration of one apply and relocks it before the caller

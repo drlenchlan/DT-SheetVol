@@ -76,7 +76,7 @@ public static class FixtureCommands
         }
     }
 
-    [CommandMethod("SVFIXTUREREPORT", CommandFlags.Modal)]
+    [CommandMethod("SVFIXTUREREPORT", CommandFlags.Modal | CommandFlags.NoUndoMarker)]   // read-only (S3, E804)
     public static void Report()
     {
         var doc = Application.DocumentManager.MdiActiveDocument;

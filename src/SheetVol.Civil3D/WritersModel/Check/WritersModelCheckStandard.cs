@@ -2,6 +2,7 @@
 // E501, create, E811/T19, T12, E502, E503, E504, E505, E802, T13, E308, T20.
 
 using Autodesk.AutoCAD.DatabaseServices;
+using SheetVol.Civil3D.Ownership;
 using SheetVol.Civil3D.SelfTest;
 using SheetVol.Core;
 using SheetVol.Core.Geometry;
@@ -121,7 +122,7 @@ public static partial class WritersModelCheck
             Check("marks", mark.Text.StartsWith("MATCH LINE STA 5+00", StringComparison.Ordinal) && mark.Text.EndsWith("SEE SHEET 2", StringComparison.Ordinal),
                 $"segment 1 end mark: text '{mark.Text}' at ({F(mark.Location.X)}, {F(mark.Location.Y)}) height {F(mark.TextHeight)}; line ({F(line.StartPoint.X)}, {F(line.StartPoint.Y)})-({F(line.EndPoint.X)}, {F(line.EndPoint.Y)})");
             var tag = OwnerTag.Read(tr, Open<Polyline>(tr, c1.Handles[BKey(s1)]), Cfg.OwnerTagKey);
-            Check("tag", tag is not null && tag.RunName == Std.Name && tag.Key == BKey(s1), $"boundary 1 extension dictionary '{Cfg.OwnerTagKey}': run '{tag?.RunName}', key {tag?.Key}");
+            Check("tag", tag is not null && tag.RunId == RunIds.For(Std.Name) && tag.Key == BKey(s1), $"boundary 1 extension dictionary '{Cfg.OwnerTagKey}': run id {tag?.RunId} (run '{Std.Name}' is {RunIds.For(Std.Name)}), key {tag?.Key}");
             tr.Commit();
         }
 

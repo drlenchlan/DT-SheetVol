@@ -7,22 +7,28 @@
 //   3. Ensure and rebuild the owned volume surfaces (P18: always Rebuild), compute bounded
 //      volumes, run the integrator for the cross-check and the HCFCD quantities (C5),
 //      reconcile and partition-check (C2). A failed partition check aborts: nothing written.
-//   4. Compute views (C3) and the planned owned objects; preflight the writers.
-//   5. Apply in ONE transaction under the document lock: layouts (two-pass renames),
-//      viewports, title attributes, tables, boundaries, marks, master table, erasures,
-//      persistence. Only what the ChangeSet (C3) marks as changed is written (E811).
+//   4. Compute views (C3) and the planned owned objects; preflight the paper writer.
+//   5. Apply in ONE transaction under the document lock: the model writer (A2: boundaries,
+//      marks, outlines, model and master tables, HCFCD tables), then the paper writer (A3:
+//      layouts with two-pass renames, viewports, clips, sheet tables, title attributes),
+//      then persistence. Each writer writes only what the live objects show has changed
+//      (E811). The paper writer runs last: it erases the template clones it creates, and an
+//      abort after such an erase can crash the host (A1, 0xC0000005), so nothing that can
+//      fail follows it; the export text is prepared before it.
 //   6. Write exports; a file failure is a warning (E506, E507).
 //
-// Steps 1-4 write no output. The owned volume surface writes of step 3 happen in the same
-// transaction as step 5, so any failure before commit rolls them back with everything
-// else: the drawing is untouched (E801, T20). P20 proved layout creation rolls back in an
-// aborted transaction, so there is no two-phase layout fallback. One transaction per run
-// inside one command means one UNDO reverts one regen (E804).
+// Steps 1-4 write no output. The owned volume surface writes of step 3 (factors, the
+// always-Rebuild of P18) happen in the same transaction as step 5, so any failure before
+// commit rolls them back with everything else: the drawing is untouched (E801, T20). P20
+// proved layout creation rolls back in an aborted transaction, so there is no two-phase
+// layout fallback. One transaction per run inside one command means one UNDO reverts one
+// regen (E804).
 
 using System.Diagnostics;
 using System.Globalization;
 using Autodesk.AutoCAD.ApplicationServices.Core;
 using Autodesk.AutoCAD.DatabaseServices;
+using SheetVol.Civil3D.Ownership;
 using SheetVol.Core;
 using SheetVol.Core.Output;
 using SheetVol.Core.Planning;
@@ -44,29 +50,28 @@ public enum RegenMode
     ExportOnly,
 }
 
-/// <summary>Counts of what step 5 did, for SVREGEN's summary and the self-test.</summary>
-/// <param name="Created">Objects created.</param>
-/// <param name="Updated">Objects updated that the writer reported as modified.</param>
-/// <param name="Erased">Objects erased.</param>
-/// <param name="Renamed">Layout renames (both passes).</param>
-/// <param name="Orphaned">Layouts that became orphans.</param>
-public sealed record ApplyCounts(int Created, int Updated, int Erased, int Renamed, int Orphaned)
-{
-    /// <summary>Database writes other than the persistence record.</summary>
-    public int Writes => Created + Updated + Erased + Renamed;
-}
-
 /// <summary>A regen's full outcome: the contract result plus what the pipeline knew (for SVREGEN, SVSTATUS and the self-test).</summary>
+/// <param name="Result">The contract result.</param>
+/// <param name="Run">The definition as applied.</param>
+/// <param name="Plan">The plan, when step 2 ran.</param>
+/// <param name="Reconcile">The reconciled volumes, when step 3 ran.</param>
+/// <param name="Views">Views per station segment, when step 4 ran.</param>
+/// <param name="Applied">What the writers wrote (both writers together), when step 5 ran.</param>
+/// <param name="OnlyTimestamp">True when the writers wrote nothing and the record changed only its timestamp (E811); null before step 5.</param>
+/// <param name="Record">The record saved, when step 5 ran.</param>
+/// <param name="FailedAtStep">The failing step; 0 on success.</param>
+/// <param name="CrossCheckMaxRelative">Largest relative difference the 6.15 cross-check found between the integrator and the bounded volume (cut and fill against their own total); null when it did not run.</param>
 public sealed record RunOutcome(
     RegenResult Result,
     RunDefinition Run,
     PlanResult? Plan,
     ReconcileResult? Reconcile,
     IReadOnlyDictionary<Guid, ViewResult> Views,
-    ChangeSet? Changes,
     ApplyCounts? Applied,
+    bool? OnlyTimestamp,
     RunRecord? Record,
-    int FailedAtStep);
+    int FailedAtStep,
+    double? CrossCheckMaxRelative = null);
 
 /// <summary>The regen engine. One instance per settings snapshot and bindings.</summary>
 public sealed class RegenEngine
@@ -114,6 +119,7 @@ public sealed class RegenEngine
         RunDefinition run = requested;
         PlanResult? plan = null;
         ReconcileResult? rec = null;
+        double? crossCheck = null;
 
         RunOutcome Fail(int step, IEnumerable<Problem>? extra = null)
         {
@@ -123,7 +129,7 @@ public sealed class RegenEngine
                 $"Run '{requested.Name}' failed at step {step} ({StepName(step)}): {(first is null ? "see the problems below" : first.Code + " " + first.Message)} Nothing in this run changed.",
                 Fix: first?.Fix));
             var result = new RegenResult(false, requested.Name, rec?.AllRows ?? [], Dedupe(problems), [], false, sw.Elapsed, null, null);
-            return new RunOutcome(result, run, plan, rec, views, null, null, null, step);
+            return new RunOutcome(result, run, plan, rec, views, null, null, null, step, crossCheck);
         }
 
         // ---- Step 1: refuse a read-only drawing, resolve references ----------------------
@@ -159,7 +165,8 @@ public sealed class RegenEngine
             var alignmentSource = alignmentOutcome.Value;
             var alignment = alignmentSource.Geometry;
             problems.AddRange(alignmentOutcome.Problems);
-            if (priorAlignmentHandle is not null && !string.Equals(priorAlignmentHandle, alignmentSource.Handle, StringComparison.OrdinalIgnoreCase))
+            if (priorAlignmentHandle is not null && !string.Equals(priorAlignmentHandle, alignmentSource.Handle, StringComparison.OrdinalIgnoreCase)
+                && !alignmentOutcome.Problems.Any(p => p.Code == PipelineCodes.MatchedByName))
                 problems.Add(new Problem(PipelineCodes.MatchedByName, Severity.Warning,
                     $"Alignment '{run.AlignmentName}' now has handle {alignmentSource.Handle} (was {priorAlignmentHandle}); it was matched by name.",
                     Fix: "Nothing to do if the alignment was re-referenced on purpose."));
@@ -169,13 +176,15 @@ public sealed class RegenEngine
             foreach (string name in run.Analyses.SelectMany(a => new[] { a.BaseSurface, a.ComparisonSurface }).Where(n => !string.IsNullOrWhiteSpace(n)).Distinct(StringComparer.Ordinal))
             {
                 string? priorHandle = prior?.SourceHandleOf(SourceKinds.Surface, name);
-                var o = sources.Surface(name, priorHandle, s.Regen.RebuildSources);
+                var o = sources.Surface(name, priorHandle, s.Adapters.RebuildSources);
                 surfaceProblems.AddRange(o.Problems);
                 if (!o.Succeeded) continue;
                 surfaces[name] = o.Value;
-                if (o.Value.Rebuilt)
-                    problems.Add(new Problem(PipelineCodes.SourceOutOfDate, Severity.Info, $"Surface '{name}' was out of date and was rebuilt (regen.rebuildSources is on)."));
-                if (priorHandle is not null && !string.Equals(priorHandle, o.Value.Handle, StringComparison.OrdinalIgnoreCase))
+                // The adapters say it themselves when they did (A1's SV-E404 Info, SV-E803 Warning); the fakes do not.
+                if (o.Value.Rebuilt && !o.Problems.Any(p => p.Code == PipelineCodes.SourceOutOfDate))
+                    problems.Add(new Problem(PipelineCodes.SourceOutOfDate, Severity.Info, $"Surface '{name}' was out of date and was rebuilt (adapters.rebuildSources is on)."));
+                if (priorHandle is not null && !string.Equals(priorHandle, o.Value.Handle, StringComparison.OrdinalIgnoreCase)
+                    && !o.Problems.Any(p => p.Code == PipelineCodes.MatchedByName))
                     problems.Add(new Problem(PipelineCodes.MatchedByName, Severity.Warning,
                         $"Surface '{name}' now has handle {o.Value.Handle} (was {priorHandle}); it was matched by name."));
             }
@@ -218,10 +227,10 @@ public sealed class RegenEngine
                 problems.Add(new Problem(PipelineCodes.NoAnalyses, Severity.Info, $"Run '{run.Name}' has no analyses: boundaries and views only, no volumes or tables.", Fix: "Add one with SVANALYSIS."));
             else
             {
-                var owned = OwnedVolumeSurfaces.Plan(run.Analyses, s.Report.Volumes);
-                if (!owned.Succeeded) return Fail(3, owned.Problems);
-                problems.AddRange(owned.Problems);
-                foreach (var op in owned.Value)
+                var ownedSurfaces = OwnedVolumeSurfaces.Plan(run.Analyses, s.Report.Volumes);
+                if (!ownedSurfaces.Succeeded) return Fail(3, ownedSurfaces.Problems);
+                problems.AddRange(ownedSurfaces.Problems);
+                foreach (var op in ownedSurfaces.Value)
                 {
                     probe.Check();
                     var o = sources.EnsureVolumeSurface(op, prior?.SourceHandleOf(SourceKinds.VolumeSurface, op.Name));
@@ -241,7 +250,7 @@ public sealed class RegenEngine
             bool hcfcd = run.Preset == ReportPreset.HcfcdSegment;
             if (run.Analyses.Count > 0 && (s.Integrator.CrossCheck || hcfcd))
             {
-                var checkProblems = Integrate(run, alignment, stationSegs, manualSegs, boundaries, surfaces, volumes, impacts, upf, probe, bar);
+                var checkProblems = Integrate(run, alignment, stationSegs, manualSegs, boundaries, surfaces, volumes, impacts, upf, probe, bar, out crossCheck);
                 problems.AddRange(checkProblems.Where(p => p.Severity != Severity.Error));
                 if (checkProblems.Any(p => p.Severity == Severity.Error)) return Fail(3, checkProblems.Where(p => p.Severity == Severity.Error));
             }
@@ -280,12 +289,12 @@ public sealed class RegenEngine
                 var preparedExport = rec is null ? null : ExportFiles.Prepare(runApplied, rec, DrawingPath(doc), alignment.FormatStation, s, Clock());
                 var exported = preparedExport is null ? null : ExportFiles.WriteFiles(preparedExport, problems);
                 bar.At(1);
-                return new RunOutcome(Success(exported?.CsvPath, exported?.JsonPath), runApplied, plan, rec, views, null, null, null, 0);
+                return new RunOutcome(Success(exported?.CsvPath, exported?.JsonPath), runApplied, plan, rec, views, null, null, null, 0, crossCheck);
             }
 
             // ---- Step 4: views, planned objects, preflight -----------------------------------
             var model = _bindings.Writers.Model(db, tr, s);
-            var paper = _bindings.Writers.Paper(db, tr, s);
+            using var paper = _bindings.Writers.Paper(db, tr, s);
             TemplateInfo? template = null;
             if (s.Regen.GenerateLayouts)
             {
@@ -326,135 +335,56 @@ public sealed class RegenEngine
 
             var layouts = paper.Layouts();
             problems.AddRange(SharedLayoutWarnings(store, run, stationSegs, manualSegs));
-            var priorHandles = (prior?.Owned ?? []).ToDictionary(o => o.Key, o => o.Handle);
             var output = OutputPlanner.Build(new OutputInputs(runApplied, plan, manualSegs, rec, alignment,
                 views.Where(kv => kv.Value.Spec is not null).ToDictionary(kv => kv.Key, kv => kv.Value.Spec!),
-                template, layouts, prior, hcfcdTemplate, formatter, upf, s,
-                key => priorHandles.TryGetValue(key, out var h) && WriterFor(key.Role).Inspect(key, h).Exists));
+                template, layouts, prior, hcfcdTemplate, formatter, planningOptions.Geometry, s));
             problems.AddRange(output.Problems);
 
-            IOwnedObjectWriter WriterFor(OwnedRole role) =>
-                model.Roles.Contains(role) ? model
-                : paper.Roles.Contains(role) ? paper
-                : throw new InvalidOperationException($"No writer owns role {role}.");
-
-            var preflight = new List<Problem>();
-            preflight.AddRange(model.Preflight(output.Objects.Where(o => model.Roles.Contains(o.Key.Role)).ToList()));
-            preflight.AddRange(paper.Preflight(output.Objects.Where(o => paper.Roles.Contains(o.Key.Role)).ToList()));
+            var nowUtc = Clock();
+            var request = new WriteRequest(runApplied, RunIds.For(run.Name), output, prior, units, nowUtc);
+            var preflight = paper.Validate(request);
             if (preflight.Any(p => p.Severity == Severity.Error)) return Fail(4, preflight);
             problems.AddRange(preflight);
+
+            // Step 6 text is prepared here, before any write: station text needs the live
+            // alignment, and nothing that can fail may run after the paper writer (see the header).
+            var prepared = rec is null ? null : ExportFiles.Prepare(runApplied, rec, DrawingPath(doc), alignment.FormatStation, s, Clock());
             probe.Check();
             bar.At(0.7);
 
             // ---- Step 5: apply in this one transaction ---------------------------------------
-            var stored = (prior?.Owned ?? []).Select(o => WriterFor(o.Key.Role).Inspect(o.Key, o.Handle)).ToList();
-            var storedByKey = stored.ToDictionary(x => x.Key);
-            var plannedObjects = output.Objects.Select(o => new PlannedObject(o.Key, o.Signature, output.Locked.Contains(o.Key))).ToList();
-
-            var nowUtc = Clock();
-            var layoutHandles = layouts.ToDictionary(l => l.Handle, l => l.Name, StringComparer.OrdinalIgnoreCase);
-            var keptOrphans = (prior?.Orphans ?? []).Where(o => layoutHandles.ContainsKey(o.Handle)).ToList();
-            var provisionalOwned = output.Objects
-                .Select(o => new OwnedHandle(o.Key, storedByKey.TryGetValue(o.Key, out var so) && so.Exists && so.Handle is not null ? so.Handle : "(new)"))
-                .ToList();
-            var provisionalOrphans = keptOrphans.Concat(stored.Where(x => x.Exists && x.Key.Role == OwnedRole.Layout && !plannedObjects.Any(p => p.Key == x.Key))
-                .Select(x => new OrphanLayout(x.Key.SegmentId, x.Handle!, layoutHandles.GetValueOrDefault(x.Handle!, ""), nowUtc))).ToList();
-            var provisional = new RunRecord(runApplied, fingerprint, provisionalOwned, newSources, provisionalOrphans, nowUtc, []);
-            var changes = ChangeSetComparer.Compare(plannedObjects, stored,
-                RunRecordCodec.Signature(provisional), prior is null ? null : RunRecordCodec.Signature(prior with { LastRegenUtc = null }));
-
-            var payload = output.Objects.ToDictionary(o => o.Key);
-            var handles = new Dictionary<OwnedKey, string>();
-            int created = 0, updated = 0, erased = 0, renamed = 0;
-            var orphans = new List<OrphanLayout>(keptOrphans);
-
-            // Owned layers that are locked are unlocked for the writes and relocked after them,
-            // in this transaction (6.10). Only when something is written: an unchanged regen
-            // touches no layer (E811). Frozen layers are left frozen (E504).
-            bool writes = changes.Writes.Any() || (output.Renames is { } rn && rn.FirstPass.Count + rn.SecondPass.Count > 0);
-            var relock = writes ? UnlockOwnedLayers(db, tr, OwnedLayerNames(s)) : [];
-
-            // 5a. Layout renames, first pass to temporary names, then to final names (E307).
-            if (output.Renames is { } rp)
-            {
-                foreach (var step in rp.FirstPass.Concat(rp.SecondPass))
-                {
-                    probe.Check();
-                    paper.RenameLayout(output.SegmentLayoutHandles[step.SegmentId], step.To);
-                    renamed++;
-                }
-            }
-
-            // 5b. Creates and updates in role order: a viewport or a paper table needs its layout first.
-            foreach (var change in changes.Changes.Where(c => c.Kind is not (ChangeKind.Erase or ChangeKind.Orphan))
-                         .OrderBy(c => RoleOrder(c.Key.Role)))
-            {
-                probe.Check();
-                switch (change.Kind)
-                {
-                    case ChangeKind.Unchanged:
-                    case ChangeKind.Kept:
-                        handles[change.Key] = change.Handle!;
-                        break;
-                    case ChangeKind.Update when change.Key.Role == OwnedRole.Layout:
-                        handles[change.Key] = change.Handle!;   // renamed in 5a
-                        break;
-                    case ChangeKind.Create:
-                    case ChangeKind.Update:
-                    {
-                        var w = WriterFor(change.Key.Role).Write(payload[change.Key], change.Kind == ChangeKind.Create ? null : change.Handle);
-                        if (w.Problems.Any(p => p.Severity == Severity.Error)) return Fail(5, w.Problems);
-                        problems.AddRange(w.Problems);
-                        handles[change.Key] = w.Handle;
-                        if (change.Kind == ChangeKind.Create)
-                        {
-                            created++;
-                            if (storedByKey.ContainsKey(change.Key))
-                                problems.Add(new Problem(PipelineCodes.Recreated, Severity.Info,
-                                    $"{Describe(change.Key, plan)} was missing (handle {storedByKey[change.Key].Handle}) and was recreated as {w.Handle}.", change.Key.SegmentId));
-                        }
-                        else if (w.Modified) updated++;
-                        break;
-                    }
-                }
-            }
-
-            // 5c. Erase what is no longer planned; orphan layouts are kept and listed (E308, E612).
-            foreach (var change in changes.Changes.Where(c => c.Kind is ChangeKind.Erase or ChangeKind.Orphan))
-            {
-                probe.Check();
-                if (change.Kind == ChangeKind.Erase)
-                {
-                    WriterFor(change.Key.Role).Erase(change.Key, change.Handle!);
-                    erased++;
-                }
-                else if (change.Key.Role == OwnedRole.Layout && change.Handle is { } lh)
-                {
-                    orphans.Add(new OrphanLayout(change.Key.SegmentId, lh, layoutHandles.GetValueOrDefault(lh, ""), nowUtc));
-                    problems.Add(new Problem(PipelineCodes.Recreated, Severity.Info,
-                        $"Layout '{layoutHandles.GetValueOrDefault(lh, lh)}' no longer has a segment; it is kept as an orphan (SVSTATUS lists it, SVPURGE deletes it).", change.Key.SegmentId));
-                }
-            }
-
-            foreach (var id in relock) ((LayerTableRecord)tr.GetObject(id, OpenMode.ForWrite)).IsLocked = true;
-            if (relock.Count > 0)
-                problems.Add(new Problem(PipelineCodes.LayerRelocked, Severity.Info, $"{relock.Count} locked owned layer(s) were unlocked for the update and locked again."));
-
-            var applied = new ApplyCounts(created, updated, erased, renamed, orphans.Count - keptOrphans.Count);
-            if (changes.OnlyTimestamp && renamed == 0)
-                problems.Add(new Problem(PipelineCodes.NothingChanged, Severity.Info, $"Run '{run.Name}': nothing changed; only the regen timestamp was written."));
-
-            var ownedList = output.Objects.Where(o => handles.ContainsKey(o.Key)).Select(o => new OwnedHandle(o.Key, handles[o.Key])).ToList();
-            var keptProblems = Dedupe(problems).Where(p => p.Severity != Severity.Info).ToList();
-            var record = new RunRecord(runApplied, fingerprint, ownedList, newSources, orphans, nowUtc, keptProblems);
-            store.Save(record);
-
-            // Step 6 is prepared here, while the transaction (and the adapters' objects) are
-            // still open: station text needs the live alignment. Only the file writes follow the commit.
-            var prepared = rec is null ? null : ExportFiles.Prepare(runApplied, rec, DrawingPath(doc), alignment.FormatStation, s, Clock());
+            // 5a. Model space (A2). A refusal writes nothing of its own; the abort undoes step 3.
+            var modelResult = model.Apply(request);
+            if (!modelResult.Succeeded) return Fail(5, modelResult.Problems);
+            problems.AddRange(modelResult.Problems);
             probe.Check();
+            bar.At(0.8);
+
+            // 5b. Paper space (A3), last. From here to the commit nothing may fail or be cancelled.
+            var paperResult = paper.Apply(request);
+            if (!paperResult.Succeeded) return Fail(5, paperResult.Problems);
+            problems.AddRange(paperResult.Problems);
+
+            // 5c. The record: owned handles from both writers, orphans kept with their first date.
+            var owned = modelResult.Owned.Concat(paperResult.Owned).GroupBy(o => o.Key).Select(g => g.Last()).ToList();
+            var ownedHandles = owned.Select(o => o.Handle).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var liveLayouts = layouts.Select(l => l.Handle).Concat(paperResult.Owned.Where(o => o.Key.Role == OwnedRole.Layout).Select(o => o.Handle))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var priorOrphans = (prior?.Orphans ?? []).Where(o => liveLayouts.Contains(o.Handle) && !ownedHandles.Contains(o.Handle)).ToList();
+            var orphans = priorOrphans.Concat(paperResult.NewOrphans.Where(n => !ownedHandles.Contains(n.Handle))
+                    .Where(n => !priorOrphans.Any(p => string.Equals(p.Handle, n.Handle, StringComparison.OrdinalIgnoreCase))))
+                .ToList();
+            var applied = modelResult.Counts.Plus(paperResult.Counts) with { Orphaned = orphans.Count - priorOrphans.Count };
+            var record = new RunRecord(runApplied, fingerprint, owned, newSources, orphans, nowUtc, []);
+            bool recordChanged = prior is null || !string.Equals(RunRecordCodec.Signature(record), RunRecordCodec.Signature(prior), StringComparison.Ordinal);
+            bool onlyTimestamp = applied.Writes == 0 && !recordChanged;
+            if (onlyTimestamp)
+                problems.Add(new Problem(PipelineCodes.NothingChanged, Severity.Info,
+                    $"Run '{run.Name}': nothing changed; the writers wrote nothing and only the regen timestamp was written (the owned volume surfaces are rebuilt on every regen, P18)."));
+            record = record with { LastProblems = Dedupe(problems).Where(p => p.Severity != Severity.Info).ToList() };
+            store.Save(record);
             tr.Commit();
-            committed = new RunOutcome(Success(null, null), runApplied, plan, rec, views, changes, applied, record, 0);
+            committed = new RunOutcome(Success(null, null), runApplied, plan, rec, views, applied, onlyTimestamp, record, 0, crossCheck);
             bar.At(0.95);
 
             // ---- Step 6: exports, after the commit; a failure here is a warning (E507) -----
@@ -497,10 +427,11 @@ public sealed class RegenEngine
     private List<Problem> Integrate(
         RunDefinition run, IAlignmentGeometry alignment, List<SegmentDef> stationSegs, List<SegmentDef> manualSegs,
         Dictionary<Guid, Boundary> boundaries, Dictionary<string, SurfaceSource> surfaces, Dictionary<Guid, MemoVolumeSource> volumes,
-        Dictionary<Guid, Dictionary<Guid, ImpactResult>> impacts, double upf, CancelProbe probe, ProgressSpan bar)
+        Dictionary<Guid, Dictionary<Guid, ImpactResult>> impacts, double upf, CancelProbe probe, ProgressSpan bar, out double? maxRelative)
     {
         var s = _settings;
         var problems = new List<Problem>();
+        maxRelative = null;
         var settings = new IntegratorSettings(s.Integrator.MinCutDepthFeet * upf, s.Integrator.GapToleranceFeet * upf);
         double absVolume = s.Integrator.CrossCheckAbsoluteCubicFeet * upf * upf * upf;
         double absArea = s.Integrator.AreaCheckAbsoluteSquareFeet * upf * upf;
@@ -546,9 +477,15 @@ public sealed class RegenEngine
                 }
                 if (band is null) continue;
 
-                // 6.15 check: integrator band cut and fill equal GetBoundedVolumes on the owned surface (E1012).
+                // 6.15 check: integrator band cut and fill equal GetBoundedVolumes on the owned surface (E1012):
+                // max(absolute, relative x total), total = bounded cut + fill of this polygon. Project data:
+                // max(0.5 ft3, 1e-4 x total); SVSELFTEST on fixtures: 1e-9 relative over the adapters' 1e-6 noise floor.
                 var bounded = volumes[a.Id].Bounded(tess);
-                double tol = Math.Max(absVolume, s.Integrator.CrossCheckRelative * (Math.Abs(bounded.Cut) + Math.Abs(bounded.Fill)));
+                double magnitude = Math.Abs(bounded.Cut) + Math.Abs(bounded.Fill);
+                double tol = Math.Max(absVolume, s.Integrator.CrossCheckRelative * magnitude);
+                double diff = Math.Max(Math.Abs(band.Cut - bounded.Cut), Math.Abs(band.Fill - bounded.Fill));
+                double rel = magnitude > 0 ? diff / magnitude : diff > 0 ? double.PositiveInfinity : 0;
+                maxRelative = Math.Max(maxRelative ?? 0, rel);
                 if (Math.Abs(band.Cut - bounded.Cut) > tol || Math.Abs(band.Fill - bounded.Fill) > tol)
                     problems.Add(new Problem(PipelineCodes.IntegratorMismatch, Severity.Error,
                         Inv($"Sheet {seg.Label}, {a.Name}: the integrator gives cut {band.Cut:R}, fill {band.Fill:R}; the bounded volume gives cut {bounded.Cut:R}, fill {bounded.Fill:R} (tolerance {tol:R} cubic drawing units)."),
@@ -595,31 +532,6 @@ public sealed class RegenEngine
 
     // ---- helpers -----------------------------------------------------------------------------
 
-    /// <summary>Every layer the tool's outputs live on, from the settings.</summary>
-    private static IEnumerable<string> OwnedLayerNames(SheetVolSettings s) =>
-    [
-        s.ModelOutput.BoundaryLayer, s.ModelOutput.MatchMarkLayer,
-        s.Report.SegmentTable.Style.Layer, s.Report.MasterTable.Style.Layer, s.Report.Hcfcd.Style.Layer,
-        s.Template.PlanViewportLayer,
-    ];
-
-    /// <summary>Unlocks the named layers that exist and are locked; returns them for relocking. Frozen state is never touched.</summary>
-    private static List<ObjectId> UnlockOwnedLayers(Database db, Transaction tr, IEnumerable<string> names)
-    {
-        var table = (LayerTable)tr.GetObject(db.LayerTableId, OpenMode.ForRead);
-        var unlocked = new List<ObjectId>();
-        foreach (string name in names.Where(n => !string.IsNullOrWhiteSpace(n)).Distinct(StringComparer.OrdinalIgnoreCase))
-        {
-            if (!table.Has(name)) continue;   // a missing owned layer is the writers' E501 preflight error
-            var layer = (LayerTableRecord)tr.GetObject(table[name], OpenMode.ForRead);
-            if (!layer.IsLocked) continue;
-            layer.UpgradeOpen();
-            layer.IsLocked = false;
-            unlocked.Add(layer.ObjectId);
-        }
-        return unlocked;
-    }
-
     private static IEnumerable<Problem> SharedLayoutWarnings(IPersistenceStore store, RunDefinition run, List<SegmentDef> stationSegs, List<SegmentDef> manualSegs)
     {
         var mine = stationSegs.Concat(manualSegs).Select(x => x.TargetLayout).Where(l => !string.IsNullOrWhiteSpace(l))
@@ -651,26 +563,6 @@ public sealed class RegenEngine
         bool ok = station.Succeeded && !manualProblems.Any(p => p.Severity == Severity.Error);
         return new ReconcileResult(ok, station.Units, station.Segments.Concat(manual.Segments).ToList(), analyses,
             station.Problems.Concat(manualProblems).ToList());
-    }
-
-    private static int RoleOrder(OwnedRole role) => role switch
-    {
-        OwnedRole.Layout => 0,
-        OwnedRole.Viewport => 1,
-        OwnedRole.Clip => 2,
-        OwnedRole.TitleAttributes => 3,
-        OwnedRole.PaperTable => 4,
-        OwnedRole.Boundary => 5,
-        OwnedRole.MatchMark => 6,
-        OwnedRole.ImpactOutline => 7,
-        OwnedRole.ModelTable => 8,
-        _ => 9,
-    };
-
-    private static string Describe(OwnedKey key, PlanResult? plan)
-    {
-        string label = plan?.Segments.FirstOrDefault(x => x.Id == key.SegmentId)?.Label ?? key.SegmentId.ToString("D");
-        return key.Role == OwnedRole.MasterTable ? "The master table" : $"Sheet {label} {key.Role}{(key.Qualifier.Length > 0 ? " (" + key.Qualifier + ")" : "")}";
     }
 
     private static string StepName(int step) => step switch
@@ -727,7 +619,10 @@ public static class ExportFiles
                     Fix: "Save the drawing, then run SVEXPORT."),
             ]);
 
-        var doc = ExportBuilder.Build(run, rec, now, drawingPath, formatStation, settings.Report);
+        // Manual segments carry NaN stations (6.3); the real FormatStation throws on them
+        // (E311 self-test on installed bindings, 2026-11-05). Format only finite stations.
+        string FormatOrManual(double raw) => double.IsFinite(raw) ? formatStation(raw) : settings.ModelOutput.ManualStationText;
+        var doc = ExportBuilder.Build(run, rec, now, drawingPath, FormatOrManual, settings.Report);
         if (!doc.Succeeded)
             return new PreparedExport(run.Name, null, "", null, "", ef.CsvUtf8Bom, doc.Problems.Select(p => p with { Severity = Severity.Warning }).ToList());
 

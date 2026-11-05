@@ -512,10 +512,8 @@ internal sealed class EditorSession : ISheetVolSession, IDisposable
             {
                 (station, _) = CivilReads.StationOffset(obj, wcs.X, wcs.Y);
             }
-            catch (Exception ex) when (ex is Autodesk.Civil.PointNotOnEntityException
-                                       || ex.InnerException is Autodesk.Civil.PointNotOnEntityException)
+            catch (Autodesk.Civil.PointNotOnEntityException)
             {
-                // The second form covers a binder that wraps the target's exception (CivilReads uses dynamic).
                 throw new InvalidOperationException(string.Format(HostText.PointNotBesideAlignmentFormat, alignmentName));
             }
             tr.Commit();

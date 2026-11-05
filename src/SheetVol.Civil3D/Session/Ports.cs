@@ -1,34 +1,40 @@
-// A4 work package (HANDOFF.md section 10, Wave 2). Owner: A4.
+// A4 work package (HANDOFF.md section 10, Wave 2). Owner: A4; writer ports reshaped at the
+// Wave 2 integration.
 //
 // The ports the regen pipeline needs from the adapters (A1), the model writers (A2) and
-// the paper writers (A3). A1-A3 are built in parallel; the orchestrator wires their real
-// implementations at integration by setting EngineBindings.Current. SVSELFTEST runs the
-// same pipeline against the in-memory fakes in SelfTest/SelfTestFakes.cs, so a real
-// factory drops in by swapping one object.
+// the paper writers (A3). The real implementations live in Civil3D/Integration and are
+// installed at assembly load (EngineStartup). SVSELFTEST runs the same pipeline against
+// the in-memory fakes in SelfTest/SelfTestFakes.cs, so a factory drops in by swapping one
+// object.
 //
 // Rules every implementation follows (HANDOFF.md 6.13, 6.10):
 //   - Every call happens inside the caller's transaction and under its document lock.
-//     Implementations never start, commit or abort a transaction of their own, never
+//     Implementations never start, commit or abort the caller's transaction, never
 //     dispose objects obtained from tr.GetObject, and never lock the document. The
 //     pipeline commits once at the end of step 5; any failure before that aborts the
 //     transaction and the drawing is untouched (6.10, E801, T20, P20).
 //   - Failures that belong to the user's data come back as Problems with a stable SV-Exxx
-//     code (Outcome failures or WriteResult problems). Exceptions are for defects; the
-//     pipeline turns them into SV-E801 and aborts.
-//   - Writers update only what they own and only what they set: cell text, view, clip,
-//     attribute values. Never a table or viewport position the user changed (6.7, E502,
-//     E608). Objects on locked layers are unlocked, written and relocked; frozen layers
-//     stay frozen (E504, E604).
-//   - Signatures: Inspect returns the content signature of the LIVE object computed with
-//     the OwnedSignatures function for its role, so the pipeline's ChangeSet (C3) compares
-//     like with like and an unchanged regen writes nothing (E811, T19). A writer that
-//     cannot read an object back returns a null signature, which forces an update.
+//     code (Outcome failures, WriterResult problems). Exceptions are for defects; the
+//     pipeline turns them into SV-E823 and aborts.
+//   - Writers are whole-run appliers (A2's ModelWriter.Apply, A3's PaperWriter.Apply): each
+//     plans read-only first, refuses with no writes on any error, and then writes only what
+//     the live objects show has changed, so an unchanged regen writes nothing (E811, T19).
+//     They update only what they own and only what they set: cell text, view, clip,
+//     attribute values; never a table or viewport position the user changed (6.7, E502,
+//     E608). Objects on locked layers are unlocked or force-opened, written and relocked;
+//     frozen layers stay frozen (E504, E604).
+//   - Ordering inside step 5 (RegenPipeline): model writer first, paper writer last. A3's
+//     apply replaces the template's cloned viewports by new ones and erases the clones; A1
+//     measured that erasing an object created in the same transaction and then aborting can
+//     crash the host (0xC0000005), so nothing that can fail runs after the paper writer.
 
 using Autodesk.AutoCAD.DatabaseServices;
+using SheetVol.Civil3D.WritersModel;
 using SheetVol.Core;
 using SheetVol.Core.Output;
 using SheetVol.Core.Planning;
 using SheetVol.Core.Tracking;
+using SheetVol.Core.Views;
 using SheetVol.Core.Volumes;
 
 namespace SheetVol.Civil3D.Session;
@@ -47,9 +53,9 @@ public interface IAdapterFactory
 /// <summary>
 /// Everything the pipeline reads from the drawing (A1). Lives for one transaction, and so does
 /// everything it returns: alignment geometry, triangle sources and volume sources may hold
-/// objects opened in that transaction and are used only while it is open (A1's adapters throw
-/// after it ends). Callers copy out plain values (stations, strings, PlanResult) before the
-/// transaction closes. Names are the user's names; handles are hex strings as AutoCAD prints them.
+/// objects opened in that transaction and are used only while it is open (they throw after it
+/// ends). Callers copy out plain values (stations, strings, PlanResult) before the transaction
+/// closes. Names are the user's names; handles are hex strings as AutoCAD prints them.
 /// </summary>
 public interface IDrawingSources
 {
@@ -63,10 +69,10 @@ public interface IDrawingSources
     IReadOnlyList<string> TinSurfaceNames();
 
     /// <summary>
-    /// The alignment, resolved by <paramref name="storedHandle"/> first and then by name (E803).
-    /// Fails with SV-E213 when missing or the reference is broken, SV-E214 when entities are
-    /// disconnected or unsolved, SV-E404 when a reference is stale. Geometry absorbs the probe
-    /// quirks (P7 Clockwise, azimuths to radians CCW from +X).
+    /// The alignment, resolved by name and then by <paramref name="storedHandle"/> (E803).
+    /// Fails with SV-E213 when missing or the reference is broken or stale, SV-E214 when
+    /// entities are disconnected or unsolved. Geometry absorbs the probe quirks (P7 Clockwise,
+    /// azimuths to radians CCW from +X).
     /// </summary>
     Outcome<AlignmentSource> Alignment(string name, string? storedHandle);
 
@@ -125,56 +131,89 @@ public interface IWriterFactory
     /// <summary>Model-space writer (A2): Boundary, MatchMark, ModelTable, MasterTable, ImpactOutline.</summary>
     IModelWriter Model(Database db, Transaction tr, SheetVolSettings settings);
 
-    /// <summary>Paper-space writer (A3): Layout, Viewport (with its clip), PaperTable, TitleAttributes.</summary>
+    /// <summary>Paper-space writer (A3): Layout, Viewport, Clip, PaperTable, TitleAttributes. Dispose it after the regen (it holds the template's side database).</summary>
     IPaperWriter Paper(Database db, Transaction tr, SheetVolSettings settings);
 
-    /// <summary>Persistence store (A2, 6.9).</summary>
+    /// <summary>Persistence store (6.9).</summary>
     IPersistenceStore Store(Database db, Transaction tr, SheetVolSettings settings);
 }
 
-/// <summary>What A2 and A3 have in common: owned objects by key.</summary>
+/// <summary>What one regen asks the writers to realize.</summary>
+/// <param name="Run">The run as applied (KnownSegments = this plan).</param>
+/// <param name="RunId">The run id in every owner tag (<see cref="Ownership.RunIds.For"/>).</param>
+/// <param name="Output">The planned objects (<see cref="OutputPlanner"/>).</param>
+/// <param name="Prior">The record of the last successful regen, or null.</param>
+/// <param name="Units">Drawing units (HCFCD values).</param>
+/// <param name="NowUtc">The regen's timestamp (orphan dates).</param>
+public sealed record WriteRequest(RunDefinition Run, Guid RunId, OutputPlan Output, RunRecord? Prior, DrawingUnits Units, DateTimeOffset NowUtc);
+
+/// <summary>Counts of what a writer did, for SVREGEN's summary and the self-test.</summary>
+/// <param name="Created">Objects created.</param>
+/// <param name="Updated">Objects updated in place.</param>
+/// <param name="Erased">Objects erased.</param>
+/// <param name="Renamed">Layout renames (both passes).</param>
+/// <param name="Orphaned">Layouts that became orphans in this regen.</param>
+/// <param name="Writes">Database writes the writer made (objects created, erased or opened for write). Zero means the drawing already realized the plan (E811).</param>
+public sealed record ApplyCounts(int Created, int Updated, int Erased, int Renamed, int Orphaned, int Writes)
+{
+    /// <summary>Nothing done.</summary>
+    public static ApplyCounts None { get; } = new(0, 0, 0, 0, 0, 0);
+
+    /// <summary>Two writers' counts together.</summary>
+    public ApplyCounts Plus(ApplyCounts other) => new(Created + other.Created, Updated + other.Updated, Erased + other.Erased,
+        Renamed + other.Renamed, Orphaned + other.Orphaned, Writes + other.Writes);
+}
+
+/// <summary>What one writer did in one regen.</summary>
+/// <param name="Succeeded">False when the writer refused; it then wrote nothing of its own.</param>
+/// <param name="Owned">Every object of this writer's roles the run owns after the apply, for the record (6.9).</param>
+/// <param name="NewOrphans">Layouts the run owns that the plan no longer holds (E308, E612); listed, never deleted.</param>
+/// <param name="Counts">What was written.</param>
+/// <param name="Problems">Errors (when refused), warnings and notes.</param>
+public sealed record WriterResult(bool Succeeded, IReadOnlyList<OwnedHandle> Owned, IReadOnlyList<OrphanLayout> NewOrphans, ApplyCounts Counts, IReadOnlyList<Problem> Problems)
+{
+    /// <summary>A refusal: nothing written by this writer.</summary>
+    public static WriterResult Refused(IReadOnlyList<Problem> problems) => new(false, [], [], ApplyCounts.None, problems);
+}
+
+/// <summary>What A2 and A3 have in common.</summary>
 public interface IOwnedObjectWriter
 {
     /// <summary>The roles this writer owns. Every <see cref="OwnedRole"/> is owned by exactly one writer.</summary>
     IReadOnlySet<OwnedRole> Roles { get; }
 
     /// <summary>
-    /// Checks, before any write, that everything the planned objects need exists: table
-    /// styles and layers (E501), template file, layout, plan viewport and anchor (E601),
-    /// target layouts (E1017). Read-only. An Error fails the run before step 5.
+    /// Live state of one stored object, read only: it exists, is not erased and carries the run's
+    /// owner tag for <paramref name="key"/> (E802, SVSTATUS); its signature describes the live
+    /// content so the self-test can compare drawing states (T20).
     /// </summary>
-    IReadOnlyList<Problem> Preflight(IReadOnlyList<OwnedObject> planned);
-
-    /// <summary>Live state of a stored object: exists (E802) and its content signature (E811).</summary>
-    StoredObject Inspect(OwnedKey key, string? handle);
+    StoredObject Inspect(string runName, OwnedKey key, string? handle);
 
     /// <summary>
-    /// Creates (<paramref name="existingHandle"/> null) or updates in place. Returns the handle,
-    /// whether anything was modified, and per-object notes (E1015 missing label, E615 missing
-    /// attribute tag). An Error problem aborts the run.
+    /// Applies the run's planned objects of this writer's roles against what <see cref="WriteRequest.Prior"/>
+    /// recorded. Plans read-only first; any error refuses the whole apply with no writes of its own.
     /// </summary>
-    WriteResult Write(OwnedObject planned, string? existingHandle);
-
-    /// <summary>Erases an object that is no longer planned (E308). Layouts are never erased here (E612).</summary>
-    void Erase(OwnedKey key, string handle);
+    WriterResult Apply(WriteRequest request);
 }
 
 /// <summary>Model-space writer (A2).</summary>
 public interface IModelWriter : IOwnedObjectWriter
 {
+    /// <summary>SVCLEAR: erases every model-space object <paramref name="record"/> lists that still exists.</summary>
+    WriterResult Clear(string runName, RunRecord record);
 }
 
-/// <summary>Paper-space writer (A3).</summary>
-public interface IPaperWriter : IOwnedObjectWriter
+/// <summary>Paper-space writer (A3). Holds the loaded template until disposed.</summary>
+public interface IPaperWriter : IOwnedObjectWriter, IDisposable
 {
-    /// <summary>The template's plan viewport size and anchor (6.7). Read-only. Fails with SV-E601 naming what is missing.</summary>
+    /// <summary>Loads the sheet template (6.7): plan viewport size and anchor. Read-only. Fails with SV-E601 naming what is missing.</summary>
     Outcome<TemplateInfo> Template();
 
-    /// <summary>Every paper layout in the drawing with its handle (E603 de-duplication, E307 renames, E612 orphans).</summary>
+    /// <summary>Every paper layout in the drawing with its handle (E603 de-duplication, E612 orphans).</summary>
     IReadOnlyList<LayoutRef> Layouts();
 
-    /// <summary>Renames one layout. The pipeline calls it with a collision-free two-pass plan (C3 LayoutNamer, E307).</summary>
-    void RenameLayout(string handle, string newName);
+    /// <summary>Every check that needs the destination drawing, before any write (E501, clip layer, E605 name clash). Read-only.</summary>
+    IReadOnlyList<Problem> Validate(WriteRequest request);
 
     /// <summary>Deletes a layout. Only SVPURGE and a confirmed SVCLEAR call this; regen never deletes a layout (6.7, E612).</summary>
     void DeleteLayout(string handle);
@@ -183,17 +222,11 @@ public interface IPaperWriter : IOwnedObjectWriter
 /// <summary>The template's plan viewport (6.7).</summary>
 /// <param name="ViewportWidth">Paper units.</param>
 /// <param name="ViewportHeight">Paper units.</param>
-/// <param name="HasTableAnchor">True when the layout holds the anchor block; otherwise template.tablePaperPoint is used.</param>
+/// <param name="HasTableAnchor">True when the layout holds the anchor block; otherwise <c>paper.tablePaperPoint</c> is used.</param>
 public sealed record TemplateInfo(double ViewportWidth, double ViewportHeight, bool HasTableAnchor);
 
 /// <summary>A paper layout.</summary>
 public sealed record LayoutRef(string Name, string Handle);
-
-/// <summary>Result of one write.</summary>
-/// <param name="Handle">The object's handle (new on create).</param>
-/// <param name="Modified">False when the writer found nothing to change.</param>
-/// <param name="Problems">Notes and warnings for this object.</param>
-public sealed record WriteResult(string Handle, bool Modified, IReadOnlyList<Problem> Problems);
 
 /// <summary>Persistence (6.9): one record per run in the drawing.</summary>
 public interface IPersistenceStore
@@ -204,7 +237,7 @@ public interface IPersistenceStore
     /// <summary>Reads a run. A stored schema newer than the plugin's refuses modification and reports both versions (E105).</summary>
     StoredRunLoad Load(string runName);
 
-    /// <summary>Creates or replaces the run's record. <see cref="RunRecordCodec"/> gives the chunked strings.</summary>
+    /// <summary>Creates or replaces the run's record. Content equal to what is stored rewrites only the timestamp (E811).</summary>
     void Save(RunRecord record);
 
     /// <summary>Removes the run's record (SVCLEAR).</summary>
@@ -231,15 +264,17 @@ public sealed record OwnedHandle(OwnedKey Key, string Handle);
 /// <param name="Handle">Handle at the last successful regen.</param>
 public sealed record SourceHandle(string Kind, string Name, string Handle);
 
-/// <summary>Source kinds in <see cref="SourceHandle"/>.</summary>
+/// <summary>Source kinds in <see cref="SourceHandle"/>: A2's store kinds, plus the owned volume surface.</summary>
 public static class SourceKinds
 {
     /// <summary>The run's alignment.</summary>
-    public const string Alignment = "alignment";
+    public const string Alignment = WritersModel.SourceKinds.Alignment;
+
     /// <summary>A base or comparison surface.</summary>
-    public const string Surface = "surface";
-    /// <summary>An owned volume surface; Name is SV-base-comparison as created.</summary>
-    public const string VolumeSurface = "volumeSurface";
+    public const string Surface = WritersModel.SourceKinds.Surface;
+
+    /// <summary>An owned volume surface; Name is SV-base-comparison as planned (the stored handle finds a suffixed or renamed one, E412).</summary>
+    public const string VolumeSurface = "VolumeSurface";
 }
 
 /// <summary>A layout whose segment no longer exists (E308, E612). Listed by SVSTATUS, deleted only by SVPURGE.</summary>
@@ -269,78 +304,81 @@ public sealed record RunRecord(
 }
 
 // ============================================================================
-// Planned objects: what a writer is asked to create or update
+// Planned objects: what the writers are asked to realize
 // ============================================================================
 
-/// <summary>Where a table goes: a layout (top-left at the anchor block or template.tablePaperPoint) or model space.</summary>
-/// <param name="LayoutName">Target layout; null for model space.</param>
-/// <param name="ModelPoint">Model-space top-left, WCS; null on a layout.</param>
-/// <param name="ModelScale">Model units per paper unit: model-space text height = config height x this (C2 note).</param>
-public sealed record TablePlacement(string? LayoutName, Pt? ModelPoint, double ModelScale);
-
-/// <summary>One object the regen plans to own. <see cref="Signature"/> uses <see cref="OwnedSignatures"/>.</summary>
+/// <summary>
+/// One object the regen plans to own. <see cref="Signature"/> uses <see cref="OwnedSignatures"/>;
+/// the fake writers compare it with what they stored, the real writers compare the live object
+/// themselves. Model-space objects carry A2's spec, paper objects what A3's sheet request needs.
+/// </summary>
 public abstract record OwnedObject(OwnedKey Key)
 {
     /// <summary>Content signature of what would be written.</summary>
     public abstract string Signature { get; }
 }
 
-/// <summary>Model-space boundary polyline, closed, true arcs (6.4). Layer: modelOutput.boundaryLayer.</summary>
+/// <summary>Model-space boundary polyline, closed, true arcs (6.4). Layer: modelWriters.boundaryLayer.</summary>
 public sealed record BoundaryObject(OwnedKey Key, Boundary Boundary) : OwnedObject(Key)
 {
     /// <inheritdoc />
     public override string Signature => ContentSignatures.Of(Boundary);
 }
 
-/// <summary>Match-line mark (6.8): a line across the band at a shared break and its text. Layer and height from modelOutput.</summary>
-/// <param name="Key">Segment, MatchMark, "start" or "end".</param>
-/// <param name="From">Left offset point at the break, WCS.</param>
-/// <param name="To">Right offset point at the break, WCS.</param>
-/// <param name="Text">Formatted text.</param>
-/// <param name="TextHeight">Model-space text height, drawing units.</param>
-public sealed record MatchMarkObject(OwnedKey Key, Pt From, Pt To, string Text, double TextHeight) : OwnedObject(Key)
+/// <summary>One half of a match-line mark (6.8): A2's spec makes a line and a text, each its own key (<see cref="MatchMarkSpec.LineKey"/>, <see cref="MatchMarkSpec.TextKey"/>).</summary>
+public sealed record MatchMarkObject(OwnedKey Key, MatchMarkSpec Spec) : OwnedObject(Key)
 {
     /// <inheritdoc />
-    public override string Signature => OwnedSignatures.OfMatchMark(From, To, Text, TextHeight);
+    public override string Signature => OwnedSignatures.OfMatchMark(Spec.Left, Spec.Right, Spec.Text, Spec.ModelUnitsPerPaperUnit);
 }
 
-/// <summary>A per-sheet or master table (6.8). Created once, afterwards cell text only (E502). Grows or shrinks by analysis block in place (E505).</summary>
-public sealed record TableObject(OwnedKey Key, TableModel Table, TablePlacement Placement) : OwnedObject(Key)
+/// <summary>An impacted-area outline below OHWM (6.15), HcfcdSegment preset.</summary>
+public sealed record ImpactOutlineObject(OwnedKey Key, ImpactOutlineSpec Spec) : OwnedObject(Key)
 {
     /// <inheritdoc />
-    public override string Signature => OwnedSignatures.OfTable(Table);
+    public override string Signature => ContentSignatures.OfPolyline(Spec.Outline);
+}
+
+/// <summary>A per-sheet table in model space or on a named layout, or the master table (6.8), written by A2. Created once, afterwards cell text only (E502); grows or shrinks by analysis block in place (E505).</summary>
+public sealed record ModelTableObject(OwnedKey Key, ModelTableSpec Spec) : OwnedObject(Key)
+{
+    /// <inheritdoc />
+    public override string Signature => OwnedSignatures.OfTable(Spec.Model);
 }
 
 /// <summary>
-/// An HCFCD label-bound table (6.16). First creation: <c>Template.CreateTable(segment, Materials, AreaUnit, Formatter.Units, config)</c>,
-/// then <c>Template.Bind</c>. Later regens: <c>Template.Bind</c> on the live cells and write only <c>Changes</c> (E811, E1015, E1016).
-/// Values only for analyses whose impact was computed (D10).
+/// An HCFCD label-bound table (6.16), written by A2: created once from the template with one
+/// material row per analysis, afterwards only the bound cells (E1015, E1016, E1018).
+/// <paramref name="BoundSignature"/> is the bound cells' text as first created.
 /// </summary>
-public sealed record HcfcdTableObject(
-    OwnedKey Key, HcfcdTemplate Template, IReadOnlyList<AnalysisDef> Materials, IReadOnlyList<HcfcdMaterial> Values,
-    AreaUnit AreaUnit, QuantityFormatter Formatter, TablePlacement Placement, string BoundSignature) : OwnedObject(Key)
+public sealed record HcfcdTableObject(OwnedKey Key, HcfcdTableSpec Spec, string BoundSignature) : OwnedObject(Key)
 {
     /// <inheritdoc />
     public override string Signature => BoundSignature;
 }
 
-/// <summary>A layout cloned from the template (6.7, P11). Signature covers the name; renames go through <see cref="IPaperWriter.RenameLayout"/>.</summary>
-public sealed record LayoutObject(OwnedKey Key, string Name, int SheetNumber) : OwnedObject(Key)
+/// <summary>A layout cloned from the template (6.7, P11). <paramref name="Parts"/> feed the layout name pattern and the title attributes (C3).</summary>
+public sealed record LayoutObject(OwnedKey Key, string Name, int SheetNumber, LayoutNameParts Parts) : OwnedObject(Key)
 {
     /// <inheritdoc />
     public override string Signature => OwnedSignatures.OfLayout(Name);
 }
 
 /// <summary>
-/// The plan viewport on a layout: view target, twist, scale, clip (6.6, P12). Paper position and size are never changed (E608).
-/// The signature covers <see cref="ViewSpec.PaperWidth"/>/<see cref="ViewSpec.PaperHeight"/>, which are the TEMPLATE viewport
-/// size the view was fitted to. Inspect must compute the live signature with that same template size (or return the signature
-/// recorded when the view was applied), never the live paper size, so a viewport the user resized is not rewritten every regen.
+/// The plan viewport on a layout: view target, twist, scale, clip (6.6, P12). Paper position and
+/// size are never changed (E608); <paramref name="LockView"/> keeps an existing viewport as it is.
 /// </summary>
-public sealed record ViewportObject(OwnedKey Key, string LayoutName, ViewSpec View) : OwnedObject(Key)
+public sealed record ViewportObject(OwnedKey Key, string LayoutName, ViewSpec View, bool LockView) : OwnedObject(Key)
 {
     /// <inheritdoc />
     public override string Signature => ContentSignatures.Of(View);
+}
+
+/// <summary>The per-sheet table on a generated layout (6.8), written by A3 at the template's anchor.</summary>
+public sealed record PaperTableObject(OwnedKey Key, string LayoutName, TableModel Table) : OwnedObject(Key)
+{
+    /// <inheritdoc />
+    public override string Signature => OwnedSignatures.OfTable(Table);
 }
 
 /// <summary>Title-block attribute values on a layout (6.7). A missing tag is skipped with a note (E615).</summary>
@@ -350,14 +388,11 @@ public sealed record TitleAttributesObject(OwnedKey Key, string LayoutName, IRea
     public override string Signature => OwnedSignatures.OfAttributes(Values);
 }
 
-/// <summary>Content signatures shared by the pipeline (planned) and the writers (live), built on C3's <see cref="ContentSignatures"/>.</summary>
+/// <summary>Content signatures shared by the planner and the fake writers, built on C3's <see cref="ContentSignatures"/>.</summary>
 public static class OwnedSignatures
 {
-    /// <summary>All cell texts row by row (cells read with FormatOption.IgnoreMtextFormat, P24). Position and style are not part of it (E502).</summary>
+    /// <summary>All cell texts row by row. Position and style are not part of it (E502).</summary>
     public static string OfTable(TableModel table) => ContentSignatures.OfTexts(table.Rows.SelectMany(r => r.Cells));
-
-    /// <summary>Cell texts read from a live table, row by row.</summary>
-    public static string OfCells(IEnumerable<IReadOnlyList<string>> rows) => ContentSignatures.OfTexts(rows.SelectMany(r => r));
 
     /// <summary>The bound cells' texts in row then column order (6.16).</summary>
     public static string OfBound(IEnumerable<CellWrite> bound) =>
@@ -370,9 +405,9 @@ public static class OwnedSignatures
     public static string OfAttributes(IReadOnlyDictionary<string, string> values) =>
         ContentSignatures.OfTexts(values.OrderBy(kv => kv.Key, StringComparer.Ordinal).Select(kv => kv.Key + "=" + kv.Value));
 
-    /// <summary>A match mark: both ends, text and height.</summary>
-    public static string OfMatchMark(Pt from, Pt to, string text, double height) =>
-        ContentSignatures.OfTexts([text, R(from.X), R(from.Y), R(to.X), R(to.Y), R(height)]);
+    /// <summary>A match mark: both ends, text and scale.</summary>
+    public static string OfMatchMark(Pt from, Pt to, string text, double scale) =>
+        ContentSignatures.OfTexts([text, R(from.X), R(from.Y), R(to.X), R(to.Y), R(scale)]);
 
     private static string R(double v) => v.ToString("R", System.Globalization.CultureInfo.InvariantCulture);
 }

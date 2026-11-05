@@ -1,0 +1,7 @@
+(command "_.NETLOAD" (getenv "SHEETVOL_DLL"))
+(progn (vl-load-com) (setq svdir (strcat (getenv "TEMP") "/sheetvol")) (vl-mkdir svdir) (setq svdwg (strcat svdir "/selftest-installed.dwg")) (if (findfile svdwg) (vl-file-delete svdwg)) (command "_.SAVEAS" "2018" svdwg))
+SVSELFTEST
+Installed
+SVSTATUS
+_.QUIT
+_Y

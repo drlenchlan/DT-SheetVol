@@ -14,6 +14,9 @@
 using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using SheetVol.Civil3D.Adapters;
+using SheetVol.Civil3D.WritersModel;
+using SheetVol.Civil3D.WritersPaper;
 using SheetVol.Core;
 using SheetVol.Core.Geometry;
 using SheetVol.Core.Output;
@@ -23,9 +26,6 @@ using SheetVol.Core.Views;
 using SheetVol.Core.Volumes;
 
 namespace SheetVol.Civil3D.Session;
-
-/// <summary>A paper or model point in settings.</summary>
-public sealed record PointSetting(double X, double Y);
 
 /// <summary>Segment planning and boundary tolerances for C1 (6.3, 6.4). Lengths in feet, scaled to drawing units.</summary>
 public sealed record PlanningSettings
@@ -93,68 +93,27 @@ public sealed record IntegratorConfig
     public double AreaCheckAbsoluteSquareFeet { get; init; } = 1.0;
 }
 
-/// <summary>Template-driven paper space (6.7). Path, layout and layer are PLACEHOLDERS until Dan's LAN template arrives (section 13).</summary>
-public sealed record TemplateSettings
-{
-    /// <summary>DWT holding the sheet layout to clone. PLACEHOLDER: empty until the LAN template arrives. Required when regen.generateLayouts is on (E601).</summary>
-    public string Path { get; init; } = "";
-
-    /// <summary>Layout in the DWT that new layouts are cloned from. PLACEHOLDER.</summary>
-    public string LayoutName { get; init; } = "SV-SHEET";
-
-    /// <summary>Layer of the plan viewport in the template; if none is on it, the largest floating viewport (6.7). PLACEHOLDER.</summary>
-    public string PlanViewportLayer { get; init; } = "SV-VPORT";
-
-    /// <summary>Table top-left on the layout when the template has no anchor block (6.7). Null: the anchor block is required.</summary>
-    public PointSetting? TablePaperPoint { get; init; }
-
-    /// <summary>Title-block attribute fill (6.7): tag to value pattern with {RUN} {N} {LABEL} {FROM} {TO} {ALIGN}. A tag missing from the block is skipped with a note (E615).</summary>
-    public IReadOnlyDictionary<string, string> TitleAttributes { get; init; } = new Dictionary<string, string>
-    {
-        ["STA_FROM"] = "{FROM}",
-        ["STA_TO"] = "{TO}",
-        ["SHEET_NO"] = "{N}",
-    };
-}
-
-/// <summary>Model-space outputs (6.8, A14). Layer names are PLACEHOLDERS (A7).</summary>
+/// <summary>
+/// Model-space choices that are A4's (6.8, A14). Layers, text, match marks and table layout
+/// at creation are the model writers' (<see cref="SheetVolSettings.ModelWriters"/>, A2).
+/// </summary>
 public sealed record ModelOutputSettings
 {
-    /// <summary>Layer of the boundary polylines. PLACEHOLDER. A missing layer fails the run (E501 rule applied to every owned layer).</summary>
-    public string BoundaryLayer { get; init; } = "SV-BOUNDARY";
-
-    /// <summary>Draw match-line marks at shared breaks (6.8, optional).</summary>
-    public bool MatchMarks { get; init; } = true;
-
-    /// <summary>Layer of the match-line marks. PLACEHOLDER.</summary>
-    public string MatchMarkLayer { get; init; } = "SV-MATCH";
-
-    /// <summary>Match-line text: {0} station as the alignment formats it, {1} the neighbouring sheet label (6.8).</summary>
-    public string MatchMarkTextTemplate { get; init; } = "MATCH LINE STA {0} — SEE SHEET {1}";
-
-    /// <summary>Match-line text height in paper units; model-space writers multiply by the run's model units per paper unit. PLACEHOLDER.</summary>
-    public double MatchMarkTextHeight { get; init; } = 0.1;
-
-    /// <summary>Distance beyond the right offset at the segment start where a model-space segment table is placed, feet (A14).</summary>
-    public double ModelTableGapFeet { get; init; } = 10;
-
-    /// <summary>Layout that receives the master table; null puts it in model space beside the alignment start (6.8).</summary>
+    /// <summary>Layout that receives the master table; null puts it in model space beside the run (6.8).</summary>
     public string? MasterTableLayout { get; init; }
 
     /// <summary>Text shown in a table for the stations of a manual segment, which has none (6.3).</summary>
     public string ManualStationText { get; init; } = "MANUAL";
 }
 
-/// <summary>Regen behaviour switches (6.10, E307, E404).</summary>
+/// <summary>
+/// Regen behaviour switches (6.10). Rebuilding out-of-date sources is the adapters' setting
+/// (<c>adapters.rebuildSources</c>, E404); renumbering layouts is the paper writers'
+/// (<c>paper.renumberLayouts</c>, E307).
+/// </summary>
 public sealed record RegenSettings
 {
-    /// <summary>Rebuild an out-of-date native source surface before computing; off fails with the surface name (E404).</summary>
-    public bool RebuildSources { get; init; } = true;
-
-    /// <summary>Renumber later layouts after a break is inserted or removed, with a two-pass rename (E307).</summary>
-    public bool RenumberLayouts { get; init; } = true;
-
-    /// <summary>Generate one layout per station segment from the template (6.7). Off until template.path names the LAN template: with it off, tables go in model space at each segment (A14).</summary>
+    /// <summary>Generate one layout per station segment from the sheet template (6.7). Off until <c>paper.templatePath</c> names the LAN template: with it off, tables go in model space at each segment (A14).</summary>
     public bool GenerateLayouts { get; init; }
 }
 
@@ -223,6 +182,19 @@ public sealed record SelfTestSettings
     /// <summary>Relative tolerance of the integrator cross-check on fixtures (6.15: 1e-9 on fixtures).</summary>
     public double FixtureCrossCheckRelative { get; init; } = 1e-9;
 
+    /// <summary>
+    /// Absolute floor of the fixture cross-check, cubic feet. The adapters return any volume below
+    /// <c>adapters.signNoiseClamp</c> (1e-6) as exactly 0 (P18 noise), so the two sides may differ by
+    /// that much on an empty polygon; 6.15's 0.5 ft³ project floor would hide a 1e-9 relative miss.
+    /// </summary>
+    public double FixtureCrossCheckAbsoluteCubicFeet { get; init; } = 1e-6;
+
+    /// <summary>Relative tolerance of the 6.5 area cross-check on fixtures. A1 measured the two areas agree to 4.4e-15 on every fixture polygon.</summary>
+    public double FixtureAreaCheckRelative { get; init; } = 1e-9;
+
+    /// <summary>Absolute floor of the fixture area check, square feet (the adapters' noise clamp, as for volumes).</summary>
+    public double FixtureAreaCheckAbsoluteSquareFeet { get; init; } = 1e-6;
+
     /// <summary>Acceptance tolerance on volumes, cubic yards (section 8: ±0.01 CY).</summary>
     public double VolumeToleranceCy { get; init; } = 0.01;
 
@@ -269,10 +241,16 @@ public sealed record SheetVolSettings
     /// <summary>C5 integrator settings and cross-check tolerances.</summary>
     public IntegratorConfig Integrator { get; init; } = new();
 
-    /// <summary>Sheet template (6.7).</summary>
-    public TemplateSettings Template { get; init; } = new();
+    /// <summary>A1 adapters: owned volume surface style and layer, rebuild of out-of-date sources (E404), noise clamp, datums, cross-check tolerances.</summary>
+    public AdapterConfig Adapters { get; init; } = new();
 
-    /// <summary>Model-space outputs.</summary>
+    /// <summary>A2 model writers: boundary, outline and match-mark layers and text, owner tag key, table layout at creation.</summary>
+    public ModelWritersConfig ModelWriters { get; init; } = new();
+
+    /// <summary>A3 paper writers: sheet template (6.7), plan viewport layer, title attributes, renumbering (E307), owner tag key, tolerances.</summary>
+    public PaperConfig Paper { get; init; } = new();
+
+    /// <summary>Model-space choices that are A4's (master table layout, manual station text).</summary>
     public ModelOutputSettings ModelOutput { get; init; } = new();
 
     /// <summary>Regen switches.</summary>
@@ -333,26 +311,21 @@ public sealed record SheetVolSettings
         NonNegative("integrator.areaCheckRelative", ig.AreaCheckRelative);
         NonNegative("integrator.areaCheckAbsoluteSquareFeet", ig.AreaCheckAbsoluteSquareFeet);
 
-        Text("template.layoutName", Template.LayoutName);
-        Text("template.planViewportLayer", Template.PlanViewportLayer);
-        if (Regen.GenerateLayouts) Text("template.path (regen.generateLayouts is on)", Template.Path);
-        if (Template.TablePaperPoint is { } tp && (!double.IsFinite(tp.X) || !double.IsFinite(tp.Y))) Bad("template.tablePaperPoint", "must be two finite numbers.");
-        foreach (var (tag, pattern) in Template.TitleAttributes ?? new Dictionary<string, string>())
+        // A1, A2 and A3 validate their own sections (SV-E446, SV-E534, SV-E691).
+        p.AddRange(Adapters.Validate());
+        p.AddRange(ModelWriters.Validate());
+        p.AddRange(Paper.Validate());
+        if (!string.Equals(ModelWriters.OwnerTagKey, Paper.OwnerTagKey, StringComparison.Ordinal))
+            Bad("modelWriters.ownerTagKey / paper.ownerTagKey", $"are '{ModelWriters.OwnerTagKey}' and '{Paper.OwnerTagKey}'; both writers write one owner-tag format (Civil3D/Ownership), so the keys must be equal.");
+        if (Regen.GenerateLayouts)
         {
-            if (string.IsNullOrWhiteSpace(tag)) Bad("template.titleAttributes", "a tag must not be empty.");
-            try { _ = LayoutNamer.FormatPattern(pattern ?? "", new LayoutNameParts("RUN", 1, "1", "0+00", "5+00", "ALIGN"), LayoutNames.SheetNumberFormat); }
-            catch (FormatException ex) { Bad($"template.titleAttributes.{tag}", ex.Message); }
+            Text("paper.templatePath (regen.generateLayouts is on)", Paper.TemplatePath);
+            Text("paper.templateLayout (regen.generateLayouts is on)", Paper.TemplateLayout);
         }
 
         var mo = ModelOutput;
-        Text("modelOutput.boundaryLayer", mo.BoundaryLayer);
-        Text("modelOutput.matchMarkLayer", mo.MatchMarkLayer);
-        Positive("modelOutput.matchMarkTextHeight", mo.MatchMarkTextHeight);
-        NonNegative("modelOutput.modelTableGapFeet", mo.ModelTableGapFeet);
         Text("modelOutput.manualStationText", mo.ManualStationText);
         if (mo.MasterTableLayout is not null) Text("modelOutput.masterTableLayout", mo.MasterTableLayout);
-        try { _ = string.Format(CultureInfo.InvariantCulture, mo.MatchMarkTextTemplate, "1+00", "2"); }
-        catch (FormatException) { Bad("modelOutput.matchMarkTextTemplate", "is not a valid format with {0} station and {1} sheet."); }
 
         var rd = RunDefaults;
         Text("runDefaults.breakSpec", rd.BreakSpec);
@@ -376,22 +349,39 @@ public sealed record SheetVolSettings
         Text("selfTest.fakeObjectDictionary", st.FakeObjectDictionary);
         Text("selfTest.fakeStoreDictionary", st.FakeStoreDictionary);
         NonNegative("selfTest.fixtureCrossCheckRelative", st.FixtureCrossCheckRelative);
+        NonNegative("selfTest.fixtureCrossCheckAbsoluteCubicFeet", st.FixtureCrossCheckAbsoluteCubicFeet);
+        NonNegative("selfTest.fixtureAreaCheckRelative", st.FixtureAreaCheckRelative);
+        NonNegative("selfTest.fixtureAreaCheckAbsoluteSquareFeet", st.FixtureAreaCheckAbsoluteSquareFeet);
         Positive("selfTest.volumeToleranceCy", st.VolumeToleranceCy);
         return p;
     }
 
-    /// <summary>Setting paths whose value is still a placeholder default (A7): C2's under <c>report.</c>, then A4's own.</summary>
+    /// <summary>Setting paths whose value is still a placeholder default (A7): C2's under <c>report.</c>, then A1's, A2's and A3's sections.</summary>
     public IReadOnlyList<string> PlaceholdersInUse()
     {
         var list = Report.PlaceholdersInUse().Select(s => "report." + s).ToList();
         var d = Default;
-        if (Template.Path == d.Template.Path) list.Add("template.path");
-        if (Template.LayoutName == d.Template.LayoutName) list.Add("template.layoutName");
-        if (Template.PlanViewportLayer == d.Template.PlanViewportLayer) list.Add("template.planViewportLayer");
-        if (ModelOutput.BoundaryLayer == d.ModelOutput.BoundaryLayer) list.Add("modelOutput.boundaryLayer");
-        if (ModelOutput.MatchMarkLayer == d.ModelOutput.MatchMarkLayer) list.Add("modelOutput.matchMarkLayer");
-        if (ModelOutput.MatchMarkTextHeight == d.ModelOutput.MatchMarkTextHeight) list.Add("modelOutput.matchMarkTextHeight");
+        if (Adapters.OwnedSurfaceStyle == d.Adapters.OwnedSurfaceStyle) list.Add("adapters.ownedSurfaceStyle");
+        if (Adapters.OwnedSurfaceLayer == d.Adapters.OwnedSurfaceLayer) list.Add("adapters.ownedSurfaceLayer");
+        var mw = ModelWriters;
+        var dmw = d.ModelWriters;
+        if (mw.BoundaryLayer == dmw.BoundaryLayer) list.Add("modelWriters.boundaryLayer");
+        if (mw.ImpactOutlineLayer == dmw.ImpactOutlineLayer) list.Add("modelWriters.impactOutlineLayer");
+        if (mw.MatchMarks.Layer == dmw.MatchMarks.Layer) list.Add("modelWriters.matchMarks.layer");
+        if (mw.MatchMarks.TextHeight == dmw.MatchMarks.TextHeight) list.Add("modelWriters.matchMarks.textHeight");
+        var pc = Paper;
+        var dpc = d.Paper;
+        if (string.IsNullOrWhiteSpace(pc.TemplatePath)) list.Add("paper.templatePath");
+        if (string.IsNullOrWhiteSpace(pc.TemplateLayout)) list.Add("paper.templateLayout");
+        if (pc.PlanViewportLayer == dpc.PlanViewportLayer) list.Add("paper.planViewportLayer");
+        if (SameMap(pc.TitleAttributes, dpc.TitleAttributes)) list.Add("paper.titleAttributes");
+        if (pc.TableColumnWidths.SequenceEqual(dpc.TableColumnWidths)) list.Add("paper.tableColumnWidths");
+        if (pc.TableRowHeight == dpc.TableRowHeight) list.Add("paper.tableRowHeight");
+        if (pc.AnnotationScaleNameFormat == dpc.AnnotationScaleNameFormat) list.Add("paper.annotationScaleNameFormat");
         return list;
+
+        static bool SameMap(IReadOnlyDictionary<string, string> a, IReadOnlyDictionary<string, string> b) =>
+            a.Count == b.Count && a.All(kv => b.TryGetValue(kv.Key, out var v) && v == kv.Value);
     }
 
     /// <summary>Reads settings from JSON and validates them. Unknown keys and nulls in non-nullable members are errors.</summary>

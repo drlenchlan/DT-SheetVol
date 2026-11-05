@@ -32,6 +32,7 @@
 
 using Autodesk.AutoCAD.DatabaseServices;
 using Autodesk.AutoCAD.Geometry;
+using SheetVol.Civil3D.Ownership;
 using SheetVol.Core;
 using SheetVol.Core.Tracking;
 
@@ -159,7 +160,7 @@ internal sealed class ViewportWriter(PaperConfig config)
             problems.Add(new Problem(PaperCodes.AnnotationScale, Severity.Info, $"Annotation scale '{name}' (1:{k:R}) was missing from the drawing and was added.", spec.SegmentId));
         }
 
-        vp = OwnerTags.OpenForWrite<Viewport>(tr, vpId);
+        vp = OwnerTag.OpenForWrite<Viewport>(tr, vpId);
         writes.Add();
         bool wasLocked = vp.Locked;
         if (wasLocked) vp.Locked = false;
@@ -208,9 +209,9 @@ internal sealed class ViewportWriter(PaperConfig config)
         if (desired is null)
         {
             if (pl is null || !vp.NonRectClipOn) return PaperChange.None;
-            var tag = OwnerTags.Read(tr, pl, config.OwnerTagKey);
+            var tag = OwnerTag.Read(tr, pl, config.OwnerTagKey);
             if (tag is null || tag.RunId != runId) { clipId = ObjectId.Null; return PaperChange.None; }   // not ours: left alone
-            vp = OwnerTags.OpenForWrite<Viewport>(tr, vpId);
+            vp = OwnerTag.OpenForWrite<Viewport>(tr, vpId);
             writes.Add();
             bool locked = vp.Locked;
             if (locked) vp.Locked = false;
@@ -227,12 +228,12 @@ internal sealed class ViewportWriter(PaperConfig config)
         }
         else if (pl is not null)
         {
-            pl = OwnerTags.OpenForWrite<Polyline>(tr, clipId);
+            pl = OwnerTag.OpenForWrite<Polyline>(tr, clipId);
             writes.Add();
             SetVertices(pl, desired);
             if (!vp.NonRectClipOn)
             {
-                vp = OwnerTags.OpenForWrite<Viewport>(tr, vpId);
+                vp = OwnerTag.OpenForWrite<Viewport>(tr, vpId);
                 bool locked = vp.Locked;
                 if (locked) vp.Locked = false;
                 vp.NonRectClipOn = true;
@@ -250,7 +251,7 @@ internal sealed class ViewportWriter(PaperConfig config)
             clipId = owner.AppendEntity(pl);
             tr.AddNewlyCreatedDBObject(pl, true);
             writes.Add();
-            vp = OwnerTags.OpenForWrite<Viewport>(tr, vpId);
+            vp = OwnerTag.OpenForWrite<Viewport>(tr, vpId);
             bool locked = vp.Locked;
             if (locked) vp.Locked = false;
             vp.NonRectClipEntityId = clipId;
@@ -264,10 +265,10 @@ internal sealed class ViewportWriter(PaperConfig config)
 
         if (change != PaperChange.Unchanged) FitToClip(tr, vpId, desired, anchor, spec.ModelUnitsPerPaperUnit);
 
-        if (!OwnerTags.Matches(tr, pl, config.OwnerTagKey, ownerTag))
+        if (!OwnerTag.Matches(tr, pl, config.OwnerTagKey, ownerTag))
         {
-            if (!pl.IsWriteEnabled) { pl = OwnerTags.OpenForWrite<Polyline>(tr, clipId); writes.Add(); }
-            OwnerTags.Write(tr, pl, config.OwnerTagKey, ownerTag);
+            if (!pl.IsWriteEnabled) { pl = OwnerTag.OpenForWrite<Polyline>(tr, clipId); writes.Add(); }
+            OwnerTag.Write(tr, pl, config.OwnerTagKey, ownerTag);
             if (change == PaperChange.Unchanged) change = PaperChange.Updated;
         }
         return change;
@@ -289,7 +290,7 @@ internal sealed class ViewportWriter(PaperConfig config)
             StraightBulgeTolerance = config.BulgeTolerance,
             DuplicateVertexTolerance = config.PaperTolerance,
         });
-        var vp = OwnerTags.OpenForWrite<Viewport>(tr, vpId);
+        var vp = OwnerTag.OpenForWrite<Viewport>(tr, vpId);
         bool locked = vp.Locked;
         if (locked) vp.Locked = false;
         double k = modelUnitsPerPaperUnit;

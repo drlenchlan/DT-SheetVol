@@ -10,7 +10,7 @@ Owner: U2 (HANDOFF.md section 10). Editor side of ISheetVolSession: pick, highli
 | `DialogHost.cs` | The one window per Civil 3D session: session creation, `Application.ShowModelessWindow`, theme follow, command-state refresh, session-lifetime `PendingEdits` (E907) |
 | `EditorSession.cs` | Decorator over the database-side session: editor members (highlight, zoom, picks), database members forwarded under a document lock or in command context, `SourcesChanged` on document activation and close, `IsCommandActive` from the document's command state |
 | `CommandContext.cs` | The command-context route (below) and the document lock for synchronous reads |
-| `CivilReads.cs` | Alignment name and `StationOffset` through `dynamic` until the csproj references `AecBaseMgd` (see Open items) |
+| `CivilReads.cs` | Alignment name and `StationOffset`, typed (the csproj references `AecBaseMgd`) |
 | `ThemeWatcher.cs` | `COLORTHEME` read and followed through `Application.SystemVariableChanged` (E908) |
 | `SessionFactory.cs` | `ISessionFactory` and `SessionFactories.Register` |
 | `DesignSession.cs` | Design-time session loaded with T2 (adapted from C4's test fake); no Autodesk types |
@@ -94,19 +94,25 @@ the view model shows as "Pick did not complete: ...".
   defers and coalesces it onto the dispatcher, so raising it inside an AutoCAD event is safe.
 - Editor members (`Highlight`, `ZoomTo`, picks) are never called on the engine session.
 
-## Registering the engine session
+## Where the engine session comes from
 
-`SheetVol.UI` references `SheetVol.Civil3D`, so the engine assembly cannot see `ISessionFactory`.
-At the A4 merge the registration therefore lives on the UI side: add one branch at the top of
-`DialogHost.CreateInner` that returns A4's session (or call `SessionFactories.Register` from an
-extension application in this assembly). The other option, moving `ISessionFactory` into Core, is a
-contract change (stop condition 12.6).
+`DialogHost.CreateInner` (Wave 2 integration), in this order: the design fixture when
+`SHEETVOL_FAKE_SESSION=1` (UI work without an engine); a factory registered with
+`SessionFactories.Register`; A4's `SheetVol.Civil3D.Session.SheetVolSession` over the installed
+bindings, which `SheetVol.Civil3D`'s `EngineStartup` sets when that assembly is NETLOADed or
+autoloaded. With none of these, SV-E900 says to NETLOAD `SheetVol.Civil3D.dll`. AutoCAD runs an
+assembly's `IExtensionApplication` only when it loads the assembly itself, not when the CLR loads
+it as a dependency of this one, so the engine DLL is loaded explicitly (the bundle lists it).
+
+`SheetVolSession.RegenerateAsync` runs the regen synchronously inside the decorator's command
+context: it does not yet yield between steps, so progress and Cancel do not repaint during a long
+regen (E906, Dan's M check).
 
 ## Codes
 
 | Code | Meaning |
 |---|---|
-| SV-E900 | No engine session in this build and the design fixture is not switched on; also the design session's "no files are written" export note |
+| SV-E900 | The engine assembly is not loaded (or not wired) and the design fixture is not switched on; also the design session's "no files are written" export note |
 | SV-E901 | SVDIALOG could not open, the dialog could not rebind to or read the active drawing, or releasing it on close did not complete |
 | SV-E908 | The dialog could not follow the colour theme |
 | SV-E909 | SVDIALOGSMOKE stopped |
@@ -122,9 +128,5 @@ engine's config file (A4) carries a UI section.
 
 ## Open items
 
-- **csproj (orchestrator):** `SheetVol.UI.csproj` needs `<Reference Include="AecBaseMgd"><HintPath>$(AcaInstall)\AecBaseMgd.dll</HintPath><Private>false</Private></Reference>`.
-  Without it any typed use of Civil's `Alignment` fails with CS0012 (its base type lives there).
-  `CivilReads.cs` reaches the two members through `dynamic` meanwhile; with the reference in place,
-  replace its three bodies with a cast to `Alignment` and direct calls.
 - **Not run in Civil 3D yet:** every editor member and the command-context route compile against
   the AutoCAD 2025 reference set; their live behaviour is the M rows in `Dialog/README.md`.

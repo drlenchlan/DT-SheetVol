@@ -13,6 +13,7 @@
 
 using Autodesk.AutoCAD.DatabaseServices;
 using Autodesk.AutoCAD.Geometry;
+using SheetVol.Civil3D.Ownership;
 using SheetVol.Core;
 using SheetVol.Core.Output;
 using SheetVol.Core.Tracking;
@@ -91,7 +92,7 @@ internal sealed class PaperTableWriter(PaperConfig config)
         {
             if (id.IsErased || !id.ObjectClass.IsDerivedFrom(Autodesk.AutoCAD.Runtime.RXObject.GetClass(typeof(Table)))) continue;
             var t = (Table)tr.GetObject(id, OpenMode.ForRead);
-            var tag = OwnerTags.Read(tr, t, config.OwnerTagKey);
+            var tag = OwnerTag.Read(tr, t, config.OwnerTagKey);
             if (tag is { Role: OwnedRole.PaperTable } && tag.RunId == runId && tag.SegmentId == segmentId && tag.Qualifier == qualifier) found.Add(t);
         }
         if (found.Count == 0) return ObjectId.Null;
@@ -116,8 +117,8 @@ internal sealed class PaperTableWriter(PaperConfig config)
         if (tableId.IsNull)
         {
             tableId = Create(tr, db, layoutBlock, model, anchor, covered, writes);
-            var created = OwnerTags.OpenForWrite<Table>(tr, tableId);
-            OwnerTags.Write(tr, created, config.OwnerTagKey, tag);
+            var created = OwnerTag.OpenForWrite<Table>(tr, tableId);
+            OwnerTag.Write(tr, created, config.OwnerTagKey, tag);
             if (!layoutFresh)
                 problems.Add(new Problem(PaperCodes.TableRecreated, Severity.Info,
                     $"The sheet table on layout '{layoutName}' was missing; it was created at the anchor ({anchor.X:R}, {anchor.Y:R}).", segmentId));
@@ -125,18 +126,18 @@ internal sealed class PaperTableWriter(PaperConfig config)
         }
 
         var t = (Table)tr.GetObject(tableId, OpenMode.ForRead);
-        var stored = OwnerTags.Read(tr, t, config.OwnerTagKey)?.Extras;
+        var stored = OwnerTag.Read(tr, t, config.OwnerTagKey)?.Extras;
         bool sameShape = stored is not null && stored.SequenceEqual(keys) && t.Rows.Count == model.Rows.Count && t.Columns.Count == model.ColumnCount;
         if (sameShape && MergesMatch(t, model) && TextsMatch(t, model, covered))
         {
-            if (OwnerTags.Matches(tr, t, config.OwnerTagKey, tag)) return PaperChange.Unchanged;
-            t = OwnerTags.OpenForWrite<Table>(tr, tableId);
+            if (OwnerTag.Matches(tr, t, config.OwnerTagKey, tag)) return PaperChange.Unchanged;
+            t = OwnerTag.OpenForWrite<Table>(tr, tableId);
             writes.Add();
-            OwnerTags.Write(tr, t, config.OwnerTagKey, tag);
+            OwnerTag.Write(tr, t, config.OwnerTagKey, tag);
             return PaperChange.Updated;
         }
 
-        t = OwnerTags.OpenForWrite<Table>(tr, tableId);
+        t = OwnerTag.OpenForWrite<Table>(tr, tableId);
         writes.Add();
         if (LayerLocked(tr, t.LayerId))
             problems.Add(new Problem(PaperCodes.TableOnLockedLayer, Severity.Info,
@@ -169,7 +170,7 @@ internal sealed class PaperTableWriter(PaperConfig config)
         SyncMerges(t, model);
         WriteTexts(t, model, covered);
         if (structural) t.GenerateLayout();
-        OwnerTags.Write(tr, t, config.OwnerTagKey, tag);
+        OwnerTag.Write(tr, t, config.OwnerTagKey, tag);
         return PaperChange.Updated;
     }
 

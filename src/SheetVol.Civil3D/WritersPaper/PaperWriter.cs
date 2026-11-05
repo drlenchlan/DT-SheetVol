@@ -22,6 +22,7 @@
 // drawing already realizes the plan (E811).
 
 using Autodesk.AutoCAD.DatabaseServices;
+using SheetVol.Civil3D.Ownership;
 using SheetVol.Core;
 using SheetVol.Core.Output;
 using SheetVol.Core.Tracking;
@@ -154,7 +155,7 @@ public sealed class PaperWriter
             var lay = (Layout)tr.GetObject(e.Value, OpenMode.ForRead);
             allNames.Add(lay.LayoutName);
             if (lay.ModelType) continue;
-            var tag = OwnerTags.Read(tr, lay, key);
+            var tag = OwnerTag.Read(tr, lay, key);
             if (tag is { Role: OwnedRole.Layout } && tag.RunId == run.RunId) tagged.Add((lay.ObjectId, lay.LayoutName, lay.Handle.Value, tag.SegmentId));
         }
 
@@ -209,11 +210,11 @@ public sealed class PaperWriter
 
             var layout = (Layout)tr.GetObject(layoutId, OpenMode.ForRead);
             var layoutTag = new OwnerTag(run.RunId, s.SegmentId, OwnedRole.Layout, "", ContentSignatures.OfTexts([layoutName]), []);
-            if (!OwnerTags.Matches(tr, layout, key, layoutTag))
+            if (!OwnerTag.Matches(tr, layout, key, layoutTag))
             {
-                layout = OwnerTags.OpenForWrite<Layout>(tr, layoutId);
+                layout = OwnerTag.OpenForWrite<Layout>(tr, layoutId);
                 writes.Add();
-                OwnerTags.Write(tr, layout, key, layoutTag);
+                OwnerTag.Write(tr, layout, key, layoutTag);
             }
             var layoutChange = layoutFresh ? PaperChange.Created : renamed.Contains(s.SegmentId) ? PaperChange.Renamed : PaperChange.Unchanged;
             var block = (BlockTableRecord)tr.GetObject(layout.BlockTableRecordId, OpenMode.ForRead);
@@ -250,11 +251,11 @@ public sealed class PaperWriter
                 clipChange = _viewports.ApplyClip(tr, db, vpId, s.View, anchor, vpFresh, run.RunId, writes, sheetProblems, layoutName, out clipId);
                 var vpTag = new OwnerTag(run.RunId, s.SegmentId, OwnedRole.Viewport, "", ContentSignatures.Of(s.View), []);
                 var vpNow = (Viewport)tr.GetObject(vpId, OpenMode.ForRead);
-                if (!OwnerTags.Matches(tr, vpNow, key, vpTag))
+                if (!OwnerTag.Matches(tr, vpNow, key, vpTag))
                 {
-                    var w = OwnerTags.OpenForWrite<Viewport>(tr, vpId);
+                    var w = OwnerTag.OpenForWrite<Viewport>(tr, vpId);
                     writes.Add();
-                    OwnerTags.Write(tr, w, key, vpTag);
+                    OwnerTag.Write(tr, w, key, vpTag);
                     if (vpChange == PaperChange.Unchanged) vpChange = PaperChange.Updated;
                 }
             }
@@ -453,7 +454,7 @@ public sealed class PaperWriter
         {
             if (id.IsErased || !id.ObjectClass.IsDerivedFrom(cls)) continue;
             var e = (T)tr.GetObject(id, OpenMode.ForRead);
-            var tag = OwnerTags.Read(tr, e, _config.OwnerTagKey);
+            var tag = OwnerTag.Read(tr, e, _config.OwnerTagKey);
             if (tag is not null && tag.Role == role && tag.RunId == runId && tag.SegmentId == segmentId) found.Add(e);
         }
         if (found.Count == 0) return ObjectId.Null;
@@ -494,14 +495,14 @@ public sealed class PaperWriter
         {
             var lay = (Layout)tr.GetObject(e.Value, OpenMode.ForRead);
             if (lay.ModelType) continue;
-            if (OwnerTags.Read(tr, lay, ownerTagKey) is { } lt && lt.RunId == runId)
+            if (OwnerTag.Read(tr, lay, ownerTagKey) is { } lt && lt.RunId == runId)
                 list.Add(new OwnedPaperObject(lt.Role, lt.SegmentId, lt.Qualifier, lay.Handle.ToString(), lay.LayoutName, lt.Signature));
             var block = (BlockTableRecord)tr.GetObject(lay.BlockTableRecordId, OpenMode.ForRead);
             foreach (ObjectId id in block)
             {
                 if (id.IsErased) continue;
                 var obj = tr.GetObject(id, OpenMode.ForRead);
-                if (OwnerTags.Read(tr, obj, ownerTagKey) is { } t && t.RunId == runId)
+                if (OwnerTag.Read(tr, obj, ownerTagKey) is { } t && t.RunId == runId)
                     list.Add(new OwnedPaperObject(t.Role, t.SegmentId, t.Qualifier, obj.Handle.ToString(), lay.LayoutName, t.Signature));
             }
         }

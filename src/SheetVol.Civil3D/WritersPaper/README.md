@@ -66,7 +66,8 @@ Xrecord under `ownerTagKey` in the extension dictionary of every layout, viewpor
 polyline, paper table and filled title-block reference. One `DxfCode.Text` per field:
 `SV-OWNER-1`, run GUID, segment GUID, role (C3 `OwnedRole`), qualifier, signature, extras
 (a table's row keys `Kind|analysis|ordinal`, which let E505 grow or shrink it in place).
-A2 tags model-space objects too; the two formats should become one at the A2/A3 merge.
+Since the Wave 2 integration this is the one format for A2's model-space objects too:
+`Civil3D/Ownership/OwnerTag.cs` holds it, and the run GUID is `RunIds.For(run name)`.
 
 ## Measured behaviour this code depends on (2026.2.3 Core Console, 2026-11-05)
 

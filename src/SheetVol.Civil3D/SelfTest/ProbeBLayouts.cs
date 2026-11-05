@@ -371,7 +371,7 @@ public static partial class ProbeBCommands
         P20Counts(db, "after committed creates (one command)");
     });
 
-    [CommandMethod("SVPROBEB_P20C", CommandFlags.Modal)]
+    [CommandMethod("SVPROBEB_P20C", CommandFlags.Modal | CommandFlags.NoUndoMarker)]   // counts only, after the UNDO (S3, E804)
     public static void P20C() => Run("P20C", (doc, db) =>
     {
         var lm = LayoutManager.Current;

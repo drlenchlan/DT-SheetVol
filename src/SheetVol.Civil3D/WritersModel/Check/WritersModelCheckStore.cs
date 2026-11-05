@@ -3,6 +3,7 @@
 // save-as and reopen with ReadDwgFile, E810 objects copied to another drawing.
 
 using Autodesk.AutoCAD.DatabaseServices;
+using SheetVol.Civil3D.Ownership;
 using SheetVol.Civil3D.SelfTest;
 using SheetVol.Core;
 using SheetVol.Core.Output;
@@ -246,7 +247,7 @@ public static partial class WritersModelCheck
         var id = WritersModel.Handles.Resolve(db, o.Handle);
         if (id.IsNull) return false;
         var obj = tr.GetObject(id, OpenMode.ForRead);
-        return OwnerTag.Read(tr, obj, Cfg.OwnerTagKey) is { } tag && tag.Matches(runName, o.Key);
+        return OwnerTag.Read(tr, obj, Cfg.OwnerTagKey) is { } tag && tag.Matches(RunIds.For(runName), o.Key);
     }
 
     private static Xrecord StoreXrecord(Transaction tr, Database db, string runName)
