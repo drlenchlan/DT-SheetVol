@@ -40,7 +40,7 @@ public static partial class ProbeBCommands
 
     /// <summary>Second session, before any activation: every SV-* layout as the document
     /// read it from disk.</summary>
-    [CommandMethod("SVPROBEB_REOPEN", CommandFlags.Modal)]
+    [CommandMethod("SVPROBEB_REOPEN", CommandFlags.Modal | CommandFlags.NoUndoMarker)]   // read-only (S3, E804)
     public static void Reopen() => Run("REOPEN", (doc, db) =>
     {
         Say($"REOPEN document '{db.Filename}' CTAB={Autodesk.AutoCAD.ApplicationServices.Core.Application.GetSystemVariable("CTAB")}");
@@ -55,7 +55,7 @@ public static partial class ProbeBCommands
         tr.Commit();
     });
 
-    [CommandMethod("SVPROBEB_VERIFY", CommandFlags.Modal)]
+    [CommandMethod("SVPROBEB_VERIFY", CommandFlags.Modal | CommandFlags.NoUndoMarker)]   // reads the saved copy in a side database (S3, E804)
     public static void Verify() => Run("VERIFY", (doc, db) =>
     {
         if (_liveSnapshot is null) { Say("VERIFY no live snapshot in this session; run SVPROBEB_SAVE first"); return; }

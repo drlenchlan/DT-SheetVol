@@ -14,7 +14,7 @@ namespace SheetVol.Civil3D.Commands;
 
 public static class HelloCommand
 {
-    [CommandMethod("SVHELLO", CommandFlags.Modal)]
+    [CommandMethod("SVHELLO", CommandFlags.Modal | CommandFlags.NoUndoMarker)]   // read-only (S3: NoUndoMarker on read-only commands, E804)
     public static void Hello()
     {
         var ed = Application.DocumentManager.MdiActiveDocument?.Editor;

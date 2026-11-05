@@ -101,7 +101,7 @@ public static partial class ProbeACommands
 
     /// <summary>P10: CivilApplication.ActiveDocument vs CivilDocument.GetCivilDocument on the
     /// active database, on side databases read with ReadDwgFile, and on a new empty database.</summary>
-    [CommandMethod("SVPROBEA_P10", CommandFlags.Modal)]
+    [CommandMethod("SVPROBEA_P10", CommandFlags.Modal | CommandFlags.NoUndoMarker)]   // reads the active drawing and side databases only (S3, E804)
     public static void P10() => Run("SVPROBEA_P10", (doc, db) =>
     {
         var active = CivilApplication.ActiveDocument;
