@@ -153,6 +153,7 @@ Filled as workers return. Status: TODO / IN PROGRESS / GREEN / MANUAL-OK / BLOCK
 | 2026-11-05 | wp/s3 (S3 probes C) | 24ecd5d | build 0 errors; probeC-events.scr re-run by orchestrator in the s3 worktree, exit 0, 5 s, "0 public event(s)" and "Idle one-shot fired 0 time(s)" reproduced; diff confined to ProbeC*.cs, UI/Probe/, probeC*.scr, api-findings.md §C, dan-probe-steps.md |
 | 2026-11-05 | wp/a1 (A1 adapters) | 8d073ad | build 0 errors; adapters.scr re-run by orchestrator in the a1 worktree, exit 0, 11 s, 85 + 2 PASS, 0 FAIL; Fixture H reconciled at 67,860 ft³ in that run; diff confined to Adapters/ and adapters*.scr |
 | 2026-11-05 | wp/a3 (A3 paper writers) | 1d5068a | build 0 errors (gated on the literal line); writersPaper.scr re-run by orchestrator in the a3 worktree and again on main after the merge, exit 0, 75 PASS, every phase "no FAIL lines"; diff confined to WritersPaper/ and writersPaper*.scr |
+| 2026-11-05 | wp/u2 (U2 dialog) | 43215c9 | build 0 errors (gated); off-screen smoke outside AutoCAD 28/28 per U2, renders kept in docs/ui/smoke/ and read by the orchestrator against 6.14; diff confined to UI/Dialog and UI/Host; no assembly-level CommandClass in SheetVol.UI |
 
 ## Decisions pending Dan (raised by workers, not yet ruled)
 

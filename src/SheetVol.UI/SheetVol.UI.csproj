@@ -35,6 +35,10 @@
       <HintPath>$(AutoCADInstall)\AdWindows.dll</HintPath>
       <Private>false</Private>
     </Reference>
+    <Reference Include="AecBaseMgd">
+      <HintPath>$(AcaInstall)AecBaseMgd.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
     <Reference Include="AeccDbMgd">
       <HintPath>$(C3DInstall)\AeccDbMgd.dll</HintPath>
       <Private>false</Private>
