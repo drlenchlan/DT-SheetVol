@@ -111,8 +111,8 @@ public static class SvCommands
 
     // ============================================================ SVSTATUS
 
-    /// <summary>Clean or stale per run, warnings, coverage flags, orphaned layouts (6.12). No prompts.</summary>
-    [CommandMethod("SVSTATUS", CommandFlags.Modal)]
+    /// <summary>Clean or stale per run, warnings, coverage flags, orphaned layouts (6.12). No prompts. Read-only: NoUndoMarker, so the next U undoes the user's edit, not this (S3, E804).</summary>
+    [CommandMethod("SVSTATUS", CommandFlags.Modal | CommandFlags.NoUndoMarker)]
     public static void Status() => Boundary.Run("SVSTATUS", c =>
     {
         var reports = DrawingRead.Run(c.Doc, c.Engine, (src, store) =>
@@ -142,8 +142,8 @@ public static class SvCommands
 
     // ============================================================ SVEXPORT
 
-    /// <summary>Writes CSV and JSON beside the drawing for one run or all (*). No drawing writes (6.12).</summary>
-    [CommandMethod("SVEXPORT", CommandFlags.Modal)]
+    /// <summary>Writes CSV and JSON beside the drawing for one run or all (*). No drawing writes (6.12): its volume transaction is aborted, so NoUndoMarker (S3, E804).</summary>
+    [CommandMethod("SVEXPORT", CommandFlags.Modal | CommandFlags.NoUndoMarker)]
     public static void Export() => Boundary.Run("SVEXPORT", c =>
     {
         var names = DrawingRead.Run(c.Doc, c.Engine, (_, store) => store.RunNames());
@@ -555,10 +555,16 @@ public static class SvCommands
             var w = c.Engine.Bindings.Writers;
             var store = w.Store(db, tr, c.Engine.Settings);
             var model = w.Model(db, tr, c.Engine.Settings);
-            var paper = w.Paper(db, tr, c.Engine.Settings);
+            using var paper = w.Paper(db, tr, c.Engine.Settings);
             var rec = store.Load(run.Name).Record ?? throw new InvalidOperationException($"Run '{run.Name}' disappeared.");
-            foreach (var o in rec.Owned.Where(o => model.Roles.Contains(o.Key.Role)))
-                if (model.Inspect(o.Key, o.Handle).Exists) { model.Erase(o.Key, o.Handle); erased++; }
+            var cleared = model.Clear(run.Name, rec);
+            if (!cleared.Succeeded)
+            {
+                c.ReportAll(cleared.Problems);
+                c.Say($"SVCLEAR: run '{run.Name}' was not removed; nothing changed.");
+                return;   // the transaction is aborted on dispose
+            }
+            erased = cleared.Counts.Erased;
             if (layoutsToo)
             {
                 var live = paper.Layouts().Select(l => l.Handle).ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -589,7 +595,7 @@ public static class SvCommands
             using var tr = db.TransactionManager.StartTransaction();
             var w = c.Engine.Bindings.Writers;
             var store = w.Store(db, tr, c.Engine.Settings);
-            var paper = w.Paper(db, tr, c.Engine.Settings);
+            using var paper = w.Paper(db, tr, c.Engine.Settings);
             var live = paper.Layouts().Select(l => l.Handle).ToHashSet(StringComparer.OrdinalIgnoreCase);
             foreach (string name in orphans.Select(o => o.Run).Distinct(StringComparer.Ordinal))
             {
@@ -606,8 +612,8 @@ public static class SvCommands
 
     // ============================================================ SVCONFIG
 
-    /// <summary>Shows the effective settings and their source; writes a settings file; reloads (A7).</summary>
-    [CommandMethod("SVCONFIG", CommandFlags.Modal)]
+    /// <summary>Shows the effective settings and their source; writes a settings file; reloads (A7). Never writes the drawing: NoUndoMarker (S3, E804).</summary>
+    [CommandMethod("SVCONFIG", CommandFlags.Modal | CommandFlags.NoUndoMarker)]
     public static void Config() => Boundary.Run("SVCONFIG", c =>
     {
         string kw = c.Keyword("SVCONFIG", ["Show", "Write", "Reload"], "Show");

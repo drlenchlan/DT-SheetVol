@@ -1,14 +1,11 @@
 // A4 work package (HANDOFF.md section 10, Wave 2). Owner: A4.
 //
-// Which adapter and writer implementations the engine uses. Until A1-A3 merge, the
-// product commands are bound to "unwired" factories that refuse with SV-E822: running
-// fakes in a real drawing would write fake numbers, which 6.13 forbids. The orchestrator
-// wires the real factories at integration with one line, for example in an
-// IExtensionApplication.Initialize or a static constructor:
-//
-//     EngineBindings.Current = new EngineBindings(new <A1 factory>(), new <A2+A3 factory>());
-//
-// SVSELFTEST builds its own bindings (fakes, or Current with the Installed keyword).
+// Which adapter and writer implementations the engine uses. Integration/EngineStartup (an
+// IExtensionApplication, Core Console safe) sets Current to the real A1-A3 factories when the
+// assembly loads. Before that, or in a build without it, the commands are bound to
+// "unwired" factories that refuse with SV-E822: running fakes in a real drawing would write
+// fake numbers, which 6.13 forbids. SVSELFTEST builds its own bindings (fakes, or Current
+// with the Installed keyword); its test-only BindFakes keyword swaps Current for a session.
 
 using Autodesk.AutoCAD.DatabaseServices;
 

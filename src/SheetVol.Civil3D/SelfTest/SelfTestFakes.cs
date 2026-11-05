@@ -35,9 +35,12 @@ public interface ISelfTestWorld
 
     /// <summary>T14: extends the straight alignment so it ends at raw station <paramref name="newEndStation"/>.</summary>
     void LengthenAlignment(string alignmentName, double newEndStation);
+
+    /// <summary>T17: a straight alignment from <paramref name="from"/> to <paramref name="to"/>, station 0 at <paramref name="from"/>; nothing when it already exists.</summary>
+    void CreateStraightAlignment(string name, Pt from, Pt to);
 }
 
-/// <summary>The world edits for the installed (real) adapters. Set by the orchestrator at integration; null means T12 and T14 are reported as not run.</summary>
+/// <summary>The world edits for the installed (real) adapters, set by Integration/EngineStartup at load; null means T12, T14 and T17 are reported as not run.</summary>
 public static class SelfTestWorlds
 {
     /// <summary>World edits against the real drawing objects, or null.</summary>
@@ -102,6 +105,11 @@ public sealed class FakeWorld : ISelfTestWorld
         var a = Alignments[alignmentName];
         Alignments[alignmentName] = new FakeLineAlignment(alignmentName, a.StartStation, newEndStation);
     }
+
+    /// <inheritdoc />
+    /// <exception cref="NotSupportedException">The fake world holds only alignments along +X (T17 runs on the installed bindings).</exception>
+    public void CreateStraightAlignment(string name, Pt from, Pt to) =>
+        throw new NotSupportedException("The fake world holds only alignments along +X; T17 runs with SVSELFTEST Installed.");
 }
 
 /// <summary>
@@ -207,53 +215,17 @@ public sealed class IntegratorVolumeSource : IVolumeSource
 // ============================================================================
 
 /// <summary>
-/// Adapters over a <see cref="FakeWorld"/>. Like A1's real adapters, the geometry and volume
-/// sources they return work only while the transaction they were opened in is open: each holds an
-/// object opened in that transaction and throws once AutoCAD has disposed it (A1 AlignmentAdapter
-/// GuardOpen). So the self-test fails on any use of geometry after a commit, as the real thing would.
+/// Adapters over a <see cref="FakeWorld"/>. Like the installed adapters, the geometry and volume
+/// sources they return work only while the transaction they were opened in is open
+/// (<see cref="TransactionLifetime"/>), so the self-test fails on any use of geometry after a
+/// commit, as the real thing does.
 /// </summary>
 public sealed class FakeAdapterFactory(FakeWorld world) : IAdapterFactory
 {
     /// <inheritdoc />
-    public IDrawingSources Open(Database db, Transaction tr, SheetVolSettings settings) => new Sources(world, new TxLife(tr));
+    public IDrawingSources Open(Database db, Transaction tr, SheetVolSettings settings) => new Sources(world, new TransactionLifetime(tr));
 
-    /// <summary>
-    /// The opening transaction's lifetime. MEASURED 2026-11-05: an object wrapper from tr.GetObject is NOT
-    /// disposed when its transaction commits, so IsDisposed on it proves nothing. Over = the transaction
-    /// was disposed, or it was committed (the active-transaction count fell below its depth).
-    /// </summary>
-    private sealed class TxLife(Transaction tr)
-    {
-        private readonly int _depth = tr.TransactionManager.NumberOfActiveTransactions;
-
-        public bool IsOver => tr.IsDisposed || tr.TransactionManager.NumberOfActiveTransactions < _depth;
-    }
-
-    private static void Guard(TxLife anchor, string what)
-    {
-        if (anchor.IsOver)
-            throw new InvalidOperationException($"The fake {what} is used after its transaction ended; open a new adapter inside the current transaction.");
-    }
-
-    private sealed class GuardedAlignment(IAlignmentGeometry a, TxLife anchor) : IAlignmentGeometry
-    {
-        public string Name => a.Name;
-        public double StartStation => a.StartStation;
-        public double EndStation => a.EndStation;
-        public IReadOnlyList<AlignSeg> Segments => a.Segments;
-        public Pt PointAt(double rawStation, double offset) { Guard(anchor, $"alignment '{a.Name}'"); return a.PointAt(rawStation, offset); }
-        public string FormatStation(double rawStation) { Guard(anchor, $"alignment '{a.Name}'"); return a.FormatStation(rawStation); }
-        public bool TryParseStation(string text, out double rawStation, out string? error) => a.TryParseStation(text, out rawStation, out error);
-    }
-
-    private sealed class GuardedVolumes(IVolumeSource v, TxLife anchor) : IVolumeSource
-    {
-        public RawVolume SurfaceTotals { get { Guard(anchor, "volume source"); return v.SurfaceTotals; } }
-        public RawVolume Bounded(IReadOnlyList<Pt> p) { Guard(anchor, "volume source"); return v.Bounded(p); }
-        public double Area2D(IReadOnlyList<Pt> p) { Guard(anchor, "volume source"); return v.Area2D(p); }
-    }
-
-    private sealed class Sources(FakeWorld w, TxLife anchor) : IDrawingSources
+    private sealed class Sources(FakeWorld w, TransactionLifetime anchor) : IDrawingSources
     {
         public Outcome<DrawingUnits> Units() => Outcome<DrawingUnits>.Ok(w.Units);
 
@@ -263,7 +235,7 @@ public sealed class FakeAdapterFactory(FakeWorld world) : IAdapterFactory
 
         public Outcome<AlignmentSource> Alignment(string name, string? storedHandle) =>
             w.Alignments.TryGetValue(name, out var a)
-                ? Outcome<AlignmentSource>.Ok(new AlignmentSource(new GuardedAlignment(a, anchor), w.HandleOf("alignment:" + name), false))
+                ? Outcome<AlignmentSource>.Ok(new AlignmentSource(new LifetimeGuardedAlignment(a, anchor), w.HandleOf("alignment:" + name), false))
                 : Outcome<AlignmentSource>.Fail(new Problem(PipelineCodes.AlignmentMissing, Severity.Error,
                     $"Alignment '{name}' was not found in the drawing; nothing was read or written.", Fix: "Restore the alignment or point the run at another with SVDEFINE."));
 
@@ -280,7 +252,7 @@ public sealed class FakeAdapterFactory(FakeWorld world) : IAdapterFactory
             bool created = !w.VolumeSurfaces.ContainsKey(plan.Name);
             string handle = w.VolumeSurfaces.TryGetValue(plan.Name, out var h) ? h : w.VolumeSurfaces[plan.Name] = w.HandleOf("volume:" + plan.Name);
             return Outcome<OwnedVolumeSurface>.Ok(new OwnedVolumeSurface(plan.Name, handle,
-                new GuardedVolumes(new IntegratorVolumeSource(w.Surfaces[plan.BaseSurface], w.Surfaces[plan.ComparisonSurface]), anchor), created));
+                new LifetimeGuardedVolumes(new IntegratorVolumeSource(w.Surfaces[plan.BaseSurface], w.Surfaces[plan.ComparisonSurface]), anchor, plan.Name), created));
         }
 
         public AnalysisSurfaceState? ReadVolumeSurfaceState(Guid analysisId, OwnedSurfacePlan plan, string? storedHandle) =>
@@ -385,56 +357,137 @@ public sealed class FakeObjectTable(Database db, Transaction tr, string dictiona
     }
 }
 
-/// <summary>Writers and store backed by <see cref="FakeObjectTable"/>; records every call in <see cref="Log"/>.</summary>
+/// <summary>
+/// Writers and store backed by <see cref="FakeObjectTable"/>; records every call in <see cref="Log"/>.
+/// Each writer is a whole-run applier like A2's and A3's: it compares the planned signatures with
+/// what it stored (C3's ChangeSet), then creates, updates and erases only what changed.
+/// </summary>
 public sealed class FakeWriterFactory(TemplateInfo template) : IWriterFactory
 {
+    private static readonly OwnedRole[] ModelRoles = [OwnedRole.Boundary, OwnedRole.MatchMark, OwnedRole.ModelTable, OwnedRole.MasterTable, OwnedRole.ImpactOutline];
+    private static readonly OwnedRole[] PaperRoles = [OwnedRole.Layout, OwnedRole.Viewport, OwnedRole.Clip, OwnedRole.PaperTable, OwnedRole.TitleAttributes];
+
     /// <summary>Every writer call, in order, as "verb role qualifier handle". Rolled-back calls stay listed: compare drawing state, not the log, for atomicity.</summary>
     public List<string> Log { get; } = [];
 
     /// <inheritdoc />
     public IModelWriter Model(Database db, Transaction tr, SheetVolSettings settings) =>
-        new Writer(new FakeObjectTable(db, tr, settings.SelfTest.FakeObjectDictionary), Log, db, tr, template,
-            [OwnedRole.Boundary, OwnedRole.MatchMark, OwnedRole.ModelTable, OwnedRole.MasterTable, OwnedRole.ImpactOutline]);
+        new Writer(new FakeObjectTable(db, tr, settings.SelfTest.FakeObjectDictionary), Log, db, tr, template, settings, ModelRoles);
 
     /// <inheritdoc />
     public IPaperWriter Paper(Database db, Transaction tr, SheetVolSettings settings) =>
-        new Writer(new FakeObjectTable(db, tr, settings.SelfTest.FakeObjectDictionary), Log, db, tr, template,
-            [OwnedRole.Layout, OwnedRole.Viewport, OwnedRole.Clip, OwnedRole.PaperTable, OwnedRole.TitleAttributes]);
+        new Writer(new FakeObjectTable(db, tr, settings.SelfTest.FakeObjectDictionary), Log, db, tr, template, settings, PaperRoles);
 
     /// <inheritdoc />
     public IPersistenceStore Store(Database db, Transaction tr, SheetVolSettings settings) => new FakeStore(db, tr, settings);
 
-    private sealed class Writer(FakeObjectTable table, List<string> log, Database db, Transaction tr, TemplateInfo template, OwnedRole[] roles)
+    private sealed class Writer(FakeObjectTable table, List<string> log, Database db, Transaction tr, TemplateInfo template, SheetVolSettings settings, OwnedRole[] roles)
         : IModelWriter, IPaperWriter
     {
         public IReadOnlySet<OwnedRole> Roles { get; } = roles.ToHashSet();
 
-        public IReadOnlyList<Problem> Preflight(IReadOnlyList<OwnedObject> planned) => [];
-
-        public StoredObject Inspect(OwnedKey key, string? handle)
+        public StoredObject Inspect(string runName, OwnedKey key, string? handle)
         {
             var o = table.Get(handle);
             return new StoredObject(key, handle, o is not null && o.Key == key, o?.Signature);
         }
 
-        public WriteResult Write(OwnedObject planned, string? existingHandle)
+        public IReadOnlyList<Problem> Validate(WriteRequest request) => [];
+
+        public WriterResult Apply(WriteRequest request)
         {
-            string name = planned is LayoutObject l ? l.Name : "";
-            if (existingHandle is null)
+            var problems = new List<Problem>();
+            var mine = request.Output.Objects.Where(o => Roles.Contains(o.Key.Role)).ToList();
+            var payload = mine.ToDictionary(o => o.Key);
+            var stored = (request.Prior?.Owned ?? []).Where(o => Roles.Contains(o.Key.Role)).Select(o => Inspect(request.Run.Name, o.Key, o.Handle)).ToList();
+            var storedByKey = stored.ToDictionary(x => x.Key);
+            var planned = mine.Select(o => new PlannedObject(o.Key, o.Signature, o is ViewportObject { LockView: true })).ToList();
+            var changes = ChangeSetComparer.Compare(planned, stored, "", "");
+            var layoutNames = Layouts().ToDictionary(l => l.Handle, l => l.Name, StringComparer.OrdinalIgnoreCase);
+
+            int created = 0, updated = 0, erased = 0, renamed = 0;
+            var owned = new List<OwnedHandle>();
+            var orphans = new List<OrphanLayout>();
+            var renames = Roles.Contains(OwnedRole.Layout) ? request.Output.Renames : null;
+            bool writes = changes.Writes.Any() || (renames is { } rn && rn.FirstPass.Count + rn.SecondPass.Count > 0);
+
+            // Owned layers that are locked are unlocked for the writes and relocked after them
+            // (6.10, E504); an unchanged regen touches no layer (E811). Frozen layers stay frozen.
+            var relock = writes && Roles.Contains(OwnedRole.Boundary) ? Unlock(OwnedLayers()) : [];
+
+            // Layout renames, first pass to temporary names, then to final names (E307).
+            if (renames is not null)
+                foreach (var step in renames.FirstPass.Concat(renames.SecondPass))
+                {
+                    string handle = request.Output.SegmentLayoutHandles[step.SegmentId];
+                    var o = table.Get(handle) ?? throw new InvalidOperationException($"Fake layout {handle} does not exist.");
+                    table.Update(handle, o.Key, OwnedSignatures.OfLayout(step.To), step.To);
+                    log.Add($"rename Layout {o.Name} -> {step.To} {handle}");
+                    renamed++;
+                }
+
+            foreach (var change in changes.Changes)
             {
-                string h = table.Create(planned.Key, planned.Signature, name);
-                log.Add($"create {planned.Key.Role} {planned.Key.Qualifier} {h}");
-                return new WriteResult(h, true, []);
+                switch (change.Kind)
+                {
+                    case ChangeKind.Unchanged:
+                    case ChangeKind.Kept:
+                        owned.Add(new OwnedHandle(change.Key, change.Handle!));
+                        break;
+                    case ChangeKind.Update when change.Key.Role == OwnedRole.Layout:
+                        owned.Add(new OwnedHandle(change.Key, change.Handle!));   // renamed above
+                        break;
+                    case ChangeKind.Create:
+                    {
+                        var p = payload[change.Key];
+                        string h = table.Create(p.Key, p.Signature, p is LayoutObject l ? l.Name : "");
+                        log.Add($"create {p.Key.Role} {p.Key.Qualifier} {h}");
+                        owned.Add(new OwnedHandle(change.Key, h));
+                        created++;
+                        if (storedByKey.TryGetValue(change.Key, out var was))
+                            problems.Add(new Problem(PipelineCodes.Recreated, Severity.Info,
+                                $"Fake {change.Key.Role} {change.Key.Qualifier} was missing (handle {was.Handle}) and was recreated as {h}.", NullIfEmpty(change.Key.SegmentId)));
+                        break;
+                    }
+                    case ChangeKind.Update:
+                    {
+                        var p = payload[change.Key];
+                        table.Update(change.Handle!, p.Key, p.Signature, p is LayoutObject l ? l.Name : "");
+                        log.Add($"update {p.Key.Role} {p.Key.Qualifier} {change.Handle}");
+                        owned.Add(new OwnedHandle(change.Key, change.Handle!));
+                        updated++;
+                        break;
+                    }
+                    case ChangeKind.Erase:
+                        table.Erase(change.Handle!);
+                        log.Add($"erase {change.Key.Role} {change.Key.Qualifier} {change.Handle}");
+                        erased++;
+                        break;
+                    case ChangeKind.Orphan when change.Key.Role == OwnedRole.Layout && change.Handle is { } lh:
+                        orphans.Add(new OrphanLayout(change.Key.SegmentId, lh, layoutNames.GetValueOrDefault(lh, ""), request.NowUtc));
+                        problems.Add(new Problem(PipelineCodes.Recreated, Severity.Info,
+                            $"Layout '{layoutNames.GetValueOrDefault(lh, lh)}' no longer has a segment; it is kept as an orphan (SVSTATUS lists it, SVPURGE deletes it).", change.Key.SegmentId));
+                        break;
+                }
             }
-            table.Update(existingHandle, planned.Key, planned.Signature, name);
-            log.Add($"update {planned.Key.Role} {planned.Key.Qualifier} {existingHandle}");
-            return new WriteResult(existingHandle, true, []);
+
+            foreach (var id in relock) ((LayerTableRecord)tr.GetObject(id, OpenMode.ForWrite)).IsLocked = true;
+            if (relock.Count > 0)
+                problems.Add(new Problem(PipelineCodes.LayerRelocked, Severity.Info, $"{relock.Count} locked owned layer(s) were unlocked for the update and locked again."));
+            return new WriterResult(true, owned, orphans, new ApplyCounts(created, updated, erased, renamed, orphans.Count, created + updated + erased + renamed), problems);
         }
 
-        public void Erase(OwnedKey key, string handle)
+        public WriterResult Clear(string runName, RunRecord record)
         {
-            table.Erase(handle);
-            log.Add($"erase {key.Role} {key.Qualifier} {handle}");
+            int erased = 0;
+            foreach (var o in record.Owned.Where(o => Roles.Contains(o.Key.Role)))
+            {
+                if (!Inspect(runName, o.Key, o.Handle).Exists) continue;
+                table.Erase(o.Handle);
+                log.Add($"erase {o.Key.Role} {o.Key.Qualifier} {o.Handle}");
+                erased++;
+            }
+            return new WriterResult(true, [], [], new ApplyCounts(0, 0, erased, 0, 0, erased), []);
         }
 
         public Outcome<TemplateInfo> Template() => Outcome<TemplateInfo>.Ok(template);
@@ -452,18 +505,40 @@ public sealed class FakeWriterFactory(TemplateInfo template) : IWriterFactory
             return list;
         }
 
-        public void RenameLayout(string handle, string newName)
-        {
-            var o = table.Get(handle) ?? throw new InvalidOperationException($"Fake layout {handle} does not exist.");
-            table.Update(handle, o.Key, OwnedSignatures.OfLayout(newName), newName);
-            log.Add($"rename Layout {o.Name} -> {newName} {handle}");
-        }
-
         public void DeleteLayout(string handle)
         {
             table.Erase(handle);
             log.Add($"delete Layout {handle}");
         }
+
+        public void Dispose()
+        {
+        }
+
+        private IEnumerable<string> OwnedLayers()
+        {
+            var mw = settings.ModelWriters;
+            return [mw.BoundaryLayer, mw.MatchMarks.Layer, mw.ImpactOutlineLayer,
+                settings.Report.SegmentTable.Style.Layer, settings.Report.MasterTable.Style.Layer, settings.Report.Hcfcd.Style.Layer];
+        }
+
+        private List<ObjectId> Unlock(IEnumerable<string> names)
+        {
+            var layers = (LayerTable)tr.GetObject(db.LayerTableId, OpenMode.ForRead);
+            var unlocked = new List<ObjectId>();
+            foreach (string name in names.Where(n => !string.IsNullOrWhiteSpace(n)).Distinct(StringComparer.OrdinalIgnoreCase))
+            {
+                if (!layers.Has(name)) continue;
+                var layer = (LayerTableRecord)tr.GetObject(layers[name], OpenMode.ForRead);
+                if (!layer.IsLocked) continue;
+                layer.UpgradeOpen();
+                layer.IsLocked = false;
+                unlocked.Add(layer.ObjectId);
+            }
+            return unlocked;
+        }
+
+        private static Guid? NullIfEmpty(Guid id) => id == Guid.Empty ? null : id;
     }
 }
 
@@ -545,7 +620,13 @@ public sealed class FakeStore(Database db, Transaction tr, SheetVolSettings sett
 // Decorators: work over fake or real factories
 // ============================================================================
 
-/// <summary>T20: the model writer refuses the Nth boundary it is asked to create, as if segment N failed mid-apply.</summary>
+/// <summary>
+/// T20: the model writer fails at the Nth object of <c>role</c> it creates, as if segment N failed
+/// mid-apply. The wrapped writer (fake or installed) really runs first and writes everything it
+/// writes; the failure is reported afterwards, so the abort that follows has real writes to roll
+/// back. The paper writer never runs (it is last in step 5), so nothing it creates and erases is
+/// rolled back here (A1's create-erase-abort crash).
+/// </summary>
 public sealed class FailOnWriteFactory(IWriterFactory inner, OwnedRole role, int failOnCreateNumber) : IWriterFactory
 {
     /// <inheritdoc />
@@ -557,18 +638,19 @@ public sealed class FailOnWriteFactory(IWriterFactory inner, OwnedRole role, int
 
     private sealed class Failing(IModelWriter w, OwnedRole role, int n) : IModelWriter
     {
-        private int _creates;
         public IReadOnlySet<OwnedRole> Roles => w.Roles;
-        public IReadOnlyList<Problem> Preflight(IReadOnlyList<OwnedObject> planned) => w.Preflight(planned);
-        public StoredObject Inspect(OwnedKey key, string? handle) => w.Inspect(key, handle);
-        public void Erase(OwnedKey key, string handle) => w.Erase(key, handle);
+        public StoredObject Inspect(string runName, OwnedKey key, string? handle) => w.Inspect(runName, key, handle);
+        public WriterResult Clear(string runName, RunRecord record) => w.Clear(runName, record);
 
-        public WriteResult Write(OwnedObject planned, string? existingHandle)
+        public WriterResult Apply(WriteRequest request)
         {
-            if (planned.Key.Role == role && existingHandle is null && ++_creates == n)
-                return new WriteResult("", false, [new Problem(PipelineCodes.SelfTestFailed, Severity.Error,
-                    $"Forced failure writing {role} number {n} (T20).", planned.Key.SegmentId)]);
-            return w.Write(planned, existingHandle);
+            var result = w.Apply(request);
+            if (!result.Succeeded) return result;
+            var before = (request.Prior?.Owned ?? []).Where(o => o.Key.Role == role).Select(o => o.Handle).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var created = result.Owned.Where(o => o.Key.Role == role && !before.Contains(o.Handle)).ToList();
+            if (created.Count < n) return result;
+            return WriterResult.Refused([new Problem(PipelineCodes.SelfTestFailed, Severity.Error,
+                $"Forced failure after writing {role} number {n} of {created.Count} created in this apply (T20).", created[n - 1].Key.SegmentId)]);
         }
     }
 }
