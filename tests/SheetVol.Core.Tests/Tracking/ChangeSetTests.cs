@@ -1,4 +1,4 @@
-using SheetVol.Core.Tests.Views;
+using SheetVol.Core.Tests.Fakes;
 using SheetVol.Core.Tracking;
 using SheetVol.Core.Views;
 
@@ -124,7 +124,7 @@ public class ChangeSetTests
     public void T19_regen_twice_changes_no_handles_and_no_geometry()
     {
         // T2's breaks on alignment S with offsets (-100, +100), FitStandard views, clip to boundary.
-        var alignment = C3Alignment.Straight(new Pt(0, 0), 0, 2000);
+        var alignment = FakeAlignments.S();
         double[] breaks = [0, 500, 1300, 1800, 2000];
         var options = new ViewOptions(ScaleMode: ScaleMode.FitStandard, StandardScales: [20, 30, 40, 50, 60, 100], ViewOverlap: 20);
         Guid[] ids = Enumerable.Range(1, 4).Select(i => Guid.Parse($"7e7e7e7e-0000-0000-0000-00000000000{i}")).ToArray();
@@ -132,7 +132,7 @@ public class ChangeSetTests
         List<PlannedObject> Plan()
         {
             var calc = new ViewCalculator(new ViewMathConfig());
-            var src = new C3BandSource(alignment, -100, 100);
+            var src = new FakeBandSource(alignment, -100, 100);
             var planned = new List<PlannedObject>();
             for (int i = 0; i < 4; i++)
             {

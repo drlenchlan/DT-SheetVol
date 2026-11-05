@@ -28,7 +28,7 @@ public sealed record FingerprintInput(
 /// <param name="Format">Canonical format version; a different format always compares stale.</param>
 /// <param name="Value">Hash over the format and every component hash. Equal values mean nothing changed.</param>
 /// <param name="Alignment">Alignment geometry and displayed stationing.</param>
-/// <param name="Definition">Run definition parts that shape outputs: break spec, offsets, analyses, views, overrides, preset, area unit, OHWM.</param>
+/// <param name="Definition">Run definition parts that shape outputs: break spec, offsets, analyses, views, draw options, per-segment overrides (offsets included), preset, area unit, OHWM.</param>
 /// <param name="Frames">View frame stations and corners.</param>
 /// <param name="Surfaces">Owned volume surface out-of-date state and last totals, per analysis.</param>
 /// <param name="ManualSegments">Manual segment polyline geometry.</param>
@@ -55,8 +55,12 @@ public sealed record FingerprintComparison(bool IsStale, IReadOnlyList<string> C
 /// </summary>
 public static class Fingerprints
 {
-    /// <summary>Canonical format version. Changing the canonical text requires a new value.</summary>
-    public const string FormatVersion = "SVFP1";
+    /// <summary>
+    /// Canonical format version. Changing the canonical text requires a new value. SVFP2
+    /// (contract rev 2): the definition signature adds <see cref="RunDefinition.Draw"/> and the
+    /// per-segment offset overrides, so every SVFP1 fingerprint compares stale once.
+    /// </summary>
+    public const string FormatVersion = "SVFP2";
 
     /// <summary>Component name: canonical format version.</summary>
     public const string FormatComponent = "format";
@@ -143,7 +147,12 @@ public static class Fingerprints
         return w.Sha256Hex();
     }
 
-    /// <summary>Signature of the run definition parts that shape outputs (see <see cref="RunFingerprint.Definition"/>).</summary>
+    /// <summary>
+    /// Signature of the run definition parts that shape outputs (see <see cref="RunFingerprint.Definition"/>).
+    /// <see cref="RunDefinition.Draw"/> null and all on are the same run (the dialog treats them
+    /// alike), so null is written as all on. Overrides are written in GUID text order with every
+    /// <see cref="SegmentOverrides"/> field; an absent optional value is a false flag.
+    /// </summary>
     public static string DefinitionSignature(RunDefinition run)
     {
         ArgumentNullException.ThrowIfNull(run);
@@ -170,14 +179,19 @@ public static class Fingerprints
         w.Add(v.StandardScales is not null).Add(scales.Count);
         foreach (double s in scales) w.Add(s);
 
+        DrawOptions draw = run.Draw ?? new DrawOptions();
+        w.Section("draw").Add(draw.BoundaryPolylines).Add(draw.TableAtEachSegment).Add(draw.SummaryTable);
+
         // Dictionaries have no defined order: sort by key text so insertion order never matters.
         var overrides = (run.Overrides ?? new Dictionary<Guid, SegmentOverrides>())
             .OrderBy(kv => kv.Key.ToString("D"), StringComparer.Ordinal).ToArray();
         w.Section("overrides").Add(overrides.Length);
         foreach (var (id, o) in overrides)
         {
-            w.Add(id).Add(o.TargetLayout).Add(o.LockView).Add(o.ModelUnitsPerPaperUnit is not null);
-            if (o.ModelUnitsPerPaperUnit is double scale) w.Add(scale);
+            w.Add(id).Add(o.TargetLayout).Add(o.LockView);
+            AddOptional(w, o.ModelUnitsPerPaperUnit);
+            AddOptional(w, o.OffsetLeft);
+            AddOptional(w, o.OffsetRight);
         }
 
         w.Section("ohwm").Add(run.Ohwm is not null);
@@ -189,6 +203,13 @@ public static class Fingerprints
             foreach (var (id, elevation) in bySegment) w.Add(id).Add(elevation);
         }
         return w.Sha256Hex();
+    }
+
+    /// <summary>Writes an optional double as a presence flag, then the value when present.</summary>
+    private static void AddOptional(CanonicalWriter w, double? value)
+    {
+        w.Add(value is not null);
+        if (value is double v) w.Add(v);
     }
 
     /// <summary>Signature of the view frames: per frame its key, raw stations and four corners (6.11).</summary>

@@ -1,5 +1,5 @@
 using System.Globalization;
-using SheetVol.Core.Tests.Views;
+using SheetVol.Core.Tests.Fakes;
 using SheetVol.Core.Tracking;
 
 namespace SheetVol.Core.Tests.Tracking;
@@ -20,7 +20,7 @@ public class FingerprintTests
         new Dictionary<Guid, SegmentOverrides>(),
         new ViewOptions());
 
-    private static C3Alignment AlignmentS(double length = 2000) => C3Alignment.Straight(new Pt(0, 0), 0, length);
+    private static FakeAlignment AlignmentS(double length = 2000) => FakeAlignments.Straight(new Pt(0, 0), 0, length);
 
     private static FrameGeom Frame(double start = 0, double end = 500, double rotation = 0)
         => new("F1", "VF - 1", start, end, new Pt(250, 0), rotation, 600, 250, null, null);
@@ -60,6 +60,8 @@ public class FingerprintTests
         { "comparison surface", Fingerprints.DefinitionComponent },
         { "view scale", Fingerprints.DefinitionComponent },
         { "segment override", Fingerprints.DefinitionComponent },
+        { "segment offset override", Fingerprints.DefinitionComponent },
+        { "draw options", Fingerprints.DefinitionComponent },
         { "frame station", Fingerprints.FramesComponent },
         { "frame rotation", Fingerprints.FramesComponent },
         { "surface out of date", Fingerprints.SurfacesComponent },
@@ -75,8 +77,8 @@ public class FingerprintTests
         FingerprintInput changed = change switch
         {
             "alignment lengthened" => Input(alignment: AlignmentS(2500)),
-            "alignment moved 0.001" => Input(alignment: C3Alignment.Straight(new Pt(0.001, 0), 0, 2000)),
-            "arc radius" => Input(alignment: C3Alignment.Build("S", new Pt(0, 0), 0, 0, new C3Piece(1000), new C3Piece(1000, 3000.0001))),
+            "alignment moved 0.001" => Input(alignment: FakeAlignments.Straight(new Pt(0.001, 0), 0, 2000)),
+            "arc radius" => Input(alignment: new AlignmentBuilder(new Pt(0, 0), 0).Line(1000).ArcByLength(3000.0001, 1000, clockwise: false).Build("S")),
             "break spec" => Input(run with { BreakSpec = "START, 5+00, 13+00, 18+00, END" }),
             "offset left" => Input(run with { OffsetLeft = -99 }),
             "offset right" => Input(run with { OffsetRight = 101 }),
@@ -84,6 +86,8 @@ public class FingerprintTests
             "comparison surface" => Input(run with { Analyses = [run.Analyses[0] with { ComparisonSurface = "FG_B" }] }),
             "view scale" => Input(run with { Views = run.Views with { ModelUnitsPerPaperUnit = 40 } }),
             "segment override" => Input(run with { Overrides = new Dictionary<Guid, SegmentOverrides> { [SegA] = new(LockView: true) } }),
+            "segment offset override" => Input(run with { Overrides = new Dictionary<Guid, SegmentOverrides> { [SegA] = new(OffsetRight: 250) } }),
+            "draw options" => Input(run with { Draw = new DrawOptions(BoundaryPolylines: false) }),
             "frame station" => Input(frame: Frame(end: 500.01)),
             "frame rotation" => Input(frame: Frame(rotation: 0.0001)),
             "surface out of date" => Input(surface: new AnalysisSurfaceState(AnalysisId, true, new RawVolume(200, 200))),
@@ -93,7 +97,7 @@ public class FingerprintTests
         };
 
         FingerprintInput baseline = change == "arc radius"
-            ? Input(alignment: C3Alignment.Build("S", new Pt(0, 0), 0, 0, new C3Piece(1000), new C3Piece(1000, 3000)))
+            ? Input(alignment: new AlignmentBuilder(new Pt(0, 0), 0).Line(1000).ArcByLength(3000, 1000, clockwise: false).Build("S"))
             : Input();
 
         RunFingerprint before = Fingerprints.Compute(baseline);
@@ -198,19 +202,96 @@ public class FingerprintTests
         Assert.Equal("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad", CanonicalWriter.Hash("abc"));
     }
 
+    // ---- Contract rev 2: draw options and per-segment offset overrides --------------------
+
+    private static RunDefinition WithOverride(SegmentOverrides o) =>
+        BaseRun() with { Overrides = new Dictionary<Guid, SegmentOverrides> { [SegA] = o } };
+
+    [Fact]
+    public void Draw_null_and_all_on_give_the_same_fingerprint()
+    {
+        Assert.Equal(
+            Fingerprints.Compute(Input(BaseRun() with { Draw = null })).Value,
+            Fingerprints.Compute(Input(BaseRun() with { Draw = new DrawOptions(true, true, true) })).Value);
+    }
+
+    [Theory]
+    [InlineData(false, true, true)]
+    [InlineData(true, false, true)]
+    [InlineData(true, true, false)]
+    public void Changing_only_Draw_changes_the_definition_only(bool boundaryPolylines, bool tableAtEachSegment, bool summaryTable)
+    {
+        RunFingerprint before = Fingerprints.Compute(Input());
+        RunFingerprint after = Fingerprints.Compute(Input(BaseRun() with { Draw = new DrawOptions(boundaryPolylines, tableAtEachSegment, summaryTable) }));
+        Assert.NotEqual(before.Value, after.Value);
+        Assert.Equal([Fingerprints.DefinitionComponent], Fingerprints.Compare(before, after).ChangedComponents);
+    }
+
+    [Theory]
+    [InlineData("target layout")]
+    [InlineData("scale")]
+    [InlineData("lock view")]
+    [InlineData("offset left")]
+    [InlineData("offset right")]
+    [InlineData("offset left cleared")]
+    [InlineData("offset right zero")]
+    public void Changing_only_one_override_field_changes_the_definition_only(string field)
+    {
+        var baseline = new SegmentOverrides("L1", 40, false, -80, null);
+        SegmentOverrides changed = field switch
+        {
+            "target layout" => baseline with { TargetLayout = "L2" },
+            "scale" => baseline with { ModelUnitsPerPaperUnit = 30 },
+            "lock view" => baseline with { LockView = true },
+            "offset left" => baseline with { OffsetLeft = -81 },
+            "offset right" => baseline with { OffsetRight = 120 },
+            "offset left cleared" => baseline with { OffsetLeft = null },
+            "offset right zero" => baseline with { OffsetRight = 0 },   // 0 is a value, not "not set"
+            _ => throw new ArgumentOutOfRangeException(nameof(field)),
+        };
+        RunFingerprint before = Fingerprints.Compute(Input(WithOverride(baseline)));
+        RunFingerprint after = Fingerprints.Compute(Input(WithOverride(changed)));
+        Assert.NotEqual(before.Value, after.Value);
+        Assert.Equal([Fingerprints.DefinitionComponent], Fingerprints.Compare(before, after).ChangedComponents);
+    }
+
+    [Fact]
+    public void Same_draw_options_and_offset_overrides_give_the_same_fingerprint_in_any_order()
+    {
+        RunDefinition Run(bool reversed)
+        {
+            var a = new KeyValuePair<Guid, SegmentOverrides>(SegA, new SegmentOverrides("L1", OffsetLeft: -60));
+            var b = new KeyValuePair<Guid, SegmentOverrides>(SegB, new SegmentOverrides(OffsetRight: 120));
+            return BaseRun() with
+            {
+                Draw = new DrawOptions(SummaryTable: false),
+                Overrides = new Dictionary<Guid, SegmentOverrides>(reversed ? new[] { b, a } : new[] { a, b }),
+            };
+        }
+        RunFingerprint first = Fingerprints.Compute(Input(Run(reversed: false)));
+        Assert.Equal(first, Fingerprints.Compute(Input(Run(reversed: false))));
+        Assert.Equal(first, Fingerprints.Compute(Input(Run(reversed: true))));
+        Assert.False(Fingerprints.Compare(first, Fingerprints.Compute(Input(Run(reversed: true)))).IsStale);
+    }
+
     [Fact]
     public void Fingerprint_is_stable_across_runs()
     {
-        // Pinned value for the baseline input. If the canonical text changes on purpose,
-        // bump Fingerprints.FormatVersion and re-pin; an accidental change fails here.
+        // Pinned values. If the canonical text changes on purpose, bump Fingerprints.FormatVersion
+        // and re-pin; an accidental change fails here. Re-pinned at SVFP2 (contract rev 2): the
+        // definition signature gained Draw and the per-segment offset overrides.
+        Assert.Equal(Fingerprints.FormatVersion, Fingerprints.Compute(Input()).Format);
         Assert.Equal(PinnedBaselineValue, Fingerprints.Compute(Input()).Value);
 
-        // Contract rev 2 moved the RunDefinition.SchemaVersion default from 1 to 2, which is an
-        // input to the definition signature. The canonical text did not change: the schema 1
-        // input still gives the value pinned before rev 2, so FormatVersion stays.
+        // RunDefinition.SchemaVersion is hashed: the schema 1 input has its own value.
         Assert.Equal(PinnedSchema1Value, Fingerprints.Compute(Input(BaseRun() with { SchemaVersion = 1 })).Value);
+
+        // The rev 2 fields themselves: one draw option off and an override with every field set.
+        RunDefinition rev2 = WithOverride(new SegmentOverrides("L1", 40, true, -80, 120)) with { Draw = new DrawOptions(TableAtEachSegment: false) };
+        Assert.Equal(PinnedRev2FieldsValue, Fingerprints.Compute(Input(rev2)).Value);
     }
 
-    private const string PinnedBaselineValue = "ff6dc11d5039faf3dc326b22ce691fa7b2d05ed87fd624ed008538264b36de1f";
-    private const string PinnedSchema1Value = "386de603b99a304a690de3c21f91d6e040deaafa123625409612436c67d211f8";
+    private const string PinnedBaselineValue = "d88e07a9142e7e275f3a54c0376cf73e6cd7264565f4da1c7312dcb8d701c0b0";
+    private const string PinnedSchema1Value = "aaa864bdfbc0c5413cb1ebdf82b379eebd586d3c23c5580daa38fb6e71c1cd49";
+    private const string PinnedRev2FieldsValue = "ec30d072e77d8d87b546e310e6130179950373f9459c4082a5679b97abd01c10";
 }

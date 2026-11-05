@@ -4,7 +4,7 @@ using SheetVol.Core.Geometry;
 namespace SheetVol.Core.Planning;
 
 /// <summary>One planned station segment.</summary>
-/// <param name="Def">The segment; raw stations, the run's offsets.</param>
+/// <param name="Def">The segment; raw stations; offsets from its <see cref="SegmentOverrides"/> where set, else the run's.</param>
 /// <param name="InRange">False when the segment reaches outside the alignment (E305, E211); such a segment gets no boundary.</param>
 /// <param name="Carried">True when the GUID came from <see cref="RunDefinition.KnownSegments"/>.</param>
 public sealed record PlannedSegment(SegmentDef Def, bool InRange, bool Carried);
@@ -30,6 +30,11 @@ public sealed record SegmentPlan(IReadOnlyList<PlannedSegment> Segments, IReadOn
 /// Intervals inside the alignment claim identities before intervals that reach outside it,
 /// so a valid survivor of a shortened alignment keeps its GUID ahead of an invalid stub.
 /// Labels are derived from position and are never identity.
+/// <para>Overrides are looked up by the GUID a segment ends up with after identity carry-over,
+/// so a per-segment offset or layout follows the segment through a split (the left part
+/// keeps it) and a merge (the merged segment keeps the left one's; the right one's lapses with
+/// its GUID). Each side's offset is the override's where set, else the run's, so an override
+/// may set one side only. The offsets are checked by <see cref="Planner"/> (E210).</para>
 /// <para><see cref="RunDefinition.KnownSegments"/> must be the last applied plan (the one the
 /// last successful regen wrote). A plan with errors is never applied, so persisting it would
 /// overwrite the identities a later, corrected plan needs.</para>
@@ -105,9 +110,11 @@ public static class SegmentPlanner
             var (a, b) = intervals[j];
             Guid id = ids[j] ?? Guid.NewGuid();
             var from = ids[j] is { } g ? known.First(k => k.Id == g) : null;
-            string? layout = run.Overrides.TryGetValue(id, out var ov) && ov.TargetLayout is not null ? ov.TargetLayout : from?.TargetLayout;
+            run.Overrides.TryGetValue(id, out var ov);
+            string? layout = ov?.TargetLayout ?? from?.TargetLayout;
+            double offsetLeft = ov?.OffsetLeft ?? run.OffsetLeft, offsetRight = ov?.OffsetRight ?? run.OffsetRight;
             string label = string.Format(CultureInfo.InvariantCulture, options.SegmentLabelFormat, j + 1);
-            var def = new SegmentDef(id, label, a, b, run.OffsetLeft, run.OffsetRight, null, layout);
+            var def = new SegmentDef(id, label, a, b, offsetLeft, offsetRight, null, layout);
             bool inRange = inRanges[j];
             segments.Add(new PlannedSegment(def, inRange, from is not null));
             if (inRange) continue;

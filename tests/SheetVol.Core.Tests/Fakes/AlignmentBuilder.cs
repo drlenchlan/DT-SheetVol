@@ -31,14 +31,22 @@ public sealed class AlignmentBuilder
         return this;
     }
 
-    /// <summary>Appends a circular arc turning <paramref name="delta"/> radians (positive) in the given sense.</summary>
-    public AlignmentBuilder Arc(double radius, double delta, bool clockwise)
+    /// <summary>Appends a circular arc turning <paramref name="delta"/> radians (positive) in the given sense; its length is radius times delta.</summary>
+    public AlignmentBuilder Arc(double radius, double delta, bool clockwise) => AddArc(radius, delta, radius * delta, clockwise);
+
+    /// <summary>
+    /// Appends a circular arc given by its length along the alignment: stations advance by
+    /// exactly <paramref name="length"/> and the arc turns length / radius radians.
+    /// </summary>
+    public AlignmentBuilder ArcByLength(double radius, double length, bool clockwise) => AddArc(radius, length / radius, length, clockwise);
+
+    private AlignmentBuilder AddArc(double radius, double delta, double length, bool clockwise)
     {
         double sgn = clockwise ? -1 : 1;
         var center = new Pt(_p.X - sgn * radius * Math.Sin(_dir), _p.Y + sgn * radius * Math.Cos(_dir));
         double phi0 = Math.Atan2(_p.Y - center.Y, _p.X - center.X), phi1 = phi0 + sgn * delta;
         var end = new Pt(center.X + radius * Math.Cos(phi1), center.Y + radius * Math.Sin(phi1));
-        double endDir = _dir + sgn * delta, length = radius * delta;
+        double endDir = _dir + sgn * delta;
         _segs.Add(new AlignSeg(SegKind.Arc, _sta, _sta + length, _p, end, _dir, endDir, center, radius, clockwise));
         Advance(end, endDir, length);
         return this;
