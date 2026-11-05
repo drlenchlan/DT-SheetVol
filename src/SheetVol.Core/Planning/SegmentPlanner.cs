@@ -27,7 +27,12 @@ public sealed record SegmentPlan(IReadOnlyList<PlannedSegment> Segments, IReadOn
 /// so a moved break or a moved START keeps the segment.</item>
 /// <item>Anything else is new. Unclaimed known segments are reported as dropped.</item>
 /// </list>
+/// Intervals inside the alignment claim identities before intervals that reach outside it,
+/// so a valid survivor of a shortened alignment keeps its GUID ahead of an invalid stub.
 /// Labels are derived from position and are never identity.
+/// <para><see cref="RunDefinition.KnownSegments"/> must be the last applied plan (the one the
+/// last successful regen wrote). A plan with errors is never applied, so persisting it would
+/// overwrite the identities a later, corrected plan needs.</para>
 /// </summary>
 public static class SegmentPlanner
 {
@@ -42,7 +47,15 @@ public static class SegmentPlanner
         double start = alignment.StartStation, end = alignment.EndStation;
         var problems = new List<Problem>();
 
-        var known = run.KnownSegments.Where(k => k.SourceKey is null).OrderBy(k => k.StartStation).ToList();
+        var known = new List<SegmentDef>();
+        var seen = new HashSet<Guid>();
+        foreach (var k in run.KnownSegments.Where(k => k.SourceKey is null).OrderBy(k => k.StartStation))
+        {
+            if (seen.Add(k.Id)) { known.Add(k); continue; }
+            problems.Add(new Problem(ProblemCodes.E300, Severity.Warning,
+                $"The stored segment list repeats segment ID {k.Id} ({Fmt.Station(alignment, k.StartStation, tol)} to {Fmt.Station(alignment, k.EndStation, tol)}); the later copy was ignored.",
+                k.Id, "Regenerate the run so the stored segment list is rewritten."));
+        }
         var knownBreaks = known.SelectMany(k => new[] { k.StartStation, k.EndStation }).ToList();
         bool WasKnown(double s) => knownBreaks.Any(k => Math.Abs(k - s) <= tol);
 
@@ -73,7 +86,18 @@ public static class SegmentPlanner
                 $"Stations {Fmt.Station(alignment, r.Start, tol)} to {Fmt.Station(alignment, r.End, tol)} are skipped: no segment, viewport or table. Their volume falls under OUTSIDE LIMITS.",
                 null, null));
 
-        var (ids, claimed) = AssignIdentity(intervals, known, tol);
+        // Identity: intervals on the alignment first, then those reaching outside it, over what is left.
+        bool[] inRanges = intervals.Select(iv => iv.A >= start - tol && iv.B <= end + tol).ToArray();
+        var ids = new Guid?[intervals.Count];
+        var claimed = new bool[known.Count];
+        foreach (bool phase in new[] { true, false })
+        {
+            var pick = Enumerable.Range(0, intervals.Count).Where(j => inRanges[j] == phase).ToArray();
+            var open = Enumerable.Range(0, known.Count).Where(i => !claimed[i]).ToArray();
+            var (phaseIds, phaseClaimed) = AssignIdentity(pick.Select(j => intervals[j]).ToArray(), open.Select(i => known[i]).ToArray(), tol);
+            for (int p = 0; p < pick.Length; p++) ids[pick[p]] = phaseIds[p];
+            for (int q = 0; q < open.Length; q++) claimed[open[q]] |= phaseClaimed[q];
+        }
 
         var segments = new List<PlannedSegment>(intervals.Count);
         for (int j = 0; j < intervals.Count; j++)
@@ -84,7 +108,7 @@ public static class SegmentPlanner
             string? layout = run.Overrides.TryGetValue(id, out var ov) && ov.TargetLayout is not null ? ov.TargetLayout : from?.TargetLayout;
             string label = string.Format(CultureInfo.InvariantCulture, options.SegmentLabelFormat, j + 1);
             var def = new SegmentDef(id, label, a, b, run.OffsetLeft, run.OffsetRight, null, layout);
-            bool inRange = a >= start - tol && b <= end + tol;
+            bool inRange = inRanges[j];
             segments.Add(new PlannedSegment(def, inRange, from is not null));
             if (inRange) continue;
 
@@ -108,7 +132,7 @@ public static class SegmentPlanner
                     $"Former segment {k.Label} ({range}) lay beyond the alignment, which now runs {Fmt.Range(alignment, tol)}. It no longer exists: its boundary and tables are removed and its layout becomes an orphan.",
                     k.Id, "Extend the alignment to bring it back, or run SVPURGE later to delete the orphaned layout.")
                 : new Problem(ProblemCodes.E308, Severity.Info,
-                    $"Former segment {k.Label} ({range}) no longer exists after the break edit: its boundary and tables are removed and its layout becomes an orphan.",
+                    $"Former segment {k.Label} ({range}) has no successor in this plan: its boundary and tables are removed and its layout becomes an orphan.",
                     k.Id, null));
         }
 

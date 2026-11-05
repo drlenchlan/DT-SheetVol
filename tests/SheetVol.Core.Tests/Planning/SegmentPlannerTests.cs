@@ -148,6 +148,52 @@ public class SegmentPlannerTests
     }
 
     [Fact]
+    public void E211_trimmed_start_gives_the_valid_survivor_the_GUID_before_the_invalid_stub()
+    {
+        var known = Plan(Straight(2000), "START, 2+00, 5+00, END").Segments;   // [0,200] [200,500] [500,2000]
+        var trimmed = new AlignmentBuilder(new Pt(300, 0), 0, 300).Line(1700).Build("S");   // same stationing, first 300 removed
+        var plan = Plan(trimmed, "START, 2+00, 5+00, END", known);
+
+        Assert.Equal([(200.0, 300.0), (300.0, 500.0), (500.0, 2000.0)], plan.Segments.Select(x => (x.StartStation, x.EndStation)));
+        Assert.Equal(known[1].Id, plan.Segments[1].Id);                        // 3+00..5+00 is what is left of 2+00..5+00
+        Assert.Equal(known[2].Id, plan.Segments[2].Id);
+        Assert.DoesNotContain(plan.Segments[0].Id, known.Select(k => k.Id));   // the stub before the start is new
+        Assert.Single(plan.Problems, x => x.Code == ProblemCodes.E211 && x.SegmentId == plan.Segments[0].Id && x.Severity == Severity.Error);
+        Assert.Equal([known[0].Id], plan.DroppedSegmentIds);
+    }
+
+    [Fact]
+    public void Repeated_known_ID_is_reported_and_used_once()
+    {
+        var s = FakeAlignments.S();
+        var known = Plan(s, "START, 10+00, END").Segments;
+        var corrupt = new[] { known[0], known[1] with { Id = known[0].Id } };
+        var plan = Plan(s, "START, 10+00, END", corrupt);
+        Assert.Single(plan.Problems, x => x.Code == ProblemCodes.E300 && x.Severity == Severity.Warning && x.Message.Contains("repeats"));
+        Assert.Equal(2, plan.Segments.Select(x => x.Id).Distinct().Count());
+        Assert.Equal(known[0].Id, plan.Segments[0].Id);
+        Assert.True(plan.IsValid);
+    }
+
+    [Theory]
+    [InlineData("S-{1}")]
+    [InlineData("S-{0")]
+    public void Malformed_label_format_fails_when_the_planner_is_built(string format)
+    {
+        var ex = Assert.Throws<ArgumentException>(() => new Planner(Feet with { SegmentLabelFormat = format }));
+        Assert.Contains("SegmentLabelFormat", ex.Message);
+    }
+
+    [Fact]
+    public void Out_of_range_settings_fail_when_the_planner_is_built()
+    {
+        Assert.Throws<ArgumentException>(() => new Planner(Feet with { Geometry = Feet.Geometry with { MidOrdinate = 0 } }));
+        Assert.Throws<ArgumentException>(() => new Planner(Feet with { Geometry = Feet.Geometry with { MitreLimitDeg = 180 } }));
+        Assert.Throws<ArgumentException>(() => new Planner(Feet with { MinSegmentLength = -1 }));
+        Assert.Throws<ArgumentException>(() => new Planner(Feet with { MaxBreaks = 1 }));
+    }
+
+    [Fact]
     public void T14_lengthened_alignment_extends_the_END_segment()
     {
         var known = Plan(Straight(2000), "START, 5+00, 13+00, 18+00, END").Segments;

@@ -52,12 +52,17 @@ public class PartitionTests
         Assert.Null(BoundaryValidator.Check(band.Tessellated, requireCounterClockwise: true, minDistinctVertices: 4));
         Assert.True(plan.PartitionCheckApplicable);
 
+        // Segments and band share one vertex array, so this sum holds by construction; it guards
+        // the ring indexing. The closed-form checks below are the independent ones.
         double bandArea = Polygon.SignedArea(band.Tessellated);
         double sum = plan.Boundaries.Sum(b => Polygon.SignedArea(b.Tessellated));
         Assert.InRange(Math.Abs(sum - bandArea) / bandArea, 0, 1e-9);
 
-        // Each segment against the closed-form band area, within the tessellation tolerance.
         double tol = Feet.Geometry.MidOrdinate;
+        double bandExact = Analytic.BandArea(a, band.StartStation, band.EndStation, oL, oR);
+        Assert.Equal(bandExact, bandArea, tol * Analytic.Perimeter(band.Tessellated) + 1e-6);
+
+        // Each segment against the closed-form band area, within the tessellation tolerance.
         foreach (var (seg, b) in plan.Segments.Zip(plan.Boundaries))
         {
             double exact = Analytic.BandArea(a, seg.StartStation, seg.EndStation, oL, oR);

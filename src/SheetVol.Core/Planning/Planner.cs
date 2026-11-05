@@ -12,9 +12,32 @@ public sealed class Planner
 {
     /// <summary>Creates a planner.</summary>
     /// <param name="options">Settings; use <see cref="PlanningOptions.ForUnitScale"/> with the drawing's units.</param>
+    /// <exception cref="ArgumentException">A setting is out of range or the label format does not format; the settings file is wrong, so fail before planning.</exception>
     public Planner(PlanningOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(options.Geometry);
+        var g = options.Geometry;
+        if (!(g.MidOrdinate > 0) || !double.IsFinite(g.MidOrdinate))
+            throw new ArgumentException($"MidOrdinate must be a positive length; it is {g.MidOrdinate}.", nameof(options));
+        if (!(g.StationTolerance > 0) || !double.IsFinite(g.StationTolerance))
+            throw new ArgumentException($"StationTolerance must be a positive length; it is {g.StationTolerance}.", nameof(options));
+        if (!(g.MitreLimitDeg > 0 && g.MitreLimitDeg < 180))
+            throw new ArgumentException($"MitreLimitDeg must lie between 0 and 180; it is {g.MitreLimitDeg}.", nameof(options));
+        if (!(g.OverlapAreaTolerance >= 0) || !double.IsFinite(g.OverlapAreaTolerance))
+            throw new ArgumentException($"OverlapAreaTolerance must be zero or a positive area; it is {g.OverlapAreaTolerance}.", nameof(options));
+        if (!(options.MinSegmentLength >= 0) || !double.IsFinite(options.MinSegmentLength))
+            throw new ArgumentException($"MinSegmentLength must be zero or a positive length; it is {options.MinSegmentLength}.", nameof(options));
+        if (options.MaxBreaks < 2)
+            throw new ArgumentException($"MaxBreaks must be at least 2; it is {options.MaxBreaks}.", nameof(options));
+        try
+        {
+            _ = string.Format(System.Globalization.CultureInfo.InvariantCulture, options.SegmentLabelFormat, 1);
+        }
+        catch (Exception ex) when (ex is FormatException or ArgumentNullException)
+        {
+            throw new ArgumentException($"SegmentLabelFormat '{options.SegmentLabelFormat}' is not a valid format with one argument ({{0}} is the segment number).", nameof(options), ex);
+        }
         Options = options;
     }
 

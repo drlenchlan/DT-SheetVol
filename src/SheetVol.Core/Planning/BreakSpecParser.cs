@@ -84,7 +84,7 @@ public static partial class BreakSpecParser
             if (text.Length == 0) continue;
             var token = ParseEntry(e + 1, text, alignment, options, problems);
             if (token is null) continue;
-            if (!Expand(token, options, raws, tokens.Count, problems, pendingRemainders)) continue;
+            if (!Expand(token, options, raws, tokens.Count, problems, pendingRemainders)) break;   // break limit reached; reported once
             tokens.Add(token);
             if (token.Kind == BreakTokenKind.Skip) skips.Add(new StationRange(token.From, token.To));
         }
@@ -200,6 +200,16 @@ public static partial class BreakSpecParser
         List<(BreakToken, double, double, bool)> remainders)
     {
         double tol = opt.Geometry.StationTolerance;
+        // The limit is on the whole specification; arithmetic in double so a huge count cannot overflow.
+        double added = t.Kind switch
+        {
+            BreakTokenKind.Single => 1,
+            BreakTokenKind.Skip => 2,
+            BreakTokenKind.Divide => (double)t.Count + 1,
+            _ => (t.To - t.From) / t.Interval + 2,
+        };
+        if (raws.Count + added > opt.MaxBreaks) return TooMany(t, opt, problems);
+
         switch (t.Kind)
         {
             case BreakTokenKind.Single:
@@ -212,14 +222,11 @@ public static partial class BreakSpecParser
                 return true;
 
             case BreakTokenKind.Divide:
-                if (t.Count + 1 > opt.MaxBreaks) return TooMany(t, opt, problems);
                 for (int i = 0; i <= t.Count; i++)
                     raws.Add(new Raw(i == t.Count ? t.To : t.From + (t.To - t.From) * i / t.Count, index, false));
                 return true;
 
             case BreakTokenKind.Every:
-                double span = t.To - t.From;
-                if (span / t.Interval + 2 > opt.MaxBreaks) return TooMany(t, opt, problems);
                 var generated = new List<double>();
                 for (int k = 0; ; k++)
                 {
@@ -244,8 +251,8 @@ public static partial class BreakSpecParser
     private static bool TooMany(BreakToken t, PlanningOptions opt, List<Problem> problems)
     {
         problems.Add(Err(ProblemCodes.E300,
-            $"Entry {t.Position} ('{t.Text}') would create more than {opt.MaxBreaks.ToString(CultureInfo.InvariantCulture)} breaks.",
-            "Use a longer interval or fewer parts."));
+            $"Entry {t.Position} ('{t.Text}') takes the break list past {opt.MaxBreaks.ToString(CultureInfo.InvariantCulture)} breaks; it and any later entries were not read.",
+            "Use longer intervals or fewer parts, or split the alignment into several runs."));
         return false;
     }
 

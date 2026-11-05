@@ -173,6 +173,27 @@ public class BreakSpecParserTests
     }
 
     [Fact]
+    public void A_huge_part_count_is_rejected_without_overflow()
+    {
+        var p = Parse("START..END/2147483647");
+        var e = Assert.Single(p.Problems);
+        Assert.Equal(ProblemCodes.E300, e.Code);
+        Assert.Empty(p.Breaks);
+    }
+
+    [Fact]
+    public void The_break_limit_applies_to_the_whole_specification()
+    {
+        // Each entry alone makes 51 breaks, under 100; the second entry takes the list past it.
+        var opts = Feet with { MaxBreaks = 100 };
+        var p = Parse("0..500@10, 500..1000@10, 1000..1500@10, 1500..2000@10", null, opts);
+        var e = Assert.Single(p.Problems);
+        Assert.Equal(ProblemCodes.E300, e.Code);
+        Assert.Contains("Entry 2", e.Message);
+        Assert.True(p.Breaks.Count <= 100);
+    }
+
+    [Fact]
     public void Breaks_snap_to_alignment_geometry_points()
     {
         var c = FakeAlignments.C();

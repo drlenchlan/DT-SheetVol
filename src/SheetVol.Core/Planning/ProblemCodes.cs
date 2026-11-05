@@ -26,8 +26,10 @@ public static class ProblemCodes
     /// <summary>Two station-segment boundaries overlap.</summary>
     public const string E215 = "SV-E215";
     /// <summary>
-    /// Break specification does not parse, or the run produces no segment. This is not a
-    /// section 7 row; it was added by work package C1 and is reported to the orchestrator.
+    /// Planning input that cannot be used as given: the break specification does not parse or
+    /// exceeds the break limit, the run produces no segment, the driver is not planned here,
+    /// or the stored segment list repeats an ID. This is not a section 7 row; it was added by
+    /// work package C1 and is reported to the orchestrator.
     /// </summary>
     public const string E300 = "SV-E300";
     /// <summary>A range left a short remainder (kept or merged).</summary>

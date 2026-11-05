@@ -172,6 +172,33 @@ public class BoundaryBuilderTests
         Assert.Equal(exact, Polygon.Area(b.Tessellated), mid * Analytic.Perimeter(b.Tessellated));
     }
 
+    [Theory]
+    [InlineData(-50, 150)]    // larger offset radius on the left: 350 against 150
+    [InlineData(20, 120)]     // band on the right only: larger radius 280 is on the offset nearer the alignment
+    [InlineData(-200, -20)]   // band on the left only: larger radius 500
+    public void Arc_subdivision_meets_the_mid_ordinate_on_the_larger_offset_radius(double oL, double oR)
+    {
+        var c = FakeAlignments.C();
+        double mid = Feet.Geometry.MidOrdinate;
+        var plan = Plan(c, $"START, {R(FakeAlignments.C_PT)}", oL, oR);
+        var b = Assert.Single(plan.Boundaries);
+        var st = plan.Stations;
+        int n = st.Count;
+        double worstOuter = 0;
+        double rLeft = 300 - oL, rRight = 300 - oR;                          // clockwise arc: offset radius R - o
+        bool leftIsOuter = rLeft > rRight;
+        for (int i = 0; i + 1 < n; i++)
+        {
+            if (st[i] < 300 || st[i + 1] > FakeAlignments.C_PT) continue;
+            double sm = 0.5 * (st[i] + st[i + 1]);
+            double gr = ChordGap(b.Tessellated[i], b.Tessellated[i + 1], c.PointAt(sm, oR));
+            double gl = ChordGap(b.Tessellated[2 * n - 1 - i], b.Tessellated[2 * n - 2 - i], c.PointAt(sm, oL));
+            Assert.True(gr <= mid && gl <= mid, $"chord gap {gr} / {gl} at {st[i]}");
+            worstOuter = Math.Max(worstOuter, leftIsOuter ? gl : gr);
+        }
+        Assert.True(worstOuter > mid / 4, $"outer chord gap {worstOuter}: subdivision is finer than the tolerance asks");
+    }
+
     private static double ChordGap(Pt a, Pt b, Pt p)
     {
         double dx = b.X - a.X, dy = b.Y - a.Y;
