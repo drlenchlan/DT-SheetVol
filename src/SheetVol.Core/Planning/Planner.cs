@@ -1,0 +1,188 @@
+using SheetVol.Core.Geometry;
+
+namespace SheetVol.Core.Planning;
+
+/// <summary>
+/// Planning and boundary checks for one run (HANDOFF.md 6.3, 6.4, 6.10 step 2): parse the
+/// break list, plan station segments with identity carried over, build and validate
+/// boundaries, check manual polylines, detect overlaps, and build the whole-band pieces.
+/// Pure: no volumes, no writes. Construct with options from the drawing's unit scale.
+/// </summary>
+public sealed class Planner
+{
+    /// <summary>Creates a planner.</summary>
+    /// <param name="options">Settings; use <see cref="PlanningOptions.ForUnitScale"/> with the drawing's units.</param>
+    public Planner(PlanningOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        Options = options;
+    }
+
+    /// <summary>The settings this planner uses.</summary>
+    public PlanningOptions Options { get; }
+
+    /// <summary>
+    /// <see cref="ISheetVolSession.Validate"/> in Core: planning and boundary checks only.
+    /// </summary>
+    /// <param name="run">The run definition.</param>
+    /// <param name="alignment">The run's alignment.</param>
+    /// <param name="manualOutlines">Polyline geometry per manual segment GUID, read by the adapter. A manual segment missing here is reported as erased (E311).</param>
+    public ValidationResult Validate(RunDefinition run, IAlignmentGeometry alignment, IReadOnlyDictionary<Guid, ManualOutline>? manualOutlines = null) =>
+        Plan(run, alignment, manualOutlines).ToValidationResult();
+
+    /// <summary>Plans the run and returns everything the regen pipeline needs.</summary>
+    /// <param name="run">The run definition.</param>
+    /// <param name="alignment">The run's alignment.</param>
+    /// <param name="manualOutlines">Polyline geometry per manual segment GUID; see <see cref="Validate"/>.</param>
+    public PlanResult Plan(RunDefinition run, IAlignmentGeometry alignment, IReadOnlyDictionary<Guid, ManualOutline>? manualOutlines = null)
+    {
+        ArgumentNullException.ThrowIfNull(run);
+        ArgumentNullException.ThrowIfNull(alignment);
+        var g = Options.Geometry;
+        double tol = g.StationTolerance;
+        var runProblems = new List<Problem>();
+        var segmentProblems = new List<Problem>();
+
+        bool offsetsOk = CheckOffsets(run, runProblems);
+
+        var planned = new List<PlannedSegment>();
+        IReadOnlyList<Guid> dropped = [];
+        bool manualOnly = run.ManualSegments.Count > 0 && string.IsNullOrWhiteSpace(run.BreakSpec);
+        if (run.Driver != SegmentDriver.Stations)
+        {
+            runProblems.Add(new Problem(ProblemCodes.E300, Severity.Error,
+                $"Run '{run.Name}' uses the {run.Driver} driver. Core planning reads break lists only (Stations driver); view frame stations are not planned here yet.",
+                null, "Switch the run to the Stations driver, or wait for the view frame driver."));
+        }
+        else if (!manualOnly)
+        {
+            var parsed = BreakSpecParser.Parse(run.BreakSpec, alignment, Options);
+            runProblems.AddRange(parsed.Problems);
+            var plan = SegmentPlanner.Plan(parsed, run, alignment, Options);
+            planned.AddRange(plan.Segments);
+            dropped = plan.Dropped;
+            foreach (var p in plan.Problems)
+                (p.SegmentId is null || p.Severity != Severity.Error ? runProblems : segmentProblems).Add(p);
+            if (planned.Count == 0 && parsed.Breaks.Count > 0)
+                runProblems.Add(new Problem(ProblemCodes.E300, Severity.Error,
+                    "The break list produces no segment.", null, "Give at least two breaks with a stretch between them that is not skipped."));
+        }
+
+        var boundaries = new List<Boundary>();
+        IReadOnlyList<BandPiece> band = [];
+        IReadOnlyList<double> stations = [];
+        if (offsetsOk)
+        {
+            var inRange = planned.Where(p => p.InRange).Select(p => p.Def).ToList();
+            var built = BoundaryBuilder.Build(alignment, inRange, run.OffsetLeft, run.OffsetRight, g);
+            boundaries.AddRange(built.Boundaries);
+            band = built.Band;
+            stations = built.Stations;
+            foreach (var p in built.Problems) (p.SegmentId is null ? runProblems : segmentProblems).Add(p);
+        }
+
+        foreach (var m in run.ManualSegments)
+        {
+            var outline = manualOutlines is not null && manualOutlines.TryGetValue(m.Id, out var o) ? o : null;
+            var b = ManualBoundary(m, outline, g, segmentProblems);
+            if (b is not null) boundaries.Add(b);
+        }
+
+        var overlaps = new List<Overlap>();
+        try
+        {
+            overlaps.AddRange(OverlapDetector.Find(boundaries, g.OverlapAreaTolerance));
+        }
+        catch (InvalidOperationException ex)
+        {
+            runProblems.Add(new Problem(ProblemCodes.E215, Severity.Error,
+                $"The overlap check could not run: {ex.Message}", null, "Report this with the drawing; a validated boundary should always triangulate."));
+        }
+
+        var labels = planned.ToDictionary(p => p.Def.Id, p => p.Def.Label);
+        foreach (var m in run.ManualSegments) labels.TryAdd(m.Id, m.Label);
+        var manualIds = run.ManualSegments.Select(m => m.Id).ToHashSet();
+        bool stationOverlap = false;
+        foreach (var ov in overlaps)
+        {
+            bool manual = manualIds.Contains(ov.First) || manualIds.Contains(ov.Second);
+            stationOverlap |= !manual;
+            string a = Describe(ov.First, manualIds, labels), b = Describe(ov.Second, manualIds, labels);
+            runProblems.Add(new Problem(manual ? ProblemCodes.E312 : ProblemCodes.E215, Severity.Warning,
+                $"{a} and {b} overlap by {Fmt.Num(ov.Area)} square units; that ground is counted in both."
+                + (manual ? string.Empty : " The partition check is skipped for this run."),
+                ov.First,
+                manual ? "Redraw the manual polyline so it does not cover station segments, or accept the double count."
+                       : "Move breaks or reduce offsets so the boundaries do not overlap, or accept the overlap; the master table carries a footnote."));
+        }
+
+        string? skipReason = stationOverlap
+            ? "Station segment boundaries overlap (E215), so the sum of segments cannot equal the band; the partition check is skipped."
+            : band.Count == 0 ? "No valid station segment, so there is no band to check." : null;
+
+        var segOrder = planned.Select((p, i) => (p.Def.Id, i)).ToDictionary(t => t.Id, t => t.i);
+        var problems = runProblems
+            .Concat(segmentProblems.OrderBy(p => p.SegmentId is { } id && segOrder.TryGetValue(id, out int i) ? i : int.MaxValue))
+            .ToList();
+
+        return new PlanResult(
+            planned.Select(p => p.Def).ToList(),
+            boundaries,
+            band,
+            overlaps,
+            dropped,
+            stations,
+            skipReason is null,
+            skipReason,
+            problems);
+    }
+
+    private static string Describe(Guid id, HashSet<Guid> manual, Dictionary<Guid, string> labels) =>
+        (manual.Contains(id) ? "Manual segment " : "Segment ") + (labels.TryGetValue(id, out var l) ? l : id.ToString());
+
+    private bool CheckOffsets(RunDefinition run, List<Problem> problems)
+    {
+        double l = run.OffsetLeft, r = run.OffsetRight;
+        if (double.IsFinite(l) && double.IsFinite(r) && r - l > Options.Geometry.StationTolerance) return true;
+        problems.Add(new Problem(ProblemCodes.E210, Severity.Error,
+            !double.IsFinite(l) || !double.IsFinite(r)
+                ? "The offsets are not numbers."
+                : $"The left offset ({Fmt.Num(l)}) must be less than the right offset ({Fmt.Num(r)}); offsets are signed, negative to the left. The band has no width.",
+            null, "Give a negative or smaller left offset and a larger right offset, for example -100 and 100."));
+        return false;
+    }
+
+    private static Boundary? ManualBoundary(ManualSegmentDef def, ManualOutline? outline, GeometryOptions g, List<Problem> problems)
+    {
+        string name = $"Manual segment '{def.Label}' (polyline {def.PolylineHandle})";
+        Problem Fail(string what, string fix) => new(ProblemCodes.E311, Severity.Error, $"{name}: {what}. No volume is computed on it.", def.Id, fix);
+
+        if (outline is null || outline.Vertices is null || outline.Vertices.Count == 0)
+        {
+            problems.Add(Fail("the polyline was not found; it may have been erased", "Redraw the polyline and attach it to the segment again, or remove the manual segment."));
+            return null;
+        }
+
+        var verts = outline.Vertices.ToList();
+        bool closed = outline.Closed;
+        if (verts.Count > 1 && verts[0].Point == verts[^1].Point)
+        {
+            verts.RemoveAt(verts.Count - 1);
+            closed = true;
+        }
+        if (!closed)
+        {
+            problems.Add(Fail("the polyline is open", "Close the polyline (PEDIT, Close) so it encloses an area."));
+            return null;
+        }
+
+        var ring = Polygon.TessellateBulges(verts, closed: true, g.MidOrdinate);
+        string? reason = BoundaryValidator.Check(ring, requireCounterClockwise: false, minDistinctVertices: 3);
+        if (reason is not null)
+        {
+            problems.Add(Fail(reason, "Redraw the polyline as a simple closed shape that does not cross itself."));
+            return null;
+        }
+        return new Boundary(def.Id, verts, ring);
+    }
+}
