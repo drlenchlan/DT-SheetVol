@@ -54,57 +54,32 @@ public static class MatchMarkPlanner
 }
 
 /// <summary>
-/// Outlines of the impacted area below OHWM (6.15) from the integrator's station intervals.
-/// The frozen <see cref="ImpactResult"/> carries the stations that have cut below OHWM, not the
-/// plan polygon of the impacted pieces, so each outline is the segment's band between the
-/// interval's stations (C1's boundary builder, true arcs kept), drawn across the full offset width.
+/// The impact outline (6.15, rev 3 D13): the rings of <see cref="ImpactResult.Outlines"/>, the true
+/// plan outline of the area counted in <see cref="ImpactResult.ImpactedArea"/> (C5's edge
+/// cancellation over its step-5 pieces), drawn as-is. Nothing is approximated here: the pre-rev-3
+/// full-width station band is gone, and an impact result with no rings draws nothing, so the
+/// writer erases any outline that segment still owns (E308).
 /// </summary>
 public static class ImpactOutlines
 {
     /// <summary>
-    /// Outlines for one segment from the union of every material's intervals, clamped to the
-    /// segment, touching intervals merged. Builder problems come back as warnings and skip the
-    /// outline; they never fail the run.
+    /// One spec per ring of every impact result of <paramref name="segmentId"/>, keyed by
+    /// (segment, analysis, ring index), in the order given. Results for another segment are
+    /// ignored. The points are passed through unchanged (bulge 0); closure is checked by the
+    /// writer (SV-E541), never repaired.
     /// </summary>
-    public static (IReadOnlyList<ImpactOutlineSpec> Outlines, IReadOnlyList<Problem> Problems) Build(
-        IAlignmentGeometry alignment, SegmentDef segment, IEnumerable<ImpactResult> impacts, GeometryOptions options)
+    /// <param name="segmentId">The station segment.</param>
+    /// <param name="impacts">Each analysis's impact result for the segment, with the analysis id (an <see cref="ImpactResult"/> names its material, not its analysis).</param>
+    public static IReadOnlyList<ImpactOutlineSpec> Build(Guid segmentId, IEnumerable<(Guid AnalysisId, ImpactResult Impact)> impacts)
     {
-        double tol = options.StationTolerance;
-        var intervals = impacts.Where(i => i.SegmentId == segment.Id).SelectMany(i => i.Intervals)
-            .Select(iv => (From: Math.Max(Math.Min(iv.From, iv.To), segment.StartStation), To: Math.Min(Math.Max(iv.From, iv.To), segment.EndStation)))
-            .Where(iv => iv.To - iv.From > tol)
-            .OrderBy(iv => iv.From).ToList();
-        var merged = new List<(double From, double To)>();
-        foreach (var iv in intervals)
-        {
-            if (merged.Count > 0 && iv.From <= merged[^1].To + tol) merged[^1] = (merged[^1].From, Math.Max(merged[^1].To, iv.To));
-            else merged.Add(iv);
-        }
-        if (merged.Count == 0) return ([], []);
-
-        var defs = merged.Select((iv, k) => new SegmentDef(Deterministic(segment.Id, k), segment.Label, iv.From, iv.To, segment.OffsetLeft, segment.OffsetRight)).ToList();
-        var built = BoundaryBuilder.Build(alignment, defs, segment.OffsetLeft, segment.OffsetRight, options);
-        var problems = built.Problems.Select(p => p with
-        {
-            Severity = p.Severity == Severity.Error ? Severity.Warning : p.Severity,
-            SegmentId = segment.Id,
-            Message = "Impacted-area outline not drawn: " + p.Message,
-        }).ToList();
         var specs = new List<ImpactOutlineSpec>();
-        for (int k = 0; k < defs.Count; k++)
+        foreach (var (analysisId, impact) in impacts)
         {
-            var b = built.Boundaries.FirstOrDefault(x => x.SegmentId == defs[k].Id);
-            if (b is not null) specs.Add(new ImpactOutlineSpec(segment.Id, specs.Count, b.Drawn));
+            if (impact.SegmentId != segmentId) continue;
+            for (int ring = 0; ring < impact.Outlines.Count; ring++)
+                specs.Add(new ImpactOutlineSpec(segmentId, analysisId, ring, impact.Outlines[ring].Select(p => new PolyVertex(p, 0)).ToList()));
         }
-        return (specs, problems);
-    }
-
-    private static Guid Deterministic(Guid segment, int k)
-    {
-        var bytes = segment.ToByteArray();
-        bytes[15] ^= (byte)(k + 1);
-        bytes[14] ^= (byte)((k + 1) >> 8);
-        return new Guid(bytes);
+        return specs;
     }
 }
 

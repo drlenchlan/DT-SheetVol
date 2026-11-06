@@ -15,7 +15,7 @@ public static class CsvExport
     /// <summary>Column keys in file order. Headers default to the key; <see cref="ExportConfig.CsvHeaders"/> renames them.</summary>
     public static IReadOnlyList<string> ColumnKeys { get; } =
     [
-        "schema_version", "row_kind", "run", "analysis_id", "analysis", "base_surface", "comparison_surface",
+        "schema_version", "row_kind", "run", "analysis_id", "analysis", "source", "volume_surface", "base_surface", "comparison_surface",
         "cut_factor", "fill_factor", "segment_id", "segment_label", "start_station", "end_station",
         "start_station_text", "end_station_text", "raw_cut", "raw_fill", "cut", "fill", "net", "volume_unit",
         "area2d_raw", "area2d", "area_unit", "coverage", "coverage_flag", "status",
@@ -45,6 +45,7 @@ public static class CsvExport
             {
                 ["schema_version"] = Num(doc.SchemaVersion), ["row_kind"] = kind, ["run"] = doc.RunName,
                 ["analysis_id"] = a.Id.ToString("D"), ["analysis"] = a.Name,
+                ["source"] = a.Source, ["volume_surface"] = a.VolumeSurface,
                 ["base_surface"] = a.BaseSurface, ["comparison_surface"] = a.ComparisonSurface,
                 ["cut_factor"] = Num(a.CutFactor), ["fill_factor"] = Num(a.FillFactor), ["volume_unit"] = doc.VolumeUnit,
             };
