@@ -501,6 +501,34 @@ public class DialogBehaviourTests
     }
 
     [Fact]
+    public async Task D10_D18_E827_segment_without_an_impact_shows_zeros_NA_and_the_coverage_flag_never_blank()
+    {
+        // Segment 2 is the SV-E827 case: the surface has no triangles in its window, so no impact
+        // result and coverage 0 %. The fake's cut and fill are canned; only the impact cells and the flag matter.
+        var session = new FakeSheetVolSession
+        {
+            ImpactFactory = (i, s) => i == 1 ? null : new ImpactResult(s.Id, "SEDIMENT", 500, 16_000, 26_000, [], 0, 0, false),
+        };
+        session.CoverageBySegment[1] = 0;
+        var run = Fixture.T2Run() with { Preset = ReportPreset.HcfcdSegment, AreaUnit = AreaUnit.Acres, Ohwm = new OhwmSpec(100, new Dictionary<Guid, double>()) };
+        var (_, _, vm) = Fixture.Open(run, session);
+
+        await vm.RegenerateCommand.ExecuteAsync();
+
+        var row = vm.Grid.Rows[1];
+        Assert.True(row.HasValues);
+        Assert.Equal("0", row.ImpactedLengthText);
+        Assert.Equal("0.00", row.ImpactedAreaText);
+        Assert.Equal("0", row.CutVolumeText);
+        Assert.Equal(DialogText.NotAvailable, row.AverageText);
+        Assert.Equal("0%", row.CoverageText);
+        Assert.True(row.CoverageIsLow);
+        string[] texts = [row.ImpactedLengthText, row.ImpactedAreaText, row.CutVolumeText, row.AverageText, row.CoverageText, row.CutText, row.FillText, row.Area2DText];
+        Assert.All(texts, t => { Assert.NotEqual(DialogText.NoValue, t); Assert.DoesNotContain("NaN", t); });
+        Assert.Equal("963", vm.Grid.Rows[0].CutVolumeText);     // the other segments are unchanged
+    }
+
+    [Fact]
     public async Task Hcfcd_per_segment_OHWM_override_is_set_from_the_row_and_removed_when_blank()
     {
         var session = new FakeSheetVolSession

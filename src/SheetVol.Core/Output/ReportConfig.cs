@@ -185,10 +185,13 @@ public sealed record HcfcdConfig
     public string TemplatePath { get; init; } = "Templates/hcfcd-segment-table.json";
 
     /// <summary>
-    /// When true the analysis cut factor applies to the HCFCD cut volume and average, as it does
-    /// to every other reported volume. ASSUMED default true; regulatory in-place volume may want false.
+    /// False (the default, D7): HCFCD rows 6–9 and the average report the in-place (bank),
+    /// unfactored cut, as a Section 404 permit and the HCFCD segment table do; shrink/swell
+    /// factors are an earthwork-balance adjustment, not an impact quantity. True applies the
+    /// analysis cut factor to the HCFCD cut volume and average, as to every other reported
+    /// volume. To be confirmed against Dan's HCFCD sample table when it arrives.
     /// </summary>
-    public bool ImpactVolumesUseCutFactor { get; init; } = true;
+    public bool ImpactVolumesUseCutFactor { get; init; } = false;
 
     /// <summary>Style, layer and text height.</summary>
     public TableStyleSettings Style { get; init; } = new();

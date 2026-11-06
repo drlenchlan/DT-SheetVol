@@ -662,7 +662,10 @@ public sealed class DialogViewModel : ObservableObject, IGridOwner, IDisposable
         if (Math.Abs(result.StartStation - segment.StartStation) > tolerance
             || Math.Abs(result.EndStation - segment.EndStation) > tolerance) return null;
         if (_regenRun is not null && !RunComparison.VolumeInputsEqual(_regenRun, _run, id, segment.Id)) return null;
-        if (_run.Preset == ReportPreset.HcfcdSegment && result.Impact is null) return null;
+        // D10/D18: an HCFCD station segment without an impact is SV-E827 (the surface has no triangles
+        // in its window); its values still apply and the row shows zero impact. Manual segments have none.
+        if (_run.Preset == ReportPreset.HcfcdSegment && result.Impact is null
+            && !(_regenRun?.Preset == ReportPreset.HcfcdSegment && double.IsFinite(segment.StartStation))) return null;
         return result;
     }
 

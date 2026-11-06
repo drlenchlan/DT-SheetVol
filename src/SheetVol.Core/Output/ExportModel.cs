@@ -55,8 +55,10 @@ public sealed record ExportInterval(double From, double To);
 
 /// <summary>
 /// Impact quantities below OHWM for one segment and material (6.15). Raw fields are drawing
-/// units; the others are in the run's units. Cut volume and average take the cut factor when
-/// <see cref="HcfcdConfig.ImpactVolumesUseCutFactor"/> is on; the QA fields are unit-converted only.
+/// units; the others are in the run's units. Cut volume and average (CSV and JSON
+/// <c>impact_cut_volume</c>, <c>impact_average</c>) are the in-place (bank), UNFACTORED cut
+/// when <see cref="HcfcdConfig.ImpactVolumesUseCutFactor"/> is off, the default (D7); they take
+/// the cut factor only when it is on. The QA fields are unit-converted only.
 /// </summary>
 /// <param name="Material">Material (analysis) name.</param>
 /// <param name="ImpactedLengthRaw">Drawing length units.</param>
@@ -64,7 +66,7 @@ public sealed record ExportInterval(double From, double To);
 /// <param name="ImpactedAreaRaw">Square drawing units.</param>
 /// <param name="ImpactedArea">In the run's area unit, unrounded.</param>
 /// <param name="CutVolumeRaw">Cubic drawing units, unadjusted.</param>
-/// <param name="CutVolume">Run volume unit.</param>
+/// <param name="CutVolume">Run volume unit; unfactored unless <see cref="HcfcdConfig.ImpactVolumesUseCutFactor"/> is on.</param>
 /// <param name="Average">Cut volume ÷ impacted length from unrounded values (E1019); null when the length is 0.</param>
 /// <param name="Intervals">Raw station intervals with cut below OHWM (E1005, E1006).</param>
 /// <param name="CutAboveOhwmRaw">QA: cut where existing ground is above OHWM, cubic drawing units (E1003).</param>
@@ -102,7 +104,7 @@ public sealed record ExportImpact(
 /// <param name="Coverage">Area2D ÷ boundary area, 0..1.</param>
 /// <param name="CoverageFlag">True when coverage is flagged (E405, E419).</param>
 /// <param name="Status">Segment status.</param>
-/// <param name="Impact">HcfcdSegment preset only.</param>
+/// <param name="Impact">HcfcdSegment preset only; zeros with a null average for a station segment with no impact result (SV-E827, D10).</param>
 public sealed record ExportRow(
     Guid SegmentId, string Label, double StartStation, double EndStation, string? StartStationText, string? EndStationText,
     Guid AnalysisId, string Analysis,
@@ -181,7 +183,10 @@ public static class ExportBuilder
             foreach (var r in a.Rows)
             {
                 ExportImpact? impact = null;
-                if (r.Impact is { } i)
+                // D10/D18: an HCFCD station segment with no impact result (SV-E827) exports zero impact, never blank.
+                var source = r.Impact ?? (run.Preset == ReportPreset.HcfcdSegment && double.IsFinite(r.StartStation)
+                    ? new ImpactResult(r.SegmentId, def.Name, 0, 0, 0, [], 0, 0, false) : null);
+                if (source is { } i)
                 {
                     bool finite = new[] { i.ImpactedLength, i.ImpactedArea, i.CutVolume, i.CutAboveOhwm, i.FillBelowOhwm }.All(double.IsFinite)
                                   && i.Intervals.All(iv => double.IsFinite(iv.From) && double.IsFinite(iv.To));

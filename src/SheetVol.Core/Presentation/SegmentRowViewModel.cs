@@ -273,6 +273,17 @@ public sealed class SegmentRowViewModel : ObservableObject
                 : DialogText.NotAvailable;
             ImpactNote = impact.TouchesSearchLimit ? DialogText.WidenOffsets : null;
         }
+        else if (values is not null && ctx.Preset == ReportPreset.HcfcdSegment && double.IsFinite(segment.StartStation))
+        {
+            // D10/D18: a computed station segment with no impact result (SV-E827, the surface has no
+            // triangles in its window) shows zero impact, never blank; its coverage flag marks it.
+            CutVolume = 0;
+            ImpactedLengthText = fmt.Config.ImpactedLength.Format(0, fmt.Culture);
+            ImpactedAreaText = fmt.Area(0, ctx.AreaUnit);
+            CutVolumeText = fmt.Volume(0);
+            AverageText = DialogText.NotAvailable;
+            ImpactNote = null;
+        }
         else
         {
             CutVolume = null;

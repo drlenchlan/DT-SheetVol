@@ -284,12 +284,14 @@ public class ViewCalculatorTests
     [Fact]
     public void Clip_follows_the_overlap_setting_and_none_gives_no_clip()
     {
+        // D1: by default the Boundary clip is the segment boundary only; the overlap is opt-in.
+        Assert.False(new ViewMathConfig().ClipIncludesOverlap);
         var opt = new ViewOptions(ModelUnitsPerPaperUnit: 50, ViewOverlap: 25, Clip: ClipMode.Boundary);
-        var withOverlap = Compute(AlignmentS(), Seg(500, 1000), opt);
-        Assert.Equal(11, Width(withOverlap.Spec!.ClipInPaper!), Tol);
-
-        var boundaryOnly = Compute(AlignmentS(), Seg(500, 1000), opt, calc: new ViewCalculator(new ViewMathConfig { ClipIncludesOverlap = false }));
+        var boundaryOnly = Compute(AlignmentS(), Seg(500, 1000), opt);
         Assert.Equal(10, Width(boundaryOnly.Spec!.ClipInPaper!), Tol);
+
+        var withOverlap = Compute(AlignmentS(), Seg(500, 1000), opt, calc: new ViewCalculator(new ViewMathConfig { ClipIncludesOverlap = true }));
+        Assert.Equal(11, Width(withOverlap.Spec!.ClipInPaper!), Tol);
         Assert.Equal(withOverlap.Spec.ModelCenter, boundaryOnly.Spec.ModelCenter);   // the view still frames the overlap
 
         var none = Compute(AlignmentS(), Seg(500, 1000), opt with { Clip = ClipMode.None });
