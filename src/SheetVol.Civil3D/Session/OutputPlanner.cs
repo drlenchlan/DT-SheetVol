@@ -227,7 +227,10 @@ public static class OutputPlanner
         foreach (var a in rec.Analyses)
         {
             var row = a.Rows.FirstOrDefault(r => r.SegmentId == seg.Id);
-            if (row?.Impact is { } impact) values.Add(new HcfcdMaterial(a.Analysis.Id, a.Analysis.Name, impact, a.Analysis.CutFactor));
+            // D10/D18: a station segment with a row but no impact (SV-E827) reports zero impact, never blank.
+            var impact = row?.Impact ?? (row is not null && double.IsFinite(seg.StartStation)
+                ? new ImpactResult(seg.Id, a.Analysis.Name, 0, 0, 0, [], 0, 0, false) : null);
+            if (impact is not null) values.Add(new HcfcdMaterial(a.Analysis.Id, a.Analysis.Name, impact, a.Analysis.CutFactor));
         }
         var created = template.CreateTable(seg.Id, run.Analyses, run.AreaUnit, formatter.Units, s.Report);
         if (!created.Succeeded) throw new InvalidOperationException("HCFCD template refused the run's materials: " + string.Join(" | ", created.Problems.Select(p => p.Message)));

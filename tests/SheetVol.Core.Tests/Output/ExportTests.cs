@@ -161,6 +161,34 @@ public class ExportTests
     }
 
     [Fact]
+    public void D10_E827_segment_without_an_impact_exports_zeros_and_an_empty_average()
+    {
+        // Segment 2 is the SV-E827 case: no impact result and no surface in its window (coverage 0 %).
+        var s = new Scenario().WithBreaks(1000, 1500, 2000);
+        var first = s.Segments[0].Id;
+        var impact = new ImpactResult(first, "SEDIMENT", 310, 9_920, 15_600, [(1000, 1150)], 0, 0, false);
+        s.AddAnalysis("SEDIMENT", [(577.78, 0), (0, 0)], areas: [100_000, 0], impacts: new Dictionary<Guid, ImpactResult> { [first] = impact });
+        var run = Run(s, AreaUnit.Acres) with { Preset = ReportPreset.HcfcdSegment };
+
+        var doc = ExportBuilder.Build(run, s.Reconcile(), At, null, Scenario.Station, Cfg).Value;
+
+        var row = doc.Rows[1];
+        Assert.True(row.CoverageFlag);
+        var i = Assert.IsType<ExportImpact>(row.Impact);
+        Assert.Equal("SEDIMENT", i.Material);
+        Assert.Equal((0d, 0d, 0d, 0d, 0d), (i.ImpactedLength, i.ImpactedArea, i.CutVolume, i.CutAboveOhwm, i.FillBelowOhwm));
+        Assert.Null(i.Average);
+        Assert.Empty(i.Intervals);
+
+        string csv = CsvExport.Write(doc, Cfg);
+        foreach (var key in new[] { "impacted_length", "impacted_area", "impact_cut_volume", "cut_above_ohwm_raw", "fill_below_ohwm_raw" })
+            Assert.Equal("0", Field(csv, 2, key));
+        Assert.Equal("", Field(csv, 2, "impact_average"));     // N/A
+        Assert.Equal("false", Field(csv, 2, "touches_search_limit"));
+        Assert.Equal(15_600 / 27.0, doc.Rows[0].Impact!.CutVolume, 9);   // the computed segment is unchanged
+    }
+
+    [Fact]
     public void A_run_that_did_not_reconcile_is_never_exported()
     {
         var s = Scenario.T2();

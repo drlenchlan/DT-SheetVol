@@ -104,7 +104,7 @@ public sealed record ExportImpact(
 /// <param name="Coverage">Area2D ÷ boundary area, 0..1.</param>
 /// <param name="CoverageFlag">True when coverage is flagged (E405, E419).</param>
 /// <param name="Status">Segment status.</param>
-/// <param name="Impact">HcfcdSegment preset only.</param>
+/// <param name="Impact">HcfcdSegment preset only; zeros with a null average for a station segment with no impact result (SV-E827, D10).</param>
 public sealed record ExportRow(
     Guid SegmentId, string Label, double StartStation, double EndStation, string? StartStationText, string? EndStationText,
     Guid AnalysisId, string Analysis,
@@ -183,7 +183,10 @@ public static class ExportBuilder
             foreach (var r in a.Rows)
             {
                 ExportImpact? impact = null;
-                if (r.Impact is { } i)
+                // D10/D18: an HCFCD station segment with no impact result (SV-E827) exports zero impact, never blank.
+                var source = r.Impact ?? (run.Preset == ReportPreset.HcfcdSegment && double.IsFinite(r.StartStation)
+                    ? new ImpactResult(r.SegmentId, def.Name, 0, 0, 0, [], 0, 0, false) : null);
+                if (source is { } i)
                 {
                     bool finite = new[] { i.ImpactedLength, i.ImpactedArea, i.CutVolume, i.CutAboveOhwm, i.FillBelowOhwm }.All(double.IsFinite)
                                   && i.Intervals.All(iv => double.IsFinite(iv.From) && double.IsFinite(iv.To));
