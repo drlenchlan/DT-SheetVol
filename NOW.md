@@ -136,6 +136,10 @@ Filled as workers return. Status: TODO / IN PROGRESS / GREEN / MANUAL-OK / BLOCK
 | Run `SVPROBEUI` once, then the P15 interactive pass, per `docs/dan-probe-steps.md` (about 25 minutes) | OPEN, steps written 2026-11-05 |
 | LAN sheet template with `SV-VPORT` viewport and table anchor block; table style and layer names | OPEN, before G3 |
 | Corrections to section 3 assumptions | none yet |
+| G2 interactive: SVDIALOG on the fixture drawing (screenshot 2026-11-06) | PARTIAL PASS: dialog opens, alignment S picked, four 500 ft segments, chart drawn, regen fails cleanly by D14/E501 (six LAN template names absent: layers SV-BOUNDARY, SV-MATCHLINE, SV-VOLUME, SV-TABLE; surface style SV-No Display; table style SV-Volumes). Verified in RegenPipeline: the run transaction is disposed without Commit, so E412's owned surface was rolled back and "Nothing in this run changed" holds. To finish: add the six to the drawing or template, point the settings at existing names (SVCONFIG, SVCONFIG Reload), or Dan says "go fixture T" for an `SVFIXTURE T` option that creates them |
+| Dan's call: E443/E444 (owned surface style or layer missing) warn and fall back to Standard and layer 0, while E501 fails the run for a missing writers layer. Make both strict per D14, or keep the owned surface lenient because it is engine-internal | OPEN 2026-11-06 |
+
+Low-priority defects from the G2 screenshot (any Civil3D worker, with its package): E412 and E802 report an owned surface "created" that the failed run's abort then removed (suppress Info lines on a failed run, or say "would be created"); the E501 boundary message prints twice, once inside the E801 summary and once on its own (Dedupe runs after E801 embeds the first error's text).
 
 ## Merge log
 
