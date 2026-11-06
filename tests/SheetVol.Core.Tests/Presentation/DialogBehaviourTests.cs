@@ -441,6 +441,20 @@ public class DialogBehaviourTests
         Assert.True(vm.CanRegenerate);
     }
 
+    // Rev 3 (X6, NOW.md rule 8): HCFCD card labels read table row, OHWM, proposed; Standard reads as before.
+    [Fact]
+    public void Hcfcd_card_labels_read_table_row_OHWM_proposed_and_standard_labels_are_unchanged()
+    {
+        var (_, _, vm) = Fixture.Open();
+        Assert.Equal(("Name", "Base", "Comparison"), (vm.AnalysisNameLabel, vm.BaseSurfaceLabel, vm.ComparisonSurfaceLabel));
+
+        vm.SelectedPreset = vm.Presets.Single(p => p.Preset == ReportPreset.HcfcdSegment);
+        Assert.Equal(("Table row", "OHWM", "Proposed"), (vm.AnalysisNameLabel, vm.BaseSurfaceLabel, vm.ComparisonSurfaceLabel));
+
+        vm.SelectedPreset = vm.Presets.Single(p => p.Preset == ReportPreset.Standard);
+        Assert.Equal(("Name", "Base", "Comparison"), (vm.AnalysisNameLabel, vm.BaseSurfaceLabel, vm.ComparisonSurfaceLabel));
+    }
+
     [Fact]
     public async Task Hcfcd_rows_show_impacted_length_area_volume_and_average_T25()
     {

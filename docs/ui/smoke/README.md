@@ -1,1 +1,1 @@
-Off-screen renders of SVDIALOG from U2's UiSmoke against the T2 design fixture (2026-11-05), for comparison with Dan's artboards. Not the artboards.
+Off-screen renders of SVDIALOG from U2's UiSmoke against the T2 design fixture (2026-11-06, rev 3 dialog: source switch per comparison, HCFCD labels table row / OHWM / proposed; 7 is a volume surface chosen as the source), for comparison with Dan's artboards. Not the artboards.

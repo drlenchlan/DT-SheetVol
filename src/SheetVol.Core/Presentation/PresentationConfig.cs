@@ -127,6 +127,9 @@ public sealed record PresentationConfig
     /// <summary>Name of a new analysis before surfaces are picked: {0} is its 1-based position.</summary>
     public string NewAnalysisNameFormat { get; init; } = "Comparison {0}";
 
+    /// <summary>Name given to an analysis once a volume surface is chosen as its source (rev 3, X6): {0} the volume surface name.</summary>
+    public string VolumeSurfaceAnalysisNameFormat { get; init; } = "{0}";
+
     /// <summary>The culture actually used: <see cref="Culture"/> or the current culture.</summary>
     public CultureInfo EffectiveCulture => Culture ?? CultureInfo.CurrentCulture;
 }

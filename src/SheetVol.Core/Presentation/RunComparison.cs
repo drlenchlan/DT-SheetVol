@@ -26,7 +26,9 @@ internal static class RunComparison
     /// to the segment (per-segment overrides included), preset, analysis surfaces and factors.
     /// Station ranges are compared by the caller. Display-only settings (area unit, auto mode,
     /// draw options) do not matter. Rev 3: no OHWM elevation exists (X5); under HCFCD the
-    /// OHWM surface is the analysis's base, compared above.
+    /// OHWM surface is the analysis's base, compared above. A volume surface source (X6) is
+    /// compared by its name only: its stored pair is a display copy and its stored factors are
+    /// ignored (rule 1); a change to the surface itself reaches the dialog through the tracker.
     /// </summary>
     public static bool VolumeInputsEqual(RunDefinition regenerated, RunDefinition current, Guid analysisId, Guid segmentId)
     {
@@ -37,6 +39,8 @@ internal static class RunComparison
         var a = regenerated.Analyses.FirstOrDefault(x => x.Id == analysisId);
         var b = current.Analyses.FirstOrDefault(x => x.Id == analysisId);
         if (a is null || b is null) return false;
+        if (a.VolumeSurface is not null || b.VolumeSurface is not null)
+            return string.Equals(a.VolumeSurface, b.VolumeSurface, StringComparison.Ordinal);
         if (a.BaseSurface != b.BaseSurface || a.ComparisonSurface != b.ComparisonSurface) return false;
         if (a.CutFactor != b.CutFactor || a.FillFactor != b.FillFactor) return false;
         return true;

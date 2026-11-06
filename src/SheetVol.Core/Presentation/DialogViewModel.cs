@@ -128,10 +128,13 @@ public sealed class DialogViewModel : ObservableObject, IGridOwner, IDisposable
     /// <summary>One-line reason the controls are disabled, or null (E901).</summary>
     public string? DisabledReason => _drawing is null ? DialogText.NoDrawingOpen : null;
 
-    /// <summary>True when the drawing has no alignment or fewer than two TIN surfaces (E902).</summary>
-    public bool IsEmptyState => _drawing is not null && (Alignments.Count == 0 || Surfaces.Count < 2);
+    /// <summary>
+    /// True when the drawing has no alignment or fewer than two TIN surfaces (E902), or (rev 3, X6) a
+    /// comparison is switched to Volume surface and the drawing has none.
+    /// </summary>
+    public bool IsEmptyState => _drawing is not null && (Alignments.Count == 0 || Surfaces.Count < 2 || LacksVolumeSurfaces);
 
-    /// <summary>Names what is missing in the empty state (E902); null otherwise.</summary>
+    /// <summary>Names what is missing in the empty state (E902); null otherwise. "No volume surfaces" only while a comparison is switched to Volume surface.</summary>
     public string? EmptyStateText
     {
         get
@@ -140,9 +143,12 @@ public sealed class DialogViewModel : ObservableObject, IGridOwner, IDisposable
             var parts = new List<string>();
             if (Alignments.Count == 0) parts.Add(DialogText.EmptyNoAlignment);
             if (Surfaces.Count < 2) parts.Add(string.Format(_fmt.Culture, DialogText.EmptyTooFewSurfacesFormat, Surfaces.Count));
+            if (LacksVolumeSurfaces) parts.Add(DialogText.EmptyNoVolumeSurfaces);
             return string.Join(Environment.NewLine, parts);
         }
     }
+
+    private bool LacksVolumeSurfaces => VolumeSurfaces.Count == 0 && Analyses.Any(a => a.IsVolumeSurfaceSource);
 
     /// <summary>True when the left panel and grid accept edits.</summary>
     public bool CanEdit => IsDrawingOpen && !IsBusy;
@@ -239,6 +245,12 @@ public sealed class DialogViewModel : ObservableObject, IGridOwner, IDisposable
     /// <summary>TIN surface names in the drawing.</summary>
     public ObservableCollection<string> Surfaces { get; } = [];
 
+    /// <summary>
+    /// User TIN volume surfaces in the drawing (rev 3, X6), exactly as <see cref="ISheetVolSession.VolumeSurfaces"/>
+    /// lists them (never SheetVol-owned ones; nothing is added here). Re-read on SourcesChanged.
+    /// </summary>
+    public ObservableCollection<VolumeSurfaceOption> VolumeSurfaces { get; } = [];
+
     /// <summary>The comparisons being edited.</summary>
     public ObservableCollection<AnalysisEditorViewModel> Analyses { get; } = [];
 
@@ -251,10 +263,10 @@ public sealed class DialogViewModel : ObservableObject, IGridOwner, IDisposable
     /// <summary>Analysis name label (HCFCD: table row).</summary>
     public string AnalysisNameLabel => IsHcfcd ? DialogText.AnalysisNameHcfcd : DialogText.AnalysisName;
 
-    /// <summary>Base surface label (HCFCD: existing).</summary>
+    /// <summary>Base surface label (HCFCD: OHWM, rev 3).</summary>
     public string BaseSurfaceLabel => IsHcfcd ? DialogText.BaseSurfaceHcfcd : DialogText.BaseSurface;
 
-    /// <summary>Comparison surface label (HCFCD: design).</summary>
+    /// <summary>Comparison surface label (HCFCD: proposed, rev 3).</summary>
     public string ComparisonSurfaceLabel => IsHcfcd ? DialogText.ComparisonSurfaceHcfcd : DialogText.ComparisonSurface;
 
     // ---- Fill stations by interval ---------------------------------------------------
@@ -395,8 +407,9 @@ public sealed class DialogViewModel : ObservableObject, IGridOwner, IDisposable
             if (_session.IsCommandActive) return DialogText.BlockedCommandActive;
             if (string.IsNullOrEmpty(_run.AlignmentName)) return DialogText.BlockedNoAlignment;
             if (_run.Analyses.Count == 0) return DialogText.BlockedNoAnalysis;
-            if (_run.Analyses.Any(a => string.IsNullOrEmpty(a.BaseSurface) || string.IsNullOrEmpty(a.ComparisonSurface)))
-                return DialogText.BlockedSurfaces;
+            if (Analyses.Any(a => a.NeedsVolumeSurface)) return DialogText.BlockedVolumeSurface;
+            if (Analyses.Any(a => a.NeedsPairSurfaces)) return DialogText.BlockedSurfaces;
+            if (Analyses.Any(a => a.VolumeSurfaceProblem is not null)) return DialogText.BlockedVolumeSurfaceUnusable;
             if (HasFieldError) return DialogText.BlockedFieldErrors;
             if (_validation is null || !_validation.IsValid) return DialogText.BlockedValidation;
             return null;
@@ -499,7 +512,7 @@ public sealed class DialogViewModel : ObservableObject, IGridOwner, IDisposable
             if (!_isDirty)
             {
                 _run = FitAreaUnitToDrawing(stored, drawing.Units);
-                LoadFieldsFromRun();
+                LoadFieldsFromRun(keepPendingSourceSwitches: true);
             }
             _baseline = stored;
         }
@@ -687,30 +700,41 @@ public sealed class DialogViewModel : ObservableObject, IGridOwner, IDisposable
         Grid.RefreshCommands();
     }
 
-    private void LoadFieldsFromRun()
+    /// <param name="keepPendingSourceSwitches">
+    /// True when reloading the same drawing's run after SourcesChanged: a comparison switched to Volume
+    /// surface with none chosen yet changes nothing in the run, so its switch is carried over by analysis
+    /// id. Otherwise creating a volume surface in the drawing (which raises SourcesChanged) would flip it back.
+    /// </param>
+    private void LoadFieldsFromRun(bool keepPendingSourceSwitches = false)
     {
+        var pending = keepPendingSourceSwitches
+            ? Analyses.Where(a => a.NeedsVolumeSurface).Select(a => a.Id).ToHashSet()
+            : new HashSet<Guid>();
         OffsetLeft.SetFromModel(_fmt.Offset(-_run.OffsetLeft));
         OffsetRight.SetFromModel(_fmt.Offset(_run.OffsetRight));
         _sameOnBothSides = Math.Abs(_run.OffsetLeft + _run.OffsetRight) <= _config.StationTolerance;
         IntervalError = null;
         Analyses.Clear();
-        foreach (var analysis in _run.Analyses) Analyses.Add(CreateEditor(analysis, IsAutoName(analysis)));
+        foreach (var analysis in _run.Analyses) Analyses.Add(CreateEditor(analysis, IsAutoName(analysis), pending.Contains(analysis.Id)));
     }
 
     private void RefreshSourceLists()
     {
         SyncInPlace(Alignments, _drawing is null ? [] : _session.AlignmentNames);
         SyncInPlace(Surfaces, _drawing is null ? [] : _session.TinSurfaceNames);
+        SyncInPlace(VolumeSurfaces, _drawing is null ? [] : _session.VolumeSurfaces.Select(v => new VolumeSurfaceOption(v)).ToList());
+        foreach (var editor in Analyses) editor.SourcesRefreshed();
     }
 
     /// <summary>Updates a bound list without clearing it, so a combo box keeps a selection that still exists.</summary>
-    private static void SyncInPlace(ObservableCollection<string> target, IReadOnlyList<string> source)
+    private static void SyncInPlace<T>(ObservableCollection<T> target, IReadOnlyList<T> source)
     {
+        var same = EqualityComparer<T>.Default;
         for (var i = target.Count - 1; i >= 0; i--)
-            if (!source.Contains(target[i])) target.RemoveAt(i);
+            if (!source.Contains(target[i], same)) target.RemoveAt(i);
         for (var i = 0; i < source.Count; i++)
         {
-            if (i < target.Count && target[i] == source[i]) continue;
+            if (i < target.Count && same.Equals(target[i], source[i])) continue;
             var existing = target.IndexOf(source[i]);
             if (existing >= 0) target.Move(existing, i);
             else target.Insert(i, source[i]);
@@ -816,14 +840,18 @@ public sealed class DialogViewModel : ObservableObject, IGridOwner, IDisposable
         TryApply(_run with { Draw = draw });       // refused while busy, like every other edit
     }
 
-    private AnalysisEditorViewModel CreateEditor(AnalysisDef definition, bool nameIsAuto)
-        => new(definition, Surfaces, _fmt, OnAnalysisEdited, RemoveAnalysis, () => CanEdit && Analyses.Count > 1, nameIsAuto, RefreshCommandState);
+    private AnalysisEditorViewModel CreateEditor(AnalysisDef definition, bool nameIsAuto, bool volumeSourcePending = false)
+        => new(definition, Surfaces, VolumeSurfaces, _fmt, OnAnalysisEdited, RemoveAnalysis, () => CanEdit && Analyses.Count > 1,
+            nameIsAuto, volumeSourcePending, RefreshCommandState);
 
     private bool IsAutoName(AnalysisDef a)
-        => string.IsNullOrEmpty(a.Name)
-           || string.IsNullOrEmpty(a.BaseSurface)
-           || string.IsNullOrEmpty(a.ComparisonSurface)
-           || a.Name == string.Format(_fmt.Culture, _config.AnalysisNameFormat, a.BaseSurface, a.ComparisonSurface);
+        => a.VolumeSurface is not null
+            ? string.IsNullOrEmpty(a.Name)
+              || a.Name == string.Format(_fmt.Culture, _config.VolumeSurfaceAnalysisNameFormat, a.VolumeSurface)
+            : string.IsNullOrEmpty(a.Name)
+              || string.IsNullOrEmpty(a.BaseSurface)
+              || string.IsNullOrEmpty(a.ComparisonSurface)
+              || a.Name == string.Format(_fmt.Culture, _config.AnalysisNameFormat, a.BaseSurface, a.ComparisonSurface);
 
     private string NewAnalysisName(int position) => string.Format(_config.EffectiveCulture, _config.NewAnalysisNameFormat, position);
 
