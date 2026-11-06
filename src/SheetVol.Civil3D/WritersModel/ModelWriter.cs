@@ -48,7 +48,8 @@ public static class ModelWriter
 
         var cfg = ctx.Config;
         var boundaries = new PolylineWriter<Boundary>(ctx, OwnedRole.Boundary, "boundary", cfg.BoundaryLayer, "modelWriters.boundaryLayer", b => b.Drawn);
-        var outlines = new PolylineWriter<ImpactOutlineSpec>(ctx, OwnedRole.ImpactOutline, "impacted-area outline", cfg.ImpactOutlineLayer, "modelWriters.impactOutlineLayer", o => o.Outline);
+        var outlines = new PolylineWriter<ImpactOutlineSpec>(ctx, OwnedRole.ImpactOutline, "impact outline ring", cfg.ImpactOutlineLayer, "modelWriters.impactOutlineLayer", o => o.Outline,
+            o => o.IsClosedRing ? null : "is not a closed ring (first point differs from last); ImpactResult.Outlines rings must close (contract rev 3).");
         var lines = new MatchLineWriter(ctx);
         var texts = new MatchTextWriter(ctx);
         var tables = new ModelTableWriter(ctx);

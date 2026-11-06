@@ -1,5 +1,5 @@
 // A2 headless check, phase B: bulges preserved, and the HcfcdSegment preset with hand-built
-// impact results (T25 then T26 values): T31, E1015, E1016, E1017, E1018, impacted-area outlines.
+// impact results (T25 then T26 values): T31, E1015, E1016, E1017, E1018, no band outline (D13).
 
 using Autodesk.AutoCAD.DatabaseServices;
 using SheetVol.Civil3D.SelfTest;
@@ -52,8 +52,9 @@ public static partial class WritersModelCheck
 
     private static readonly HState Hc = new();
 
-    // Rev 3: no outlines here (the rev3-output package draws them from ImpactResult.Outlines); the hand-built
-    // values below are the pre-rev-3 T25/T26 numbers. rev 3: expected values re-derived by rev3-integrator.
+    // Rev 3: these impacts carry intervals but no rings, so no outline is drawn here (D13: the band outline is
+    // gone, not kept as a fallback); the ring cases are the outline phase (WritersModelCheckOutline.cs). The
+    // hand-built values below are the pre-rev-3 T25/T26 numbers. rev 3: expected values re-derived by rev3-integrator.
     private static ImpactResult Impact(Guid seg, string material, double length, double area, double volumeFt3, params (double, double)[] intervals)
         => new(seg, material, length, area, volumeFt3, intervals, [], false);
 
@@ -66,10 +67,8 @@ public static partial class WritersModelCheck
         var tables = new List<HcfcdTableSpec>();
         foreach (var seg in h.Segments)
         {
-            var impacts = h.Analyses.Where(a => h.Impacts.ContainsKey((seg.Id, a.Id))).Select(a => h.Impacts[(seg.Id, a.Id)]).ToList();
-            var (o, p) = ImpactOutlines.Build(AlignmentS, seg, impacts, Geom);
-            outlines.AddRange(o);
-            notes.AddRange(p);
+            var impacts = h.Analyses.Where(a => h.Impacts.ContainsKey((seg.Id, a.Id))).Select(a => (a.Id, h.Impacts[(seg.Id, a.Id)])).ToList();
+            outlines.AddRange(ImpactOutlines.Build(seg.Id, impacts));
             var materials = h.Analyses.Where(a => h.Impacts.ContainsKey((seg.Id, a.Id)))
                 .Select(a => new HcfcdMaterial(a.Id, a.Name, h.Impacts[(seg.Id, a.Id)], a.CutFactor)).ToList();
             var boundary = built.Boundaries.Single(b => b.SegmentId == seg.Id);
@@ -112,8 +111,9 @@ public static partial class WritersModelCheck
                 $"created {c1.Kinds}; table 1 has {t1.Rows.Count} rows = {templateRows} template rows + 1 row each for SEDIMENT and ROCK under TOTAL CUT MATERIAL");
             Check("T25", len.EndsWith("| 500 | LF", StringComparison.Ordinal) && area.EndsWith("| 0.37 | AC", StringComparison.Ordinal) && sed == "SEDIMENT | 963 | 1.93",
                 $"bound rows: '{len}' ; '{area}' ; '{sed}'");
-            Check("outline", c1.Count(ChangeKind.Create, OwnedRole.ImpactOutline) == 2 && Open<Polyline>(tr, c1.Handles[new OwnedKey(h1, OwnedRole.ImpactOutline, "0")]).Layer == Cfg.ImpactOutlineLayer,
-                $"{c1.Count(ChangeKind.Create, OwnedRole.ImpactOutline)} impacted-area outlines on {Cfg.ImpactOutlineLayer}, one per segment (interval = whole segment)");
+            int drawn = c1.Result.Changes.Count(c => c.Key.Role == OwnedRole.ImpactOutline);
+            Check("D13-noband", drawn == 0 && Hc.Impacts.Values.All(i => i.Intervals.Count > 0 && i.Outlines.Count == 0),
+                $"impacts with intervals (whole segment) and empty Outlines: {drawn} impact outline objects planned or drawn (no full-width band fallback)");
             tr.Commit();
         }
         var c2 = RegenHc();
@@ -152,10 +152,9 @@ public static partial class WritersModelCheck
             Check("E1016", typedKept && deletionKept && RowText(t1, FindRow(t1, "SEDIMENT")) == "SEDIMENT | 907 | 1.89"
                            && RowText(t1, FindRow(t1, "TOTAL IMPACTED LENGTH")).EndsWith("| 480 | LF", StringComparison.Ordinal),
                 $"table 1 after rebind: typed cell and removed row preserved; its SEDIMENT row (shifted up one) reads '{RowText(t1, FindRow(t1, "SEDIMENT"))}'");
-            var o = c3.Result.Changes.Where(c => c.Key.Role == OwnedRole.ImpactOutline && c.Key.SegmentId == h1).ToList();
-            Check("outline", o.Count == 2 && o.Count(c => c.Kind == ChangeKind.Update) == 1 && o.Count(c => c.Kind == ChangeKind.Create) == 1
-                             && c3.Handles[new OwnedKey(h1, OwnedRole.ImpactOutline, "0")] == c1.Handles[new OwnedKey(h1, OwnedRole.ImpactOutline, "0")],
-                $"segment 1 now cuts in two stretches: outline 0 updated in place, outline 1 created ({string.Join(", ", o.Select(c => $"{c.Key.Qualifier}:{c.Kind}"))})");
+            int drawn3 = c3.Result.Changes.Count(c => c.Key.Role == OwnedRole.ImpactOutline);
+            Check("D13-noband", drawn3 == 0,
+                $"segment 1 now cuts in two stretches (intervals 0-300, 320-500) with empty Outlines: {drawn3} impact outline objects (pre-rev-3 drew a band per stretch)");
             tr.Commit();
         }
 

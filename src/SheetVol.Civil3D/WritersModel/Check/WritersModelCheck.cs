@@ -168,6 +168,7 @@ public static partial class WritersModelCheck
             step = "standard"; StandardPhase();
             step = "bulge"; BulgePhase();
             step = "hcfcd"; HcfcdPhase();
+            step = "outline"; OutlinePhase();
             step = "layout"; LayoutPhase();
             step = "store"; StorePhase();
             Say($"SUMMARY pass={_pass} fail={_fail}");

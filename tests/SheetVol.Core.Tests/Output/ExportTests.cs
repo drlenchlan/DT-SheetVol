@@ -49,7 +49,7 @@ public class ExportTests
 
         using var parsed = JsonDocument.Parse(json);
         var root = parsed.RootElement;
-        Assert.Equal(2, root.GetProperty("schemaVersion").GetInt32());   // rev 3: export schema 2 (OHWM QA columns gone)
+        Assert.Equal(3, root.GetProperty("schemaVersion").GetInt32());   // rev 3: export schema 3 (OHWM QA columns gone in 2; source kind added in 3)
         Assert.Equal("Run1", root.GetProperty("runName").GetString());
         var row = root.GetProperty("rows")[0];
         Assert.Equal(100_000, row.GetProperty("area2DRaw").GetDouble());
@@ -88,7 +88,7 @@ public class ExportTests
         Assert.Equal(string.Join(",", CsvExport.ColumnKeys), lines[0]);
         Assert.Equal(1 + 4 + 2, lines.Length);
         Assert.Equal("segment", Field(csv, 1, "row_kind"));
-        Assert.Equal("2", Field(csv, 1, "schema_version"));   // rev 3: export schema 2
+        Assert.Equal("3", Field(csv, 1, "schema_version"));   // rev 3: export schema 3
         Assert.Equal("outside_limits", Field(csv, 5, "row_kind"));
         Assert.Equal("WithinTolerance", Field(csv, 5, "status"));
         Assert.Equal("total", Field(csv, 6, "row_kind"));
@@ -207,6 +207,66 @@ public class ExportTests
 
         var bad = Cfg with { Export = new ExportConfig { CsvHeaders = new Dictionary<string, string> { ["cutt"] = "x" } } };
         Assert.Contains(bad.Validate(), p => p.Code == OutputCodes.ConfigInvalid && p.Message.Contains("cutt"));
+    }
+
+    [Fact]
+    public void Rev3_pair_analysis_exports_source_pair_and_an_empty_volume_surface()
+    {
+        var doc = Doc(Scenario.T2());
+        var a = doc.Analyses.Single();
+        Assert.Equal(3, ExportBuilder.SchemaVersion);
+        Assert.Equal(ExportSourceKinds.Pair, a.Source);
+        Assert.Equal("pair", a.Source);
+        Assert.Equal("", a.VolumeSurface);
+        Assert.Equal(("EG", "FG_A"), (a.BaseSurface, a.ComparisonSurface));
+
+        string csv = CsvExport.Write(doc, Cfg);
+        var keys = CsvExport.ColumnKeys.ToList();
+        Assert.Equal(keys.IndexOf("analysis") + 1, keys.IndexOf("source"));
+        Assert.Equal(keys.IndexOf("source") + 1, keys.IndexOf("volume_surface"));
+        Assert.Equal(keys.IndexOf("volume_surface") + 1, keys.IndexOf("base_surface"));
+        for (int line = 1; line <= 6; line++)   // 4 segment rows, outside_limits, total
+        {
+            Assert.Equal("pair", Field(csv, line, "source"));
+            Assert.Equal("", Field(csv, line, "volume_surface"));
+        }
+
+        using var parsed = JsonDocument.Parse(JsonExport.Write(doc));
+        var ja = parsed.RootElement.GetProperty("analyses")[0];
+        Assert.Equal("pair", ja.GetProperty("source").GetString());
+        Assert.Equal("", ja.GetProperty("volumeSurface").GetString());
+    }
+
+    [Fact]
+    public void Rev3_volume_surface_analysis_exports_its_kind_and_surface_name_beside_the_pair_and_factors()
+    {
+        // A volume-surface source next to a pair. Factors: the run's stored ones until rev3-adapters hands the surface's.
+        var s = new Scenario().WithBreaks(0, 500, 1300);
+        s.AddAnalysis("EG vs FG_A", [(100, 50), (100, 0)]);
+        s.AddAnalysis("VOL user", [(10, 5), (20, 0)], cutFactor: 1.15, fillFactor: 0.9, baseSurface: "EG", comparison: "FG_B");
+        s.Analyses[1] = s.Analyses[1] with { Analysis = s.Analyses[1].Analysis with { VolumeSurface = "VOL, EG-FG_B" } };
+
+        var doc = Doc(s);
+        var pair = doc.Analyses[0];
+        var vol = doc.Analyses[1];
+        Assert.Equal(("pair", ""), (pair.Source, pair.VolumeSurface));
+        Assert.Equal((ExportSourceKinds.VolumeSurface, "VOL, EG-FG_B"), (vol.Source, vol.VolumeSurface));
+        Assert.Equal(("EG", "FG_B", 1.15, 0.9), (vol.BaseSurface, vol.ComparisonSurface, vol.CutFactor, vol.FillFactor));
+
+        string csv = CsvExport.Write(doc, Cfg);
+        var lines = CsvLines(csv);
+        Assert.Equal(1 + 2 * (2 + 2), lines.Length);   // per analysis: 2 segment rows, outside_limits, total
+        var volLines = Enumerable.Range(1, lines.Length - 1).Where(l => lines[l].Contains(",VOL user,", StringComparison.Ordinal)).ToList();
+        Assert.Equal(4, volLines.Count);
+        Assert.All(volLines, l => Assert.Contains(",VOL user,volume_surface,\"VOL, EG-FG_B\",EG,FG_B,1.15,0.9,", lines[l]));
+        Assert.Contains(",EG vs FG_A,pair,,EG,FG_A,1,1,", lines[1]);
+
+        using var parsed = JsonDocument.Parse(JsonExport.Write(doc));
+        var ja = parsed.RootElement.GetProperty("analyses")[1];
+        Assert.Equal("volume_surface", ja.GetProperty("source").GetString());
+        Assert.Equal("VOL, EG-FG_B", ja.GetProperty("volumeSurface").GetString());
+        Assert.Equal(1.15, ja.GetProperty("cutFactor").GetDouble());
+        Assert.Equal(3, parsed.RootElement.GetProperty("schemaVersion").GetInt32());
     }
 
     [Fact]

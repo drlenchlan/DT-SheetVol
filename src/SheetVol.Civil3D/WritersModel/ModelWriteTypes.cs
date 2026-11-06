@@ -30,8 +30,15 @@ public static class OwnedQualifiers
     /// <summary>Text of the match mark at a segment's end.</summary>
     public const string EndText = "end-text";
 
-    /// <summary>Impacted-area outline number <paramref name="index"/> of a segment.</summary>
-    public static string Outline(int index) => index.ToString(System.Globalization.CultureInfo.InvariantCulture);
+    /// <summary>
+    /// Impact outline ring <paramref name="ring"/> of analysis <paramref name="analysisId"/> within a
+    /// segment (rev 3, D13): <c>{analysis GUID "D"}/{ring index}</c>, e.g.
+    /// <c>00000000-0000-0000-0004-000000000101/0</c>. The ring index is the ring's position in
+    /// <see cref="ImpactResult.Outlines"/>. Stored keys of the pre-rev-3 band outline ("0", "1", ...)
+    /// are never planned again, so the first rev 3 regen erases them as owned objects (E308).
+    /// </summary>
+    public static string Outline(Guid analysisId, int ring)
+        => analysisId.ToString("D") + "/" + ring.ToString(System.Globalization.CultureInfo.InvariantCulture);
 }
 
 /// <summary>Which end of a segment a match mark sits at.</summary>
@@ -64,14 +71,21 @@ public sealed record MatchMarkSpec(Guid SegmentId, MatchEnd End, Pt Left, Pt Rig
     public OwnedKey TextKey => new(SegmentId, OwnedRole.MatchMark, End == MatchEnd.Start ? OwnedQualifiers.StartText : OwnedQualifiers.EndText);
 }
 
-/// <summary>One closed outline of impacted area below OHWM (6.15), drawn as a polyline.</summary>
+/// <summary>
+/// One ring of the impacted area (6.15, rev 3 D13): a ring of <see cref="ImpactResult.Outlines"/>
+/// drawn as-is as a closed polyline. A hole is a ring too and is drawn as its own polyline.
+/// </summary>
 /// <param name="SegmentId">The segment.</param>
-/// <param name="Index">Zero-based number of the outline within the segment.</param>
-/// <param name="Outline">Closed outline with bulges, no repeated closing vertex.</param>
-public sealed record ImpactOutlineSpec(Guid SegmentId, int Index, IReadOnlyList<PolyVertex> Outline)
+/// <param name="AnalysisId">The analysis (HCFCD material row) whose impact result carries the ring.</param>
+/// <param name="Ring">Zero-based position of the ring in that result's <see cref="ImpactResult.Outlines"/>.</param>
+/// <param name="Outline">The ring's points as returned (first == last, WCS), bulge 0. The writer refuses a ring that is not closed (SV-E541) and draws it without the repeated closing vertex.</param>
+public sealed record ImpactOutlineSpec(Guid SegmentId, Guid AnalysisId, int Ring, IReadOnlyList<PolyVertex> Outline)
 {
-    /// <summary>The owned key.</summary>
-    public OwnedKey Key => new(SegmentId, OwnedRole.ImpactOutline, OwnedQualifiers.Outline(Index));
+    /// <summary>The owned key: (segment, ImpactOutline, <see cref="OwnedQualifiers.Outline"/>(analysis, ring)).</summary>
+    public OwnedKey Key => new(SegmentId, OwnedRole.ImpactOutline, OwnedQualifiers.Outline(AnalysisId, Ring));
+
+    /// <summary>True when the ring is closed as the contract requires: more than one point and first == last.</summary>
+    public bool IsClosedRing => Outline.Count > 1 && Outline[0].Point == Outline[^1].Point;
 }
 
 /// <summary>Which corner of a new table sits on the anchor point.</summary>
@@ -141,7 +155,7 @@ public sealed record HcfcdTableSpec(
 /// when a feature is off, so objects no longer planned are erased (E308).
 /// </summary>
 /// <param name="Boundaries">Station-segment boundaries to draw. Manual segments are the user's own polylines and are not passed.</param>
-/// <param name="ImpactOutlines">Impacted-area outlines (HcfcdSegment preset); empty otherwise.</param>
+/// <param name="ImpactOutlines">Impact outline rings from <see cref="ImpactResult.Outlines"/> (HcfcdSegment preset, <see cref="WritersModel.ImpactOutlines.Build"/>); empty otherwise and when nothing is impacted.</param>
 /// <param name="MatchMarks">Match marks; empty when disabled.</param>
 /// <param name="Tables">Per-sheet model-space tables and the master table.</param>
 /// <param name="HcfcdTables">HCFCD tables placed by the model writer.</param>

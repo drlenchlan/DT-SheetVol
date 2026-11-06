@@ -12,8 +12,8 @@
 // Placement rules (6.7, 6.8, 6.16, A14):
 //   - boundary polyline per station segment when Draw.BoundaryPolylines;
 //   - match marks at shared breaks when modelWriters.matchMarks.enabled (A2's planner);
-//   - impacted-area outlines per station segment for the HcfcdSegment preset when
-//     modelWriters.drawImpactOutline;
+//   - impact outline rings (ImpactResult.Outlines, rev 3 D13) per station segment and analysis
+//     for the HcfcdSegment preset when modelWriters.drawImpactOutline;
 //   - with regen.generateLayouts: one layout per station segment from the template, named by
 //     C3's LayoutNamer (E307, E603), its plan viewport (LockView keeps it, E608) and title
 //     attributes; A3 renames and creates the layouts itself from the same name parts;
@@ -58,7 +58,7 @@ public sealed record OutputInputs(
 /// <param name="Objects">Planned objects.</param>
 /// <param name="Renames">Layout rename plan, or null when layouts are not generated (the fake paper writer applies it; A3 plans its own from the same names).</param>
 /// <param name="SegmentLayoutHandles">Stored layout handle per segment.</param>
-/// <param name="Problems">Notes and warnings (E603, impacted-area outlines not drawn).</param>
+/// <param name="Problems">Notes and warnings (E603).</param>
 public sealed record OutputPlan(
     IReadOnlyList<OwnedObject> Objects,
     LayoutRenamePlan? Renames,
@@ -104,16 +104,19 @@ public static class OutputPlanner
             objects.Add(new MatchMarkObject(mark.TextKey, mark));
         }
 
-        // Impacted-area outlines (HcfcdSegment preset).
+        // Impact outline (HcfcdSegment preset; rev 3 D13): every ring of each analysis's
+        // ImpactResult.Outlines, keyed (segment, analysis, ring). No rings, no outline: a segment
+        // whose rings are gone owns none afterwards and A2 erases what it drew (E308).
         var rec = input.Reconcile;
         if (run.Preset == ReportPreset.HcfcdSegment && s.ModelWriters.DrawImpactOutline && rec is not null)
         {
-            var impacts = rec.Analyses.SelectMany(a => a.Rows).Select(r => r.Impact).OfType<ImpactResult>().ToList();
             foreach (var seg in valid)
             {
-                var (outlines, outlineProblems) = ImpactOutlines.Build(alignment, seg, impacts, input.Geometry);
-                problems.AddRange(outlineProblems);
-                foreach (var o in outlines) objects.Add(new ImpactOutlineObject(o.Key, o));
+                var impacts = rec.Analyses
+                    .Select(a => (a.Analysis.Id, Impact: a.Rows.FirstOrDefault(r => r.SegmentId == seg.Id)?.Impact))
+                    .Where(t => t.Impact is not null)
+                    .Select(t => (t.Id, t.Impact!));
+                foreach (var o in ImpactOutlines.Build(seg.Id, impacts)) objects.Add(new ImpactOutlineObject(o.Key, o));
             }
         }
 

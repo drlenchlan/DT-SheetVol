@@ -28,13 +28,28 @@ public sealed record ExportTotals(
     double Cut, double Fill, double Net,
     decimal CutDisplayedRowsSum, decimal FillDisplayedRowsSum, decimal NetDisplayedRowsSum);
 
+/// <summary>Values of <see cref="ExportAnalysis.Source"/> (CSV and JSON <c>source</c>, export schema 3).</summary>
+public static class ExportSourceKinds
+{
+    /// <summary>The analysis is a base/comparison pair (<see cref="AnalysisDef.VolumeSurface"/> is null).</summary>
+    public const string Pair = "pair";
+
+    /// <summary>The analysis takes an existing user TIN volume surface as its source (rev 3, X6).</summary>
+    public const string VolumeSurface = "volume_surface";
+
+    /// <summary>The kind for an analysis definition.</summary>
+    public static string Of(AnalysisDef analysis) => analysis.VolumeSurface is null ? Pair : VolumeSurface;
+}
+
 /// <summary>One analysis in an export.</summary>
 /// <param name="Id">Analysis id.</param>
 /// <param name="Name">Analysis name.</param>
+/// <param name="Source"><see cref="ExportSourceKinds.Pair"/> or <see cref="ExportSourceKinds.VolumeSurface"/>, from <see cref="AnalysisDef.VolumeSurface"/> (rev 3, E423).</param>
+/// <param name="VolumeSurface">The volume surface's name when <paramref name="Source"/> is <c>volume_surface</c>; empty for a pair.</param>
 /// <param name="BaseSurface">Base surface name.</param>
 /// <param name="ComparisonSurface">Comparison surface name.</param>
-/// <param name="CutFactor">Cut factor applied once to every cut value.</param>
-/// <param name="FillFactor">Fill factor applied once to every fill value.</param>
+/// <param name="CutFactor">Cut factor applied once to every cut value: the analysis's own as reconciled. For a volume-surface source this is the run's stored factor until rev3-adapters hands the surface's own (the surface's govern, contract rule 1).</param>
+/// <param name="FillFactor">Fill factor applied once to every fill value; same note as <paramref name="CutFactor"/>.</param>
 /// <param name="SurfaceTotals">Whole-surface totals.</param>
 /// <param name="Band">Whole-band volume.</param>
 /// <param name="OutsideLimits">Surface totals − band, always carried even when within tolerance.</param>
@@ -44,7 +59,7 @@ public sealed record ExportTotals(
 /// <param name="PartitionTolerance">Tolerance used, cubic drawing units.</param>
 /// <param name="Totals">Totals for this analysis.</param>
 public sealed record ExportAnalysis(
-    Guid Id, string Name, string BaseSurface, string ComparisonSurface, double CutFactor, double FillFactor,
+    Guid Id, string Name, string Source, string VolumeSurface, string BaseSurface, string ComparisonSurface, double CutFactor, double FillFactor,
     ExportVolumes SurfaceTotals, ExportVolumes Band, ExportVolumes OutsideLimits, bool OutsideLimitsShown,
     string PartitionStatus, string? PartitionNote, double PartitionTolerance, ExportTotals Totals);
 
@@ -138,8 +153,12 @@ public sealed record ExportDocument(
 /// <summary>Builds the export document from a reconciled run.</summary>
 public static class ExportBuilder
 {
-    /// <summary>Export schema version. Bumped whenever a field changes meaning or is removed. 2 (contract rev 3): the cut_above_ohwm and fill_below_ohwm QA columns are gone.</summary>
-    public const int SchemaVersion = 2;
+    /// <summary>
+    /// Export schema version. Bumped whenever a field is added, changes meaning or is removed.
+    /// 2 (contract rev 3): the cut_above_ohwm and fill_below_ohwm QA columns are gone.
+    /// 3 (contract rev 3, rule 7): per analysis <c>source</c> (pair or volume_surface) and <c>volume_surface</c> (name or empty).
+    /// </summary>
+    public const int SchemaVersion = 3;
 
     /// <summary>
     /// Builds the document. Refuses a run that did not reconcile (SV-E535) and impact values
@@ -219,7 +238,8 @@ public static class ExportBuilder
                 return Outcome<ExportDocument>.Fail(new Problem(OutputCodes.ResultNotReconciled, Severity.Error,
                     $"{def.Name}: the outside-limits row was not computed; nothing exported."));
             analyses.Add(new ExportAnalysis(
-                def.Id, def.Name, def.BaseSurface, def.ComparisonSurface, def.CutFactor, def.FillFactor,
+                def.Id, def.Name, ExportSourceKinds.Of(def), def.VolumeSurface ?? "",
+                def.BaseSurface, def.ComparisonSurface, def.CutFactor, def.FillFactor,
                 Vol(a.SurfaceTotals), Vol(a.Partition.Band), Vol(outside.Difference), outside.Shown,
                 a.Partition.Status.ToString(), a.Partition.Note, a.Partition.Tolerance, totals));
         }

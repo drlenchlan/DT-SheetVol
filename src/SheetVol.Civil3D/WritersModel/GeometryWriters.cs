@@ -11,8 +11,9 @@ namespace SheetVol.Civil3D.WritersModel;
 
 /// <summary>
 /// Closed polylines with bulges: segment boundaries from <see cref="Boundary.Drawn"/> and the
-/// impacted-area outlines. Updated in place while the handle is live (vertex count adjusted,
-/// points and bulges rewritten), recreated when erased (E802), erased when no longer planned (E308).
+/// impact outline rings (rev 3, D13: one polyline per ring of <see cref="ImpactResult.Outlines"/>).
+/// Updated in place while the handle is live (vertex count adjusted, points and bulges
+/// rewritten), recreated when erased (E802), erased when no longer planned (E308).
 /// </summary>
 /// <typeparam name="TSpec"><see cref="Boundary"/> or <see cref="ImpactOutlineSpec"/>.</typeparam>
 public sealed class PolylineWriter<TSpec> : OwnedWriter<TSpec, Polyline>
@@ -21,12 +22,21 @@ public sealed class PolylineWriter<TSpec> : OwnedWriter<TSpec, Polyline>
     private readonly string _layerName;
     private readonly string _layerSetting;
     private readonly Func<TSpec, IReadOnlyList<PolyVertex>> _vertices;
+    private readonly Func<TSpec, string?>? _inputCheck;
     private readonly string _what;
     private ObjectId _layerId;
     private string _layerActualName = "";
 
     /// <summary>A writer for one polyline role.</summary>
-    public PolylineWriter(ModelWriteContext ctx, OwnedRole role, string what, string layerName, string layerSetting, Func<TSpec, IReadOnlyList<PolyVertex>> vertices)
+    /// <param name="ctx">The caller's context.</param>
+    /// <param name="role">The owned role it writes.</param>
+    /// <param name="what">Short name for messages.</param>
+    /// <param name="layerName">Configured layer.</param>
+    /// <param name="layerSetting">Setting key of the layer, for SV-E501.</param>
+    /// <param name="vertices">The vertices of a spec.</param>
+    /// <param name="inputCheck">Optional role-specific input check: a message makes the spec an SV-E541 error.</param>
+    public PolylineWriter(ModelWriteContext ctx, OwnedRole role, string what, string layerName, string layerSetting,
+        Func<TSpec, IReadOnlyList<PolyVertex>> vertices, Func<TSpec, string?>? inputCheck = null)
         : base(ctx)
     {
         _role = role;
@@ -34,6 +44,7 @@ public sealed class PolylineWriter<TSpec> : OwnedWriter<TSpec, Polyline>
         _layerName = layerName;
         _layerSetting = layerSetting;
         _vertices = vertices;
+        _inputCheck = inputCheck;
     }
 
     /// <inheritdoc/>
@@ -50,6 +61,8 @@ public sealed class PolylineWriter<TSpec> : OwnedWriter<TSpec, Polyline>
             yield return new Problem(ModelWriterCodes.InvalidInput, Severity.Error, $"The {_what} for {Describe(key)} has fewer than 3 distinct vertices.", NullIfEmpty(key.SegmentId));
         else if (v.Any(p => !double.IsFinite(p.Point.X) || !double.IsFinite(p.Point.Y) || !double.IsFinite(p.Bulge)))
             yield return new Problem(ModelWriterCodes.InvalidInput, Severity.Error, $"The {_what} for {Describe(key)} has a non-finite vertex or bulge.", NullIfEmpty(key.SegmentId));
+        if (_inputCheck?.Invoke(spec) is { } message)
+            yield return new Problem(ModelWriterCodes.InvalidInput, Severity.Error, $"The {_what} for {Describe(key)} {message}", NullIfEmpty(key.SegmentId));
     }
 
     /// <inheritdoc/>
