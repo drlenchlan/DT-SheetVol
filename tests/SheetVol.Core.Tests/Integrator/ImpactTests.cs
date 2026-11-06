@@ -6,15 +6,20 @@
 //   Depth d = EG - FG: 2 on the bed, 2 - (|y| - 10)/3 on 10..16 (0 at 16). Full section 52 ft2, 32 ft wide.
 // Units: ft, ft2, ft3. 1 CY = 27 ft3. HCFCD display: length whole ft, average to 2 decimals (A12).
 //
-// Rev 3 (NOW.md X5): OHWM is a surface, the analysis's base; there is no OHWM elevation and no
-// base < OHWM clip. Impact cut is d = base - comparison > MinCutDepth. Tests that ran EG_H/FG_H with
-// OHWM 100 keep their values: EG_H < 100 for |y| < 22, wider than the 32 ft cut, so that clip removed
-// nothing. Tests whose OHWM elevation mattered use a flat base at that elevation (the flat-base
-// construction NOW.md rev 3 rule 6 names) with FG_H as the comparison, d = z - FG_H:
-//   flat 97 -> FG_H < 97 for |y| < 14.5: width 29; section 20 * 3 + 2 * (3 * 4.5 - 4.5^2 / 3) = 73.5 ft2.
-//   flat 94 -> equal to the FG_H bed and below it everywhere else: no cut.
-// Each such test carries "rev 3: re-derived by rev3-integrator"; that package moves T25 to T30 onto
-// Fixture H's OHWM surface and owns the final numbers.
+// Rev 3 (NOW.md X5, rule 6): OHWM is a surface, the analysis's base; there is no OHWM elevation and
+// no base < OHWM clip. Impact cut is d = base - comparison > MinCutDepth. T25 to T30 run with Fixture
+// H's flat OHWM surface at the stated elevation z as the base and FG_H as the comparison, so every
+// expected value is OHWM minus design, d = z - FG_H. With FG_H (x <= 1300) 94 on the bed (|y| <= 10),
+// 94 + 2(|y| - 10)/3 on 10..16 (98 at 16), then EG_H's 3:1 slope 96 + (|y| - 10)/3 (100 at 22):
+//   z = 100 -> cut |y| < 22, width 44; section: bed 20 * 6 = 120, each side 10..16 (6 + 2)/2 * 6 = 24
+//              and 16..22 2 * 6/2 = 6, so 120 + 2 * 30 = 180 ft2. Past the transition (x >= 1310,
+//              FG_H = EG_H) still |y| < 22: bed 20 * 4 = 80 + 2 * (4 * 12/2) = 128 ft2.
+//   z = 97  -> cut |y| < 14.5, width 29; section 20 * 3 + 2 * (3 * 4.5/2) = 73.5 ft2.
+//   z = 95  -> cut |y| < 11.5, width 23; section 20 * 1 + 2 * (1 * 1.5/2) = 21.5 ft2. Past the
+//              transition FG_H >= 96 > 95: no cut (the E1001 case).
+//   z = 94  -> equal to the FG_H bed and below FG_H everywhere else: no cut.
+// Domain note (NOW.md rule 6): a flat OHWM counts the water column above the existing bed as cut.
+// Robustness and E10xx rows that are not HCFCD rows keep EG_H vs FG_H.
 
 using System.Diagnostics;
 using SheetVol.Core.Tests.Fakes;
@@ -37,12 +42,13 @@ public class ImpactTests(ITestOutputHelper output)
             FakeBands.Band(S, s0, s1, offL, offR), "SEDIMENT", settings);
     }
 
-    /// <summary>Rev 3 flat-base construction: a flat base (the OHWM surface) at <paramref name="z"/> over Fixture H's extent, FG_H as the comparison.</summary>
-    private static TriangleListSource FlatBase(double z) => FixtureSurfaces.Flat("OHWM", z, 0, -100, 2000, 100);
+    /// <summary>Fixture H's OHWM surface (rev 3): flat at <paramref name="z"/> over H's extent (x 0..2000, y -100..100), two triangles.</summary>
+    internal static TriangleListSource FlatBase(double z) => FixtureSurfaces.Flat("OHWM", z, 0, -100, 2000, 100);
 
-    private static SegmentImpactResult RunFlat(double s0, double s1, double z)
-        => OverlayIntegrator.IntegrateSegment(FlatBase(z), FixtureSurfaces.FgH(), S, C5.Seg(s0, s1),
-            FakeBands.Band(S, s0, s1, -100, 100), "SEDIMENT");
+    /// <summary>An HCFCD analysis on Fixture H: base the OHWM surface at <paramref name="z"/>, comparison FG_H.</summary>
+    private static SegmentImpactResult RunFlat(double s0, double s1, double z, double offL = -100, double offR = 100)
+        => OverlayIntegrator.IntegrateSegment(FlatBase(z), FixtureSurfaces.FgH(), S, C5.Seg(s0, s1, offL, offR),
+            FakeBands.Band(S, s0, s1, offL, offR), "SEDIMENT");
 
     private static ImpactResult Ok(SegmentImpactResult r)
     {
@@ -53,11 +59,11 @@ public class ImpactTests(ITestOutputHelper output)
     private static double Cy(double ft3) => ft3 / C5.CubicFeetPerCubicYard;
 
     // ---------------------------------------------------------------------------------------
-    // T25: OHWM 100. Below OHWM is |y| < 22, cut is |y| < 16, so the impacted strip is the full cut:
-    // area 32 * 500 = 16,000 ft2, volume 52 * 500 = 26,000 ft3 = 962.963 CY, length 500,
-    // average 962.963 / 500 = 1.925926 -> 1.93. Handoff: 500, 16,000 (0.37 ac), 962.963, 1.93. Agree.
-    // rev 3: re-derived by rev3-integrator. EG_H base, no OHWM clip: the same full cut, same values.
-    // The two QA accumulators are gone; band cut equals impact cut (MinCutDepth 0); the base covers the band.
+    // T25: OHWM_100 (flat 100) vs FG_H. d = 100 - FG_H > 0 for |y| < 22 over the whole segment:
+    // area 44 * 500 = 22,000 ft2 (0.505 ac -> 0.51), volume 180 * 500 = 90,000 ft3 = 3,333.333 CY,
+    // length 500, average 3,333.333 / 500 = 6.666667 -> 6.67. Pre-rev-3 (EG_H clipped at 100):
+    // 16,000 / 26,000. Band cut equals impact cut (MinCutDepth 0); the flat base covers the band.
+    // Outline: one ring, the rectangle [s0, s1] x [-22, 22] (4 vertices plus the closing point).
     // ---------------------------------------------------------------------------------------
 
     [Theory]
@@ -65,36 +71,37 @@ public class ImpactTests(ITestOutputHelper output)
     [InlineData(500, 1000)]
     public void T25_OHWM_100(double s0, double s1)
     {
-        var r = RunH(s0, s1);
+        var r = RunFlat(s0, s1, 100.0);
         var i = Ok(r);
         C5.Rel(500, i.ImpactedLength, Rel, what: "length");
-        C5.Rel(16000, i.ImpactedArea, Rel, what: "area");
-        C5.Rel(26000, i.CutVolume, Rel, what: "volume");
-        Assert.Equal(962.963, Cy(i.CutVolume), 3);
-        Assert.Equal(0.37, Math.Round(i.ImpactedArea / 43560.0, 2));
-        Assert.Equal(1.93, Math.Round(Cy(r.AveragePerLength!.Value), 2));
+        C5.Rel(22000, i.ImpactedArea, Rel, what: "area");
+        C5.Rel(90000, i.CutVolume, Rel, what: "volume");
+        Assert.Equal(3333.333, Cy(i.CutVolume), 3);
+        Assert.Equal(0.51, Math.Round(i.ImpactedArea / 43560.0, 2));
+        Assert.Equal(6.67, Math.Round(Cy(r.AveragePerLength!.Value), 2));
         var iv = Assert.Single(i.Intervals);
         C5.Rel(s0, iv.From, Rel); C5.Rel(s1, iv.To, Rel);
         Assert.False(i.TouchesSearchLimit);
         C5.Rel(r.Band!.Cut, i.CutVolume, Rel, what: "band cut = impact cut");
         C5.Rel(500 * 200, r.BaseArea, Rel, what: "base area");
         Assert.True(r.HasBase);
-        Assert.Empty(i.Outlines);                  // rev 3: filled by rev3-integrator
+        var ring = Assert.Single(i.Outlines);
+        Assert.Equal(5, ring.Count);
+        C5.Rel(22000, OutlineTests.RingArea(ring), Rel, what: "ring area");
         Assert.Empty(r.Problems);
     }
 
     // ---------------------------------------------------------------------------------------
-    // T26: OHWM 97. Pre-rev-3 (EG_H clipped at 97): area 13,000 ft2, 24,500 ft3 = 907.407 CY, 1.81,
-    // plus E1003 bank cut 1,500 ft3 reported separately.
-    // rev 3: re-derived by rev3-integrator. Flat base 97, comparison FG_H: d = 97 - FG_H > 0 for
-    // |y| < 14.5. Area 29 * 500 = 14,500 ft2 (0.33 ac); section 73.5 ft2 -> 36,750 ft3 = 1,361.111 CY;
-    // average 2.722222 -> 2.72. E1003 is retired: there is no cut above the base, so band cut = impact cut.
+    // T26: OHWM_97 vs FG_H. d = 97 - FG_H > 0 for |y| < 14.5 (FG_H = 94 + 2(|y| - 10)/3 = 97 there):
+    // area 29 * 500 = 14,500 ft2 (0.333 ac -> 0.33); section 73.5 ft2 -> 36,750 ft3 = 1,361.111 CY;
+    // average 2.722222 -> 2.72. Pre-rev-3 (EG_H clipped at 97): 13,000 / 24,500. E1003 is retired:
+    // there is no cut above the base, so band cut = impact cut.
     // ---------------------------------------------------------------------------------------
 
     [Theory]
     [InlineData(0, 500)]
     [InlineData(500, 1000)]
-    public void T26_OHWM_97_and_E1003_bank_cut_reported_separately(double s0, double s1)
+    public void T26_OHWM_97(double s0, double s1)
     {
         var r = RunFlat(s0, s1, 97.0);
         var i = Ok(r);
@@ -105,26 +112,50 @@ public class ImpactTests(ITestOutputHelper output)
         Assert.Equal(0.33, Math.Round(i.ImpactedArea / 43560.0, 2));
         Assert.Equal(2.72, Math.Round(Cy(r.AveragePerLength!.Value), 2));
         C5.Rel(r.Band!.Cut, i.CutVolume, Rel, what: "band cut = impact cut");
+        C5.Rel(14500, OutlineTests.RingArea(Assert.Single(i.Outlines)), Rel, what: "ring area");
     }
 
     // ---------------------------------------------------------------------------------------
-    // T27 / E1001: OHWM 95 is below the 96 bed everywhere. Length 0, area 0, volume 0, average N/A,
-    // and the segment is noted as having no ground below OHWM. Handoff agrees.
-    // rev 3: re-derived by rev3-integrator. E1001 is "no cut in the segment": a flat base at 94, equal to
-    // the FG_H bed (d exactly 0 there) and below FG_H everywhere else. Zeros, N/A, one SV-E1001 note; the
-    // base still covers the band (100,000 ft2), and band cut is 0.
+    // T27: OHWM_95 vs FG_H. Pre-rev-3 OHWM 95 sat below the EG_H bed (96): zeros. As OHWM minus
+    // design it sits 1 ft above the FG_H sediment bed (94): d = 95 - FG_H > 0 for |y| < 11.5
+    // (94 + 2(|y| - 10)/3 = 95). Area 23 * 500 = 11,500 ft2 (0.264 ac -> 0.26); section 21.5 ft2 ->
+    // 10,750 ft3 = 398.148 CY; average 0.796296 -> 0.80.
     // ---------------------------------------------------------------------------------------
 
     [Theory]
     [InlineData(0, 500)]
     [InlineData(500, 1000)]
-    public void T27_E1001_OHWM_95_nothing_below(double s0, double s1)
+    public void T27_OHWM_95(double s0, double s1)
     {
-        var r = RunFlat(s0, s1, 94.0);
+        var r = RunFlat(s0, s1, 95.0);
+        var i = Ok(r);
+        C5.Rel(500, i.ImpactedLength, Rel, what: "length");
+        C5.Rel(11500, i.ImpactedArea, Rel, what: "area");
+        C5.Rel(10750, i.CutVolume, Rel, what: "volume");
+        Assert.Equal(398.148, Cy(i.CutVolume), 3);
+        Assert.Equal(0.26, Math.Round(i.ImpactedArea / 43560.0, 2));
+        Assert.Equal(0.80, Math.Round(Cy(r.AveragePerLength!.Value), 2));
+        C5.Rel(r.Band!.Cut, i.CutVolume, Rel, what: "band cut = impact cut");
+    }
+
+    // ---------------------------------------------------------------------------------------
+    // E1001 ("no cut in the segment", rev 3): OHWM_95 on [1500, 2000], past the transition, where
+    // FG_H = EG_H >= 96 > 95: d <= -1 everywhere. Zeros, N/A, no interval, no outline, one SV-E1001
+    // note; the base still covers the band (100,000 ft2), and band cut is 0. The flat 94 base (equal
+    // to the FG_H bed, d exactly 0 there) is the same case on [0, 500].
+    // ---------------------------------------------------------------------------------------
+
+    [Theory]
+    [InlineData(1500, 2000, 95.0)]
+    [InlineData(0, 500, 94.0)]
+    public void E1001_no_cut_in_the_segment(double s0, double s1, double z)
+    {
+        var r = RunFlat(s0, s1, z);
         var i = Ok(r);
         Assert.Equal((0.0, 0.0, 0.0), (i.ImpactedLength, i.ImpactedArea, i.CutVolume));
         Assert.Null(r.AveragePerLength);
         Assert.Empty(i.Intervals);
+        Assert.Empty(i.Outlines);
         Assert.True(r.HasBase);
         C5.Rel(500 * 200, r.BaseArea, Rel, what: "base area");
         var p = Assert.Single(r.Problems);
@@ -133,64 +164,65 @@ public class ImpactTests(ITestOutputHelper output)
     }
 
     // ---------------------------------------------------------------------------------------
-    // T28: OHWM 100, segment [1000, 1500]. Cut exists for x < 1310: impacted length 310.00.
-    // Volume = 300 * 52 + transition 280 (see FixtureSurfaces.FgH) = 15,880 ft3 = 588.148 CY.
-    // Handoff band: 577.78 (300 ft of full section = 15,600) to 597.04 (310 ft = 16,120). Inside.
-    // Area: 300 * 32 = 9,600 + transition bed 200 + both 10..16 cells fully positive 2 * 60 = 9,920 ft2.
-    // rev 3: re-derived by rev3-integrator. EG_H base, no OHWM clip: the same values (the clip removed nothing).
+    // T28: OHWM_100 vs FG_H, segment [1000, 1500]. Pre-rev-3 (EG_H clipped at 100) the cut ended in
+    // the 1300-1310 transition (310 ft, 15,880 ft3). As OHWM minus design the cut continues past it:
+    // FG_H = EG_H < 100 for |y| < 22 there, so the impacted length is the whole 500.
+    // Area: width 44 everywhere (the transition's 10..16 cells have corner depths 6, 4, 2, 2, all
+    // positive), 44 * 500 = 22,000 ft2.
+    // Volume: 300 * 180 (x 1000..1300) = 54,000; transition 1300..1310 (depth corners at x = 1300 /
+    // 1310: bed 6 / 4, |y| = 10 6 / 4, |y| = 16 2 / 2, |y| = 40 -6 / -6): bed cells planar, mean 5 *
+    // 200 = 1,000; 16..40 cells planar, positive part 2 * 6/2 * 10 * 2 = 120; 10..16 cells per side,
+    // diagonal (1300, 10)-(1310, 16) (FixtureSurfaces.FgH): (6, 4, 2) * 30 / 3 = 120 + (6, 2, 2) * 30 / 3
+    // = 100 -> 220, both sides 440; transition 1,560 (the other diagonal gives 200 per side, 1,520);
+    // 190 * 128 (x 1310..1500) = 24,320. Total 79,880 ft3 = 2,958.519 CY.
     // ---------------------------------------------------------------------------------------
 
     [Fact]
     public void T28_transition_segment()
     {
-        var r = RunH(1000, 1500);
+        var r = RunFlat(1000, 1500, 100.0);
         var i = Ok(r);
-        Assert.InRange(i.ImpactedLength, 310.00 - 0.01, 310.00 + 0.01);
-        C5.Rel(310, i.ImpactedLength, Rel, what: "length");
-        Assert.InRange(Cy(i.CutVolume), 577.78, 597.04);
-        C5.Rel(15880, i.CutVolume, Rel, what: "volume");
-        Assert.Equal(588.148, Cy(i.CutVolume), 3);
-        C5.Rel(9920, i.ImpactedArea, Rel, what: "area");
+        C5.Rel(500, i.ImpactedLength, Rel, what: "length");
+        C5.Rel(79880, i.CutVolume, Rel, what: "volume");
+        Assert.Equal(2958.519, Cy(i.CutVolume), 3);
+        C5.Rel(22000, i.ImpactedArea, Rel, what: "area");
         var iv = Assert.Single(i.Intervals);
-        C5.Rel(1000, iv.From, Rel); C5.Rel(1310, iv.To, Rel);
+        C5.Rel(1000, iv.From, Rel); C5.Rel(1500, iv.To, Rel);
+        C5.Rel(22000, OutlineTests.RingArea(Assert.Single(i.Outlines)), Rel, what: "ring area");
     }
 
     // ---------------------------------------------------------------------------------------
-    // T30 / E1002: offsets (-12, +12). Ground below OHWM 100 is |y| < 22, which reaches the lateral
-    // edges at +-12 (EG 96.667 there): flagged, values still shown. Area 24 * 500 = 12,000; volume
-    // = 500 * (40 + 2 * integral_10^12 (2 - (y-10)/3) dy) = 500 * (40 + 2 * 3.3333) = 23,333.33 ft3.
-    // Control: offsets +-100 put the edges on 106 ground: no flag.
-    // rev 3: re-derived by rev3-integrator. E1002 is "cut reaches a lateral edge": the cut is 1.333 ft deep
-    // at |y| = 12, so (-12, +12) still flags with the same values. The cut ends at |y| = 16, so the
-    // pre-rev-3 pair (-23, 23) / (-21.9, 23) becomes (-17, 17) no flag / (-15.9, 17) flag.
+    // T30 / E1002: OHWM_100 vs FG_H, offsets (-12, +12). The cut (|y| < 22) reaches the lateral edges:
+    // d at |y| = 12 is 100 - (94 + 4/3) = 4.667. Flagged, values still shown. Area 24 * 500 = 12,000;
+    // volume = 500 * (bed 120 + 2 * integral_10^12 (6 - 2(y - 10)/3) dy) = 500 * (120 + 2 * (12 - 4/3))
+    // = 70,666.667 ft3. Control: offsets +-100 put the edges on d = -6: no flag. The cut ends at
+    // |y| = 22, so (-23, 23) does not flag (d = -1/3 at 23) and (-21.9, 23) does (d = +1/30 at 21.9).
     // ---------------------------------------------------------------------------------------
 
     [Fact]
     public void T30_E1002_search_limit_flag()
     {
-        var r = RunH(0, 500, -12, 12);
+        var r = RunFlat(0, 500, 100.0, -12, 12);
         var i = Ok(r);
         Assert.True(i.TouchesSearchLimit);
         var p = Assert.Single(r.Problems);
         Assert.Equal((IntegratorCodes.SearchLimit, Severity.Warning), (p.Code, p.Severity));
         C5.Rel(12000, i.ImpactedArea, Rel);
-        C5.Rel(500 * (40 + 2 * (4 - 4.0 / 6)), i.CutVolume, Rel);
+        C5.Rel(500 * (120 + 2 * (12 - 4.0 / 3)), i.CutVolume, Rel);
 
-        Assert.False(Ok(RunH(0, 500)).TouchesSearchLimit);
-        // Just outside the cut (|y| = 16, depth 0): no flag. One edge inside: flag.
-        Assert.False(Ok(RunH(0, 500, -17, 17)).TouchesSearchLimit);
-        Assert.True(Ok(RunH(0, 500, -15.9, 17)).TouchesSearchLimit);
+        Assert.False(Ok(RunFlat(0, 500, 100.0)).TouchesSearchLimit);
+        Assert.False(Ok(RunFlat(0, 500, 100.0, -23, 23)).TouchesSearchLimit);
+        Assert.True(Ok(RunFlat(0, 500, 100.0, -21.9, 23)).TouchesSearchLimit);
     }
 
     // ---------------------------------------------------------------------------------------
-    // E1004: swap the surfaces (base = FG_H, comparison = EG_H): all of it becomes fill below OHWM.
-    // Base < 100 for |y| < 22; fill = 26,000 ft3 per 500 ft, none of it counted in rows 6 to 9.
-    // rev 3: re-derived by rev3-integrator. E1004 is retired: the comparison above the base is the band's
-    // fill (exported as the analysis's fill), never counted. d <= 0 everywhere: zeros, N/A, SV-E1001.
+    // E1004 is retired (7.10 rev 3): the comparison above the base is the band's fill, exported as
+    // the analysis's fill and never counted. Swapped surfaces (base FG_H, comparison EG_H): d <= 0
+    // everywhere, band fill 26,000 ft3 per 500 ft, impact zeros, N/A, SV-E1001.
     // ---------------------------------------------------------------------------------------
 
     [Fact]
-    public void E1004_fill_below_OHWM_is_reported_not_counted()
+    public void Comparison_above_base_is_band_fill_never_impact()
     {
         var seg = C5.Seg(0, 500);
         var r = OverlayIntegrator.IntegrateSegment(FixtureSurfaces.FgH(), FixtureSurfaces.EgH(), S, seg,
@@ -233,11 +265,11 @@ public class ImpactTests(ITestOutputHelper output)
     }
 
     // ---------------------------------------------------------------------------------------
-    // E1006: low ground below OHWM away from the channel (a pond in the overbank, C5Fixtures)
-    // with cut counts under the plan-area rule and its interval appears: [0, 310] and [707.5, 792.5].
+    // E1006 is retired (7.10 rev 3); what stands is the plan-area rule for a second cut region away
+    // from the channel (a pond in the overbank, C5Fixtures): its cut counts and its interval appears.
+    // With no base < OHWM clip the pond counts wherever d > 0, the open x = (700, 800), y = (50, 70):
+    // intervals [0, 310] and [700, 800], length 310 + 100. Pre-rev-3 (clipped at 100): [707.5, 792.5].
     // E1007 slivers: a pond cut of 0.001 ft counts by default and disappears with MinCutDepth 0.01.
-    // rev 3: re-derived by rev3-integrator. No base < OHWM clip: the pond's cut counts wherever
-    // d > 0, the open x = (700, 800) (C5Fixtures), so its interval is [700, 800] and the length 310 + 100.
     // ---------------------------------------------------------------------------------------
 
     [Fact]
@@ -346,24 +378,21 @@ public class ImpactTests(ITestOutputHelper output)
     }
 
     // ---------------------------------------------------------------------------------------
-    // E1010: per-segment OHWM. Segment 1 uses the default 100 (T25 values), segment 2 overrides 97
-    // (T26 values). Segments partition by station, so band totals add up to the whole band.
-    // rev 3: re-derived by rev3-integrator. E1010 is retired (no OHWM elevation, no per-segment override);
-    // what stands is the partition: both segments on EG_H/FG_H give T25's 26,000 ft3 each, and band totals
-    // still add up to the whole band.
+    // E1010 is retired (7.10 rev 3: no OHWM elevation, no per-segment override); what stands is the
+    // partition. Both segments on OHWM_100 vs FG_H give T25's 90,000 ft3 each, and band totals add up
+    // to the whole band.
     // ---------------------------------------------------------------------------------------
 
     [Fact]
-    public void E1010_per_segment_override_without_double_counting()
+    public void Segments_partition_without_double_counting()
     {
-        var s1 = C5.Seg(0, 500);
-        var s2 = C5.Seg(500, 1000);
-        var r1 = OverlayIntegrator.IntegrateSegment(FixtureSurfaces.EgH(), FixtureSurfaces.FgH(), S, s1, FakeBands.Band(S, 0, 500, -100, 100), "SEDIMENT");
-        var r2 = OverlayIntegrator.IntegrateSegment(FixtureSurfaces.EgH(), FixtureSurfaces.FgH(), S, s2, FakeBands.Band(S, 500, 1000, -100, 100), "SEDIMENT");
-        C5.Rel(26000, Ok(r1).CutVolume, Rel);
-        C5.Rel(26000, Ok(r2).CutVolume, Rel);
-        var whole = OverlayIntegrator.IntegrateBand(FixtureSurfaces.EgH(), FixtureSurfaces.FgH(), FakeBands.Band(S, 0, 1000, -100, 100)).Totals!;
+        var r1 = RunFlat(0, 500, 100.0);
+        var r2 = RunFlat(500, 1000, 100.0);
+        C5.Rel(90000, Ok(r1).CutVolume, Rel);
+        C5.Rel(90000, Ok(r2).CutVolume, Rel);
+        var whole = OverlayIntegrator.IntegrateBand(FlatBase(100.0), FixtureSurfaces.FgH(), FakeBands.Band(S, 0, 1000, -100, 100)).Totals!;
         C5.Rel(whole.Cut, r1.Band!.Cut + r2.Band!.Cut, Rel);
+        C5.Rel(whole.Fill, r1.Band.Fill + r2.Band.Fill, Rel);
         C5.Rel(whole.PlanArea, r1.Band.PlanArea + r2.Band.PlanArea, Rel);
     }
 
@@ -421,16 +450,17 @@ public class ImpactTests(ITestOutputHelper output)
     // ---------------------------------------------------------------------------------------
     // Robustness: base and comparison triangulated on different grids (EG_H on 37 ft cells, FG_H
     // on 50 ft cells; the same surfaces). Where they coincide, depth is zero only up to plane
-    // rounding (about 1e-13), which must not count as cut: the T25, T26 and T28 values hold with
-    // default settings, and an OHWM equal to the bed elevation (96) puts nothing below it.
-    // rev 3: re-derived by rev3-integrator. The OHWM-elevation snap is gone with the clip (D9); the depth
-    // snap stays. baseZ NaN = EG_H base (37 ft cells); otherwise the flat-base construction against
-    // FG_H on 50 ft cells: the T26 row is flat 97 (14,500 / 36,750), and the snap row is a flat base equal
-    // to the FG_H bed (94), where d is 0 up to plane rounding: no phantom cut.
+    // rounding (about 1e-13), which must not count as cut (the depth snap, D9; the OHWM-elevation
+    // snap retired with the clip). baseZ NaN = EG_H base, which coincides with FG_H for |y| >= 16 and
+    // x >= 1310 (EG_H - FG_H: 32 ft cut, 52 ft2 section, 16,000 / 26,000 per 500 ft; [1000, 1500] ends
+    // in the transition at 1310: 9,920 / 15,880; [1500, 2000] nothing). Otherwise the OHWM surface at
+    // baseZ against FG_H on 50 ft cells: 100 -> T25 (22,000 / 90,000), 97 -> T26 (14,500 / 36,750),
+    // 94 -> equal to the FG_H bed, d 0 up to plane rounding: no phantom cut.
     // ---------------------------------------------------------------------------------------
 
     [Theory]
     [InlineData(0, 500, double.NaN, 500, 16000, 26000)]
+    [InlineData(0, 500, 100, 500, 22000, 90000)]
     [InlineData(500, 1000, 97, 500, 14500, 36750)]
     [InlineData(1000, 1500, double.NaN, 310, 9920, 15880)]
     [InlineData(1500, 2000, double.NaN, 0, 0, 0)]
@@ -453,11 +483,12 @@ public class ImpactTests(ITestOutputHelper output)
     /// The same cases with every coordinate inexact: Fixture H and alignment S rotated by 17 degrees
     /// about the origin and moved to (1234.567, -890.123). Rotation preserves lengths, areas and
     /// volumes, so the expected values are unchanged; only rounding differs. Identical and different
-    /// grids both run. rev 3: re-derived by rev3-integrator; baseZ as in the test above (NaN = EG_H,
-    /// else a flat base at that elevation, which has one triangulation, so both passes use it).
+    /// grids both run. baseZ as in the test above (NaN = EG_H, else the OHWM surface at that
+    /// elevation, which has one triangulation, so both passes use it).
     /// </summary>
     [Theory]
     [InlineData(0, 500, double.NaN, 500, 16000, 26000)]
+    [InlineData(0, 500, 100, 500, 22000, 90000)]
     [InlineData(500, 1000, 97, 500, 14500, 36750)]
     [InlineData(1000, 1500, double.NaN, 310, 9920, 15880)]
     [InlineData(1500, 2000, double.NaN, 0, 0, 0)]
@@ -496,15 +527,14 @@ public class ImpactTests(ITestOutputHelper output)
     }
 
     [Fact]
-    public void Invalid_settings_and_OHWM_are_errors_with_no_numbers()
+    public void Invalid_settings_and_empty_surface_are_errors_with_no_numbers()
     {
+        // The NaN OHWM elevation case (SV-E1010) retired with OhwmSpec (rev 3): no OHWM elevation
+        // reaches the integrator, so settings and surfaces are all there is to validate.
         var bad = RunH(0, 500, settings: new IntegratorSettings(MinCutDepth: -1));
         Assert.False(bad.Succeeded);
         Assert.True(double.IsNaN(bad.BaseArea));
         Assert.Equal(IntegratorCodes.InvalidSettings, Assert.Single(bad.Problems).Code);
-
-        // rev 3: re-derived by rev3-integrator. The NaN OHWM elevation case (SV-E1010) is retired with
-        // OhwmSpec: no OHWM elevation reaches the integrator, so there is nothing to validate.
 
         var empty = OverlayIntegrator.IntegrateSegment(FixtureSurfaces.EgH(), new C5EmptySource(), S, C5.Seg(0, 500),
             FakeBands.Band(S, 0, 500, -100, 100), "SEDIMENT");

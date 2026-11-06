@@ -133,7 +133,9 @@ internal sealed class SelfTestRunner
 
     private static Guid DeterministicId(string name) => RunIds.For("analysis:" + name);
 
-    private AnalysisDef[] Sediment() => [new AnalysisDef(_analysisH, "SEDIMENT", FixtureSpec.Names.EgH, FixtureSpec.Names.FgH)];
+    /// <summary>The SEDIMENT analysis on Fixture H: base <paramref name="baseSurface"/> (an OHWM surface for the rev 3 HCFCD checks; EG_H when null), comparison FG_H.</summary>
+    private AnalysisDef[] Sediment(string? baseSurface = null) =>
+        [new AnalysisDef(_analysisH, "SEDIMENT", baseSurface ?? FixtureSpec.Names.EgH, FixtureSpec.Names.FgH)];
 
     private static double Cy(double ft3) => ft3 / FixtureSpec.CubicFeetPerCubicYard;
 
@@ -204,6 +206,9 @@ internal sealed class SelfTestRunner
 
     public void Run()
     {
+        // Rev 3: Fixture H's OHWM surfaces. SVFIXTURE H builds them in the drawing (installed bindings);
+        // the in-memory fake world gets the same flat triangles here.
+        if (_world is FakeWorld fake) Fixtures.AddOhwmSurfaces(fake.Surfaces);
         RunOutcome? t1 = null, t2 = null;
         Try("CONFIG", Config);
         Try("LIFETIME", Lifetime);
@@ -218,15 +223,15 @@ internal sealed class SelfTestRunner
         Try("T3", T3);
         Try("T4", T4);
         Try("T16", T16Fixed);
-        // Rev 3 (X5): OHWM is a surface, so these run the HCFCD preset on Fixture H's own pair (EG_H base,
-        // FG_H comparison) with no OHWM elevation. rev 3: expected values re-derived by rev3-integrator.
-        Try("T25", () => Hcfcd("T25", "0, 500, 1000", -100, 100));
-        NotRun("T26", "each segment L 500, A 13,000 ft2, V 907.407 CY (OHWM 97)",
-            "rev 3: OHWM is a surface (X5); OHWM 97 needs Fixture H's flat OHWM surface, added by rev3-integrator");
-        NotRun("T27", "L 0, A 0, V 0, average N/A, SV-E1001 (OHWM 95)",
-            "rev 3: OHWM is a surface (X5); OHWM 95 needs Fixture H's flat OHWM surface, added by rev3-integrator");
-        Try("T28", () => Hcfcd("T28", "1000, 1500", -100, 100));
-        Try("T30", () => Hcfcd("T30", "0, 500, 1000", -12, 12));
+        // Rev 3 (NOW.md X5, rule 6): OHWM is a surface. Each HCFCD analysis takes Fixture H's flat OHWM
+        // surface at the stated elevation as its base and FG_H as its comparison; every expected value
+        // is OHWM minus design, derived in FixtureSpec.Expected.
+        Try("T25", () => Hcfcd("T25", "0, 500, 1000", FixtureSpec.Names.Ohwm100, -100, 100));
+        Try("T26", () => Hcfcd("T26", "0, 500, 1000", FixtureSpec.Names.Ohwm97, -100, 100));
+        Try("T27", () => Hcfcd("T27", "0, 500, 1000", FixtureSpec.Names.Ohwm95, -100, 100));
+        Try("T27.E1001", () => Hcfcd("T27.E1001", "1500, 2000", FixtureSpec.Names.Ohwm95, -100, 100));
+        Try("T28", () => Hcfcd("T28", "1000, 1500", FixtureSpec.Names.Ohwm100, -100, 100));
+        Try("T30", () => Hcfcd("T30", "0, 500, 1000", FixtureSpec.Names.Ohwm100, -12, 12));
         if (t2 is not null)
         {
             Try("E802", () => E802(t2));
@@ -433,40 +438,64 @@ internal sealed class SelfTestRunner
             "S, 0-800 at fixed 1:50 does not fit the 12 x 5 viewport (needs 16 x 4)");
     }
 
-    // Rev 3 (X5): base EG_H, comparison FG_H, no OHWM elevation. The pre-rev-3 T25, T28 and T30 runs used
-    // OHWM 100, and EG_H is below 100 for |y| < 22, wider than FG_H's 32 ft cut (|y| < 16): that clip removed
-    // nothing, so EG_H - FG_H unclipped gives the same expected values. rev 3: expected values re-derived by
-    // rev3-integrator (which moves these onto Fixture H's flat OHWM surface).
-    private void Hcfcd(string id, string breaks, double left, double right)
+    // Rev 3 (NOW.md X5, rule 6): base = Fixture H's flat OHWM surface at the stated elevation, comparison
+    // = FG_H, so impact cut is d = OHWM - FG_H > 0. Expected values and their derivations are in
+    // FixtureSpec.Expected; the one-line form sits beside each check below. Every impacted segment must
+    // also carry its outline (ImpactResult.Outlines, D13): rings whose signed areas sum to the impacted
+    // area within 1e-9 relative.
+    private void Hcfcd(string id, string breaks, string ohwm, double left, double right)
     {
-        var o = Regen(Def(id, breaks, preset: ReportPreset.HcfcdSegment, analyses: Sediment(),
+        var o = Regen(Def(id.Replace(".", "", StringComparison.Ordinal), breaks, preset: ReportPreset.HcfcdSegment, analyses: Sediment(ohwm),
             area: AreaUnit.Acres, left: left, right: right));
         if (!o.Result.Succeeded) { Add(id, false, Codes(o), "succeeded", FirstError(o)); return; }
         var rows = o.Result.Segments.OrderBy(r => r.StartStation).ToList();
-        string measured = string.Join("; ", rows.Select(r => r.Impact is { } i ? $"L {F(i.ImpactedLength)} A {F(i.ImpactedArea)} ft2 V {F(Cy(i.CutVolume))} CY avg {(i.ImpactedLength > 0 ? F(Cy(i.CutVolume) / i.ImpactedLength) : "N/A")}" : "no impact"));
+        string measured = string.Join("; ", rows.Select(r => r.Impact is { } i
+            ? $"L {F(i.ImpactedLength)} A {F(i.ImpactedArea)} ft2 V {F(Cy(i.CutVolume))} CY avg {(i.ImpactedLength > 0 ? F(Cy(i.CutVolume) / i.ImpactedLength) : "N/A")} outline {i.Outlines.Count} ring(s) {F(i.Outlines.Sum(ShoelaceArea))} ft2"
+            : "no impact"));
+        string what = $"H, {ohwm} vs {FixtureSpec.Names.FgH}, breaks {breaks}, offsets ({F(left)}, {F(right)}), through the pipeline and C5 (HCFCD preset)";
+        static bool Outlined(ImpactResult i) =>
+            i.Outlines.Count > 0 && Math.Abs(i.Outlines.Sum(ShoelaceArea) - i.ImpactedArea) <= 1e-9 * i.ImpactedArea;
+        bool Each(int count, double length, double areaFt2, double volumeFt3) =>
+            rows.Count == count && rows.All(r => r.Impact is { } i && Math.Abs(i.ImpactedLength - length) <= 0.01
+                && Math.Abs(i.ImpactedArea - areaFt2) <= 0.01 && Math.Abs(Cy(i.CutVolume) - Cy(volumeFt3)) <= _tolCy && Outlined(i));
+        string Want3(double areaFt2, double volumeFt3) =>
+            $"each segment L 500, A {F(areaFt2)} ft2 ({F(areaFt2 / 43_560)} ac), V {F(Cy(volumeFt3))} CY, avg {F(Cy(volumeFt3) / 500)}; outline rings summing to A";
         switch (id)
         {
-            case "T25":
-            {
-                double area = Want.T25AreaFt2, vol = Want.T25VolumeFt3;
-                bool ok = rows.Count == 2 && rows.All(r => r.Impact is { } i && Math.Abs(i.ImpactedLength - 500) <= 0.01
-                    && Math.Abs(i.ImpactedArea - area) <= 0.01 && Math.Abs(Cy(i.CutVolume) - Cy(vol)) <= _tolCy);
-                Add(id, ok, measured, $"each segment L 500, A {F(area)} ft2 ({F(area / 43_560)} ac), V {F(Cy(vol))} CY, avg {F(Cy(vol) / 500)}",
-                    "H, EG_H vs FG_H (rev 3: no OHWM elevation), breaks 0, 500, 1000, through the pipeline and C5 (HCFCD preset)");
+            case "T25":   // d = 100 - FG_H > 0 for |y| < 22: A 44 x 500 = 22,000; section 120 + 2 x (24 + 6) = 180 -> V 90,000 ft3
+                Add(id, Each(2, 500, Want.T25OhwmAreaFt2, Want.T25OhwmVolumeFt3), measured, Want3(Want.T25OhwmAreaFt2, Want.T25OhwmVolumeFt3), what);
                 break;
-            }
-            case "T28":
+            case "T26":   // d = 97 - FG_H > 0 for |y| < 14.5: A 29 x 500 = 14,500; section 60 + 2 x 6.75 = 73.5 -> V 36,750 ft3
+                Add(id, Each(2, 500, Want.T26OhwmAreaFt2, Want.T26OhwmVolumeFt3), measured, Want3(Want.T26OhwmAreaFt2, Want.T26OhwmVolumeFt3), what);
+                break;
+            case "T27":   // d = 95 - FG_H > 0 for |y| < 11.5 (1 ft above the 94 sediment bed): A 23 x 500 = 11,500; section 20 + 2 x 0.75 = 21.5 -> V 10,750 ft3
+                Add(id, Each(2, 500, Want.T27OhwmAreaFt2, Want.T27OhwmVolumeFt3), measured, Want3(Want.T27OhwmAreaFt2, Want.T27OhwmVolumeFt3), what);
+                break;
+            case "T27.E1001":   // past the transition FG_H = EG_H >= 96 > 95: d <= -1, nothing impacted
             {
                 var i = rows.SingleOrDefault()?.Impact;
-                bool ok = i is not null && Math.Abs(i.ImpactedLength - Want.T28Length) <= 0.01
-                          && Cy(i.CutVolume) >= Cy(Want.T28VolumeMinFt3) - _tolCy && Cy(i.CutVolume) <= Cy(Want.T28VolumeMaxFt3) + _tolCy;
-                Add(id, ok, measured, $"L {F(Want.T28Length)} +-0.01; V between {F(Cy(Want.T28VolumeMinFt3))} and {F(Cy(Want.T28VolumeMaxFt3))} CY", "H, EG_H vs FG_H, segment [1000, 1500]: the cut ends in the 1300-1310 transition");
+                bool note = o.Result.Problems.Any(p => p.Code == IntegratorCodes.NoCut);
+                bool ok = i is not null && i.ImpactedLength == 0 && i.ImpactedArea == 0 && i.CutVolume == 0 && i.Intervals.Count == 0 && i.Outlines.Count == 0
+                          && ImpactQuantities.Average(i) is null && note;
+                Add(id, ok, measured + $"; {IntegratorCodes.NoCut} {note}", $"L 0, A 0, V 0, average N/A, no outline; {IntegratorCodes.NoCut} note", what + ": OHWM_95 is below the design bed (96) past the transition");
                 break;
             }
-            default:   // T30
+            case "T28":   // cut runs past the transition (FG_H = EG_H < 100 for |y| < 22): L 500, A 22,000; V 54,000 + transition 1,520..1,560 + 24,320
+            {
+                var i = rows.SingleOrDefault()?.Impact;
+                bool ok = i is not null && Math.Abs(i.ImpactedLength - Want.T28Length) <= 0.01 && Math.Abs(i.ImpactedArea - Want.T28AreaFt2) <= 0.01
+                          && Cy(i.CutVolume) >= Cy(Want.T28VolumeMinFt3) - _tolCy && Cy(i.CutVolume) <= Cy(Want.T28VolumeMaxFt3) + _tolCy && Outlined(i);
+                Add(id, ok, measured,
+                    $"L {F(Want.T28Length)} +-0.01; A {F(Want.T28AreaFt2)} ft2; V between {F(Cy(Want.T28VolumeMinFt3))} and {F(Cy(Want.T28VolumeMaxFt3))} CY (the transition diagonal); outline rings summing to A",
+                    what + ": as OHWM minus design the cut runs past the 1300-1310 transition");
+                break;
+            }
+            default:   // T30: the cut (|y| < 22) reaches the +-12 edges: SV-E1002; A 24 x 500 = 12,000; section 120 + 2 x (12 - 4/3) -> V 70,666.667 ft3
             {
                 bool flagged = o.Result.Problems.Any(p => p.Code == IntegratorCodes.SearchLimit);
-                Add(id, flagged, $"codes {Codes(o)}", $"{IntegratorCodes.SearchLimit} raised (E1002)", "H, EG_H vs FG_H, offsets (-12, +12): the cut (1.33 ft deep at |y| = 12) reaches the lateral limit");
+                Add(id, flagged && Each(2, 500, Want.T30AreaFt2, Want.T30VolumeFt3), measured + $"; codes {Codes(o)}",
+                    $"{IntegratorCodes.SearchLimit} raised (E1002); " + Want3(Want.T30AreaFt2, Want.T30VolumeFt3),
+                    what + ": the cut (4.67 ft deep at |y| = 12) reaches the lateral limit");
                 break;
             }
         }
@@ -831,13 +860,44 @@ internal sealed class SelfTestRunner
             $"A, 0-500-1000 from FX's code-built template, saved to {Path.GetFileName(path)} and read back with ReadDwgFile");
     }
 
-    // rev 3: expected values re-derived by rev3-integrator. T31 regenerated H with OHWM 100, typed into the
-    // centre-coordinates cell, deleted WETLANDS, regenerated with OHWM 97 and expected rows 6, 7 and 9 at T26's
-    // values with the edits and table handles kept (full body at commit 36bc0c5, SelfTestRunner.T31). The OHWM
-    // change has no rev 3 form until rev3-integrator adds Fixture H's flat OHWM surfaces, so it reports NOT RUN.
-    private void T31() =>
-        NotRun("T31", "typed text and the deletion kept; rows 6, 7 and 9 show T26's values (500 LF, 0.30 AC, 907 CY, 1.81); table handles unchanged",
-            "rev 3: OHWM is a surface (X5); the OHWM 100 -> 97 change needs Fixture H's flat OHWM surfaces, added by rev3-integrator");
+    // T31 in rev 3 form (NOW.md X5): T25's run (base OHWM_100, comparison FG_H), type into the centre-
+    // coordinates cell, delete WETLANDS, then the OHWM change, which is now a change of base surface from
+    // OHWM_100 to OHWM_97 on the same analysis, and regenerate. Rows 6, 7 and 9 must show T26's values as
+    // the table formats them (FixtureSpec.Expected.T31*: 500 LF; 14,500 / 43,560 = 0.33 AC; 36,750 / 27 =
+    // 1,361 CY; 1,361.111 / 500 = 2.72), with the typed text, the deletion and the table handles kept.
+    private void T31()
+    {
+        var run = Def("T31", "0, 500, 1000", preset: ReportPreset.HcfcdSegment, analyses: Sediment(FixtureSpec.Names.Ohwm100), area: AreaUnit.Acres);
+        var first = Regen(run);
+        if (!first.Result.Succeeded) { Add("T31", false, Codes(first), "succeeded", FirstError(first)); return; }
+        var hcfcd = first.Record!.Owned.Where(o => o.Key.Role == OwnedRole.ModelTable && o.Key.Qualifier == OwnedQualifiers.HcfcdTable).OrderBy(o => o.Handle).ToList();
+        if (hcfcd.Count != 2) { Add("T31", false, $"{hcfcd.Count} HCFCD tables", "2", "one HCFCD table per segment in model space"); return; }
+        const string typed = "N 13,812,345.67  E 3,101,234.56 (TYPED)";
+        string handle = hcfcd[0].Handle;
+        int rowsBefore = WithTransaction(tr =>
+        {
+            var t = (Table)tr.GetObject(Id(_doc.Database, handle), OpenMode.ForWrite);
+            t.Cells[FindRow(t, "CENTER COORDINATES"), 1].TextString = typed;
+            t.DeleteRows(FindRow(t, "WETLANDS"), 1);
+            return t.Rows.Count;
+        });
+        var second = Regen(run with { Analyses = Sediment(FixtureSpec.Names.Ohwm97) });
+        if (!second.Result.Succeeded) { Add("T31", false, Codes(second), "succeeded", FirstError(second)); return; }
+        bool handles = hcfcd.All(h => second.Record!.Owned.Any(o => o.Key == h.Key && o.Handle == h.Handle));
+        var (kept, gone, rows, length, area, sediment) = WithTransaction(tr =>
+        {
+            var t = (Table)tr.GetObject(Id(_doc.Database, handle), OpenMode.ForRead);
+            string Row(int r) => r < 0 ? "missing" : string.Join(" | ", Enumerable.Range(0, t.Columns.Count).Select(c => TableRenderer.Plain(t, r, c)));
+            return (TableRenderer.Plain(t, FindRow(t, "CENTER COORDINATES"), 1) == typed, FindRow(t, "WETLANDS") < 0, t.Rows.Count,
+                Row(FindRow(t, "TOTAL IMPACTED LENGTH")), Row(FindRow(t, "TOTAL IMPACTED AREA")), Row(FindRow(t, "SEDIMENT")));
+        });
+        bool values = length.Contains($"| {Want.T31Length} |", StringComparison.Ordinal) && area.Contains($"| {Want.T31AreaAc} |", StringComparison.Ordinal)
+                      && sediment.StartsWith($"SEDIMENT | {Want.T31Volume} | {Want.T31Average}", StringComparison.Ordinal);
+        Add("T31", kept && gone && rows == rowsBefore && handles && values,
+            $"typed text kept {kept}; WETLANDS deletion kept {gone} ({rows} rows, {rowsBefore} after the edit); handles unchanged {handles}; rows 6, 7, 9: '{length}' ; '{area}' ; '{sediment}'",
+            $"typed text and the deletion kept; rows 6, 7 and 9 show T26's values ({Want.T31Length} LF, {Want.T31AreaAc} AC, {Want.T31Volume} CY, {Want.T31Average}); table handles unchanged",
+            $"H: HCFCD tables, type into the centre-coordinates cell, delete WETLANDS, base {FixtureSpec.Names.Ohwm100} -> {FixtureSpec.Names.Ohwm97}, regen");
+    }
 
     /// <summary>E217: a run made with a rotated UCS current gives the WCS run's boundaries and volumes exactly (geometry is WCS; only picks are transformed).</summary>
     private void E217()
