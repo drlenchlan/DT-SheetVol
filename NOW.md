@@ -15,6 +15,7 @@ what is true; HANDOFF.md wins on method. Every figure is MEASURED unless marked 
 | X2 | Section 11: `SheetVol.sln` | The solution is `SheetVol.slnx`; the .NET 10 SDK's `dotnet new sln` emits the XML format | Wave 0 |
 | X3 | Section 11: `accoreconsole ... /isolate svtest ...` | `/isolate` dropped; the run with it hung before reading the script. Working form is in `tools/test-headless.ps1`: `/i /s /product C3D /l en-US`, stdin closed, `LAN_DT_BATCH=1` | Wave 0 |
 | X4 | Section 5.1: "Custom code must be in a trusted location" | Confirmed the hard way: `NETLOAD` from `C:\LAN-DT-build` fails with "Unable to load ... assembly" under `SECURELOAD=1`. The runner stages the build into `%APPDATA%\Autodesk\ApplicationPlugins\SheetVol-dev.bundle\Contents\` and scripts load it via `(getenv "SHEETVOL_DLL")` | Wave 0 |
+| X5 | A10, A11, 6.15: OHWM is one elevation per run (override per segment); "below OHWM" is the plan area where existing ground is lower than that elevation; cut counted is existing minus design inside that area | **OHWM is a surface in the drawing, not an elevation.** The HCFCD preset is an ordinary analysis with the OHWM surface as base and the proposed surface as comparison: impact cut is where proposed is below OHWM (OHWM minus proposed), impacted area is the plan area of that cut, impacted length its station extent. Existing ground is not part of rows 6 to 9. Consequences: `OhwmSpec` (elevation) is replaced by an OHWM surface name on the analysis (contract revision 3, 12.6, Dan's call recorded here); the 6.15 integrator keeps its triangle overlay but its half-plane clip `base < OHWM` goes; T25 to T30 fixtures become a flat OHWM surface at the stated elevation and their expected numbers are recomputed as OHWM minus design (not existing minus design); E1003 "cut above OHWM" and E1004 "fill below OHWM" become "proposed above OHWM" (not counted, exported for QA); E1006 side-ditch rule falls away. A10 is closed by this row; A12 (acre decimals) still open | Dan 2026-11-06: "OHWM is just another surface. It would be the base surface in the comparison and the proposed surface would generate a cut when below" |
 
 ## Platform on this seat (MEASURED 2026-11-05)
 
@@ -129,7 +130,7 @@ Filled as workers return. Status: TODO / IN PROGRESS / GREEN / MANUAL-OK / BLOCK
 | P16 in full Civil 3D (`SVHELLO`) | DONE 2026-11-05 |
 | Four dialog artboards as PNG in `docs/ui/` | OPEN, before Wave 2 |
 | HCFCD table as it should look in CAD, plus a sample drawing with real surfaces and an OHWM elevation | OPEN, before Wave 2 |
-| Confirm A10 (what "below OHWM" means) and A12 (acre decimals) | OPEN, before Wave 2 |
+| Confirm A10 (what "below OHWM" means) and A12 (acre decimals) | A10 CLOSED 2026-11-06 (X5: OHWM is a surface); A12 OPEN |
 | View-frame fixtures `frames-src.dwg`, `frames-sheets.dwg`, `frames-ref.dwg` per `docs/dan-probe-steps.md` step 2 (no LAN templates) | OPEN, needed for P14 and L1 |
 | Run `SVPROBEUI` once, then the P15 interactive pass, per `docs/dan-probe-steps.md` (about 25 minutes) | OPEN, steps written 2026-11-05 |
 | LAN sheet template with `SV-VPORT` viewport and table anchor block; table style and layer names | OPEN, before G3 |
