@@ -24,13 +24,15 @@ public sealed record RunLoadResult(
 /// <see cref="SegmentOverrides.OffsetLeft"/> / <see cref="SegmentOverrides.OffsetRight"/> added,
 /// all optional. A schema 1 run reads as schema 2 with no draw options (<c>Draw = null</c>, which
 /// draws everything) and no offset overrides; <see cref="RunLoadResult.StoredSchemaVersion"/>
-/// still reports 1.
+/// still reports 1. 3 (contract rev 3): <c>ohwm</c> removed, <see cref="AnalysisDef.VolumeSurface"/>
+/// added (optional). A schema 1 or 2 run reads as schema 3: its <c>ohwm</c> member, if any, is an
+/// unmapped member and is skipped, and every analysis has <c>VolumeSurface = null</c> (a pair).
 /// </para>
 /// </summary>
 public static class RunPersistence
 {
     /// <summary>The run schema version this plugin reads and writes. Matches the <see cref="RunDefinition.SchemaVersion"/> default.</summary>
-    public const int PluginSchemaVersion = 2;
+    public const int PluginSchemaVersion = 3;
 
     /// <summary>The 6.9 ceiling for one Xrecord string.</summary>
     public const int MaxChunkLength = 250;
@@ -85,6 +87,8 @@ public static class RunPersistence
             if (run is null) return Refused(stored, "Stored run JSON is null.");
             // Schema 1 has no "draw" and no override offsets; both are optional constructor
             // parameters, so they read as null: draw everything, no per-segment offsets.
+            // Schema 1 and 2 may carry "ohwm" (retired in rev 3): unmapped, so skipped. Neither
+            // has "volumeSurface": optional, so null (a pair analysis).
             return new RunLoadResult(run with { SchemaVersion = PluginSchemaVersion }, true, stored, PluginSchemaVersion, []);
         }
         catch (JsonException ex)

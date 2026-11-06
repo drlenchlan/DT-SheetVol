@@ -90,6 +90,7 @@ internal sealed class FakeSheetVolSession : ISheetVolSession
 
     public IReadOnlyList<string> AlignmentNames => Alignments;
     public IReadOnlyList<string> TinSurfaceNames => Surfaces;
+    public IReadOnlyList<VolumeSurfaceInfo> VolumeSurfaces => [];   // rev 3 adoption: none until the rev3-dialog package needs them
 
     public event EventHandler SourcesChanged
     {

@@ -52,8 +52,10 @@ public static partial class WritersModelCheck
 
     private static readonly HState Hc = new();
 
+    // Rev 3: no outlines here (the rev3-output package draws them from ImpactResult.Outlines); the hand-built
+    // values below are the pre-rev-3 T25/T26 numbers. rev 3: expected values re-derived by rev3-integrator.
     private static ImpactResult Impact(Guid seg, string material, double length, double area, double volumeFt3, params (double, double)[] intervals)
-        => new(seg, material, length, area, volumeFt3, intervals, 0, 0, false);
+        => new(seg, material, length, area, volumeFt3, intervals, [], false);
 
     private static (ModelWritePlan Plan, RunDefinition Run, List<Problem> Notes) HcfcdPlan(HState h)
     {
@@ -75,7 +77,7 @@ public static partial class WritersModelCheck
             tables.Add(new HcfcdTableSpec(seg.Id, _template, h.Analyses, materials, AreaUnit.Acres, placement));
         }
         var marks = MatchMarkPlanner.Plan(h.Segments, AlignmentS, _ => Scale, Cfg, Geom.StationTolerance, Report.TableCulture());
-        var run = Def(h.Name, h.Segments, h.Analyses, ReportPreset.HcfcdSegment, AreaUnit.Acres, new OhwmSpec(100.0, new Dictionary<Guid, double>()));
+        var run = Def(h.Name, h.Segments, h.Analyses, ReportPreset.HcfcdSegment, AreaUnit.Acres);   // rev 3: no OHWM elevation; the analyses' base is the OHWM surface
         return (new ModelWritePlan(built.Boundaries, outlines, marks, [], tables), run, notes);
     }
 
@@ -93,6 +95,7 @@ public static partial class WritersModelCheck
         foreach (var s in Hc.Segments)
         {
             // T25 (OHWM 100): length 500, area 16,000 ft2 = 0.37 ac, volume 26,000 ft3 = 962.963 CY, average 1.93.
+            // rev 3: expected values re-derived by rev3-integrator (hand-built values; the writers do not compute them).
             Hc.Impacts[(s.Id, sediment.Id)] = Impact(s.Id, sediment.Name, 500, FixtureSpec.Expected.T25AreaFt2, FixtureSpec.Expected.T25VolumeFt3, (s.StartStation, s.EndStation));
             Hc.Impacts[(s.Id, rock.Id)] = Impact(s.Id, rock.Name, 500, FixtureSpec.Expected.T25AreaFt2, 13500, (s.StartStation, s.EndStation));
         }
@@ -129,6 +132,7 @@ public static partial class WritersModelCheck
         foreach (var s in Hc.Segments)
         {
             // T26 (OHWM 97): area 13,000 ft2 = 0.30 ac, volume 24,500 ft3 = 907.407 CY, average 1.81. Segment 1 now cuts in two stretches.
+            // rev 3: expected values re-derived by rev3-integrator (hand-built values; the writers do not compute them).
             var iv = s.Id == h1 ? new[] { (0.0, 300.0), (320.0, 500.0) } : new[] { (s.StartStation, s.EndStation) };
             Hc.Impacts[(s.Id, sediment.Id)] = Impact(s.Id, sediment.Name, s.Id == h1 ? 480 : 500, FixtureSpec.Expected.T26AreaFt2, FixtureSpec.Expected.T26VolumeFt3, iv);
             Hc.Impacts[(s.Id, rock.Id)] = Impact(s.Id, rock.Name, s.Id == h1 ? 480 : 500, FixtureSpec.Expected.T26AreaFt2, 12000, iv);

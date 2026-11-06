@@ -71,8 +71,6 @@ public static class DialogText
     public const string PresetStandard = "Cut, fill and net";
     /// <summary>HCFCD preset name.</summary>
     public const string PresetHcfcd = "HCFCD segment table";
-    /// <summary>OHWM elevation field (HCFCD preset).</summary>
-    public const string OhwmElevation = "OHWM elevation";
 
     // ---- Chart ------------------------------------------------------------------
 
@@ -111,8 +109,6 @@ public static class DialogText
     public const string ColumnStatus = "Status";
     /// <summary>HCFCD column header (the segment's layout).</summary>
     public const string ColumnSheet = "Sheet";
-    /// <summary>HCFCD column header.</summary>
-    public const string ColumnOhwm = "OHWM elevation";
     /// <summary>HCFCD column header.</summary>
     public const string ColumnImpactedLength = "Impacted length";
     /// <summary>HCFCD column header; the unit dropdown sits beside it.</summary>
@@ -244,8 +240,8 @@ public static class DialogText
     public const string ExportCancelled = "Export cancelled.";
     /// <summary>Status line when the export threw: {0} message.</summary>
     public const string ExportErrorFormat = "Export stopped: {0}";
-    /// <summary>Row note when ground below OHWM reaches the search limit (E1002).</summary>
-    public const string WidenOffsets = "Ground below OHWM reaches the edge of the band. Widen the offsets.";
+    /// <summary>Row note when the cut reaches the search limit (E1002, rev 3).</summary>
+    public const string WidenOffsets = "Cut reaches the edge of the band. Widen the offsets.";
 
     // ---- Field errors -------------------------------------------------------------
 
@@ -261,8 +257,6 @@ public static class DialogText
     public const string IntervalMustBePositive = "Type an interval greater than zero.";
     /// <summary>Message when a new break falls inside a skipped range.</summary>
     public const string StationInsideSkip = "That station is inside a skipped range.";
-    /// <summary>Inline error for a per-segment OHWM before the run has one.</summary>
-    public const string OhwmDefaultFirst = "Enter the run's OHWM elevation first.";
     /// <summary>Inline error for an edit made while a regen runs.</summary>
     public const string BusyRefused = "Wait for Regenerate to finish.";
     /// <summary>Inline error on a station of a segment the break list does not drive.</summary>
@@ -280,8 +274,6 @@ public static class DialogText
     public const string BlockedNoAnalysis = "Add a comparison.";
     /// <summary>Regenerate disabled reason.</summary>
     public const string BlockedSurfaces = "Pick a base and a comparison surface for every comparison.";
-    /// <summary>Regenerate disabled reason.</summary>
-    public const string BlockedOhwm = "Enter the OHWM elevation.";
     /// <summary>Regenerate disabled reason.</summary>
     public const string BlockedFieldErrors = "Fix the fields that show an error.";
     /// <summary>Regenerate disabled reason.</summary>

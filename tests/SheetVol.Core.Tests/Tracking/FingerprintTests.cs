@@ -62,6 +62,8 @@ public class FingerprintTests
         { "segment override", Fingerprints.DefinitionComponent },
         { "segment offset override", Fingerprints.DefinitionComponent },
         { "draw options", Fingerprints.DefinitionComponent },
+        { "volume surface set", Fingerprints.DefinitionComponent },       // rev 3: presence
+        { "volume surface renamed", Fingerprints.DefinitionComponent },   // rev 3: name
         { "frame station", Fingerprints.FramesComponent },
         { "frame rotation", Fingerprints.FramesComponent },
         { "surface out of date", Fingerprints.SurfacesComponent },
@@ -88,6 +90,8 @@ public class FingerprintTests
             "segment override" => Input(run with { Overrides = new Dictionary<Guid, SegmentOverrides> { [SegA] = new(LockView: true) } }),
             "segment offset override" => Input(run with { Overrides = new Dictionary<Guid, SegmentOverrides> { [SegA] = new(OffsetRight: 250) } }),
             "draw options" => Input(run with { Draw = new DrawOptions(BoundaryPolylines: false) }),
+            "volume surface set" => Input(run with { Analyses = [run.Analyses[0] with { VolumeSurface = "VOL1" }] }),
+            "volume surface renamed" => Input(run with { Analyses = [run.Analyses[0] with { VolumeSurface = "VOL2" }] }),
             "frame station" => Input(frame: Frame(end: 500.01)),
             "frame rotation" => Input(frame: Frame(rotation: 0.0001)),
             "surface out of date" => Input(surface: new AnalysisSurfaceState(AnalysisId, true, new RawVolume(200, 200))),
@@ -96,9 +100,12 @@ public class FingerprintTests
             _ => throw new ArgumentOutOfRangeException(nameof(change)),
         };
 
-        FingerprintInput baseline = change == "arc radius"
-            ? Input(alignment: new AlignmentBuilder(new Pt(0, 0), 0).Line(1000).ArcByLength(3000, 1000, clockwise: false).Build("S"))
-            : Input();
+        FingerprintInput baseline = change switch
+        {
+            "arc radius" => Input(alignment: new AlignmentBuilder(new Pt(0, 0), 0).Line(1000).ArcByLength(3000, 1000, clockwise: false).Build("S")),
+            "volume surface renamed" => Input(run with { Analyses = [run.Analyses[0] with { VolumeSurface = "VOL1" }] }),
+            _ => Input(),
+        };
 
         RunFingerprint before = Fingerprints.Compute(baseline);
         RunFingerprint after = Fingerprints.Compute(changed);
@@ -279,7 +286,9 @@ public class FingerprintTests
     {
         // Pinned values. If the canonical text changes on purpose, bump Fingerprints.FormatVersion
         // and re-pin; an accidental change fails here. Re-pinned at SVFP2 (contract rev 2): the
-        // definition signature gained Draw and the per-segment offset overrides.
+        // definition signature gained Draw and the per-segment offset overrides. Re-pinned at SVFP3
+        // (contract rev 3): the ohwm section is gone and each analysis adds its VolumeSurface presence
+        // and name; the baseline's default SchemaVersion is now 3.
         Assert.Equal(Fingerprints.FormatVersion, Fingerprints.Compute(Input()).Format);
         Assert.Equal(PinnedBaselineValue, Fingerprints.Compute(Input()).Value);
 
@@ -291,7 +300,7 @@ public class FingerprintTests
         Assert.Equal(PinnedRev2FieldsValue, Fingerprints.Compute(Input(rev2)).Value);
     }
 
-    private const string PinnedBaselineValue = "d88e07a9142e7e275f3a54c0376cf73e6cd7264565f4da1c7312dcb8d701c0b0";
-    private const string PinnedSchema1Value = "aaa864bdfbc0c5413cb1ebdf82b379eebd586d3c23c5580daa38fb6e71c1cd49";
-    private const string PinnedRev2FieldsValue = "ec30d072e77d8d87b546e310e6130179950373f9459c4082a5679b97abd01c10";
+    private const string PinnedBaselineValue = "5eab423dff27c3fb50fe64873ee942e006d998cf908152b87b09b0f18042e73d";
+    private const string PinnedSchema1Value = "01061d44d365b2019e386cdee63b2a2d4553e181263957765b79543e234510a1";
+    private const string PinnedRev2FieldsValue = "d7a084e0ad48562b7685ff3c3cd2c97d4958ca1d4b1442f522534c35ef0f7163";
 }

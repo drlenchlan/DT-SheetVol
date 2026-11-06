@@ -49,7 +49,7 @@ public class ExportTests
 
         using var parsed = JsonDocument.Parse(json);
         var root = parsed.RootElement;
-        Assert.Equal(1, root.GetProperty("schemaVersion").GetInt32());
+        Assert.Equal(2, root.GetProperty("schemaVersion").GetInt32());   // rev 3: export schema 2 (OHWM QA columns gone)
         Assert.Equal("Run1", root.GetProperty("runName").GetString());
         var row = root.GetProperty("rows")[0];
         Assert.Equal(100_000, row.GetProperty("area2DRaw").GetDouble());
@@ -88,7 +88,7 @@ public class ExportTests
         Assert.Equal(string.Join(",", CsvExport.ColumnKeys), lines[0]);
         Assert.Equal(1 + 4 + 2, lines.Length);
         Assert.Equal("segment", Field(csv, 1, "row_kind"));
-        Assert.Equal("1", Field(csv, 1, "schema_version"));
+        Assert.Equal("2", Field(csv, 1, "schema_version"));   // rev 3: export schema 2
         Assert.Equal("outside_limits", Field(csv, 5, "row_kind"));
         Assert.Equal("WithinTolerance", Field(csv, 5, "status"));
         Assert.Equal("total", Field(csv, 6, "row_kind"));
@@ -127,9 +127,10 @@ public class ExportTests
     [Fact]
     public void Impact_export_carries_intervals_qa_fields_and_the_average()
     {
+        // Rev 3: the cut_above_ohwm / fill_below_ohwm QA fields are gone (X5); the rest stands.
         var s = new Scenario().WithBreaks(1000, 1500);
         var id = s.Segments[0].Id;
-        var impact = new ImpactResult(id, "SEDIMENT", 310, 9_920, 15_600, [(1000, 1150), (1200, 1360)], 270, 54, true);
+        var impact = new ImpactResult(id, "SEDIMENT", 310, 9_920, 15_600, [(1000, 1150), (1200, 1360)], [], true);
         s.AddAnalysis("SEDIMENT", [(577.78, 0)], impacts: new Dictionary<Guid, ImpactResult> { [id] = impact });
 
         var doc = Doc(s, AreaUnit.Acres);
@@ -139,14 +140,13 @@ public class ExportTests
         Assert.Equal(15_600 / 27.0, i.CutVolume, 9);
         Assert.Equal(15_600 / 27.0 / 310, i.Average!.Value, 9);
         Assert.Equal([new ExportInterval(1000, 1150), new ExportInterval(1200, 1360)], i.Intervals);
-        Assert.Equal(270, i.CutAboveOhwmRaw);
-        Assert.Equal(10, i.CutAboveOhwm, 9);
-        Assert.Equal(54, i.FillBelowOhwmRaw);
         Assert.True(i.TouchesSearchLimit);
 
         string csv = CsvExport.Write(doc, Cfg);
         Assert.Equal("1000..1150;1200..1360", Field(csv, 1, "impact_intervals"));
         Assert.Equal("true", Field(csv, 1, "touches_search_limit"));
+        Assert.DoesNotContain("cut_above_ohwm_raw", CsvExport.ColumnKeys);
+        Assert.DoesNotContain("fill_below_ohwm_raw", CsvExport.ColumnKeys);
     }
 
     [Fact]
@@ -154,7 +154,7 @@ public class ExportTests
     {
         var s = new Scenario().WithBreaks(0, 500);
         var id = s.Segments[0].Id;
-        s.AddAnalysis("SEDIMENT", [(0, 0)], impacts: new Dictionary<Guid, ImpactResult> { [id] = new(id, "SEDIMENT", 0, 0, 0, [], 0, 0, false) });
+        s.AddAnalysis("SEDIMENT", [(0, 0)], impacts: new Dictionary<Guid, ImpactResult> { [id] = new(id, "SEDIMENT", 0, 0, 0, [], [], false) });
         var doc = Doc(s, AreaUnit.Acres);
         Assert.Null(doc.Rows.Single().Impact!.Average);
         Assert.Equal("", Field(CsvExport.Write(doc, Cfg), 1, "impact_average"));
@@ -166,7 +166,7 @@ public class ExportTests
         // Segment 2 is the SV-E827 case: no impact result and no surface in its window (coverage 0 %).
         var s = new Scenario().WithBreaks(1000, 1500, 2000);
         var first = s.Segments[0].Id;
-        var impact = new ImpactResult(first, "SEDIMENT", 310, 9_920, 15_600, [(1000, 1150)], 0, 0, false);
+        var impact = new ImpactResult(first, "SEDIMENT", 310, 9_920, 15_600, [(1000, 1150)], [], false);
         s.AddAnalysis("SEDIMENT", [(577.78, 0), (0, 0)], areas: [100_000, 0], impacts: new Dictionary<Guid, ImpactResult> { [first] = impact });
         var run = Run(s, AreaUnit.Acres) with { Preset = ReportPreset.HcfcdSegment };
 
@@ -176,12 +176,12 @@ public class ExportTests
         Assert.True(row.CoverageFlag);
         var i = Assert.IsType<ExportImpact>(row.Impact);
         Assert.Equal("SEDIMENT", i.Material);
-        Assert.Equal((0d, 0d, 0d, 0d, 0d), (i.ImpactedLength, i.ImpactedArea, i.CutVolume, i.CutAboveOhwm, i.FillBelowOhwm));
+        Assert.Equal((0d, 0d, 0d), (i.ImpactedLength, i.ImpactedArea, i.CutVolume));   // rev 3: the two OHWM QA fields are gone
         Assert.Null(i.Average);
         Assert.Empty(i.Intervals);
 
         string csv = CsvExport.Write(doc, Cfg);
-        foreach (var key in new[] { "impacted_length", "impacted_area", "impact_cut_volume", "cut_above_ohwm_raw", "fill_below_ohwm_raw" })
+        foreach (var key in new[] { "impacted_length", "impacted_area", "impact_cut_volume" })
             Assert.Equal("0", Field(csv, 2, key));
         Assert.Equal("", Field(csv, 2, "impact_average"));     // N/A
         Assert.Equal("false", Field(csv, 2, "touches_search_limit"));

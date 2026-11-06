@@ -23,9 +23,10 @@ internal static class RunComparison
     /// <summary>
     /// True when a result computed from <paramref name="regenerated"/> still holds for one
     /// segment and analysis of <paramref name="current"/>: same alignment, offsets that apply
-    /// to the segment (per-segment overrides included), preset, analysis surfaces and factors,
-    /// and for HCFCD the same OHWM. Station ranges are compared by the caller. Display-only
-    /// settings (area unit, auto mode, draw options) do not matter.
+    /// to the segment (per-segment overrides included), preset, analysis surfaces and factors.
+    /// Station ranges are compared by the caller. Display-only settings (area unit, auto mode,
+    /// draw options) do not matter. Rev 3: no OHWM elevation exists (X5); under HCFCD the
+    /// OHWM surface is the analysis's base, compared above.
     /// </summary>
     public static bool VolumeInputsEqual(RunDefinition regenerated, RunDefinition current, Guid analysisId, Guid segmentId)
     {
@@ -38,16 +39,7 @@ internal static class RunComparison
         if (a is null || b is null) return false;
         if (a.BaseSurface != b.BaseSurface || a.ComparisonSurface != b.ComparisonSurface) return false;
         if (a.CutFactor != b.CutFactor || a.FillFactor != b.FillFactor) return false;
-
-        if (current.Preset == ReportPreset.HcfcdSegment && EffectiveOhwm(regenerated, segmentId) != EffectiveOhwm(current, segmentId))
-            return false;
         return true;
-    }
-
-    public static double? EffectiveOhwm(RunDefinition run, Guid segmentId)
-    {
-        if (run.Ohwm is null) return null;
-        return run.Ohwm.BySegment.TryGetValue(segmentId, out var value) ? value : run.Ohwm.DefaultElevation;
     }
 
     /// <summary>Signed offsets that apply to one segment: <see cref="SegmentOverrides.OffsetLeft"/> and <see cref="SegmentOverrides.OffsetRight"/> when set (D8), else the run's.</summary>

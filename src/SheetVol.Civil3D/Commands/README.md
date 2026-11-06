@@ -5,3 +5,7 @@ Owner: A4 (HANDOFF.md section 10). SV* commands (6.12) and the command boundary 
 - `SvCommands.cs`: SVDEFINE, SVANALYSIS, SVBREAK, SVREGEN, SVSTATUS, SVEXPORT, SVCLEAR, SVPURGE, SVCONFIG. Every prompt takes typed input (A9).
 - `CommandSupport.cs`: the boundary that catches at the command edge with a stable SV-Exxx code, and the prompt helpers.
 - SVSELFTEST lives in `SelfTest/SelfTestCommand.cs`.
+
+## Rev 3
+
+- SVDEFINE's `Ohwm` keyword and the per-segment `Segment Ohwm` keyword are removed (no OHWM elevation, X5).

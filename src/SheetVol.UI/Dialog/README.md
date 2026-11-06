@@ -27,13 +27,13 @@ renders in a plain WPF process (see "Smoke check" below). Labels come from `Dial
 |---|---|
 | Left panel, 328 wide | `Grid.ColumnDefinitions` of the body, first column `Width="328"` |
 | Alignment dropdown, pick button, station range | "Alignment" card |
-| Offsets, "same on both sides"; HCFCD OHWM next to them | "Boundary offsets" card; OHWM shows with `IsHcfcd` |
+| Offsets, "same on both sides" (rev 3: no OHWM field, X6) | "Boundary offsets" card |
 | Surfaces card (base, comparison, cut factor, fill factor, add another); HCFCD labels table row / existing / design | "Surfaces to compare" card; labels from `AnalysisNameLabel`, `BaseSurfaceLabel`, `ComparisonSurfaceLabel` |
 | Fill by interval: every / from / to, Fill table | "Fill stations by interval" card |
 | Draw options | "Draw in the drawing" card, bound to `RunDefinition.Draw` through the view model |
 | Report selector | "Report" card at the top. Shown for both presets: it is the only way to reach the HCFCD preset from the dialog. **Compare with the artboards**: 6.14 says the HCFCD panel "gains" it |
 | Strip chart, stale banner above it | Main area rows 0 to 2 |
-| Grid: columns per preset, editable begin/end, status chips, per-row message with the fix beside it and the offset-fix fields, total row, reconciliation line, comparison selector, area-unit dropdown in the area header | Main area row 4. Standard columns 0–8 and 15; HCFCD columns 0–2 and 9–15 (visibility through `BindingProxy`). Row details carry the message, fix, impact note, field errors and the offset fix |
+| Grid: columns per preset, editable begin/end, status chips, per-row message with the fix beside it and the offset-fix fields, total row, reconciliation line, comparison selector, area-unit dropdown in the area header | Main area row 4. Standard columns 0–8 and 14; HCFCD columns 0–2 and 9–14 (visibility through `BindingProxy`; rev 3 removed the OHWM column that was 10). Row details carry the message, fix, impact note, field errors and the offset fix |
 | Grid toolbar: Add station, Pick in drawing, Remove, Zoom to | Above the grid, right-aligned |
 | Footer: auto-regenerate checkbox, Export CSV, Close, Regenerate (primary); progress and Cancel during a regen | Footer; progress bar and Cancel show while `IsBusy` |
 | Totals hidden until every row has a result | Total row visibility = `Grid.TotalsVisible` |
@@ -135,7 +135,7 @@ Goal: open `SVDIALOG` once in Civil 3D, run T2's breaks through it, compare it w
    EG vs FG_A). Press Regenerate and compare with the "Volumes current" artboard. Type 350 into an
    offset and compare with "Out of date, one error" (row 2 in Error with its message, the fix and the
    offset fields under it, the banner above the chart, totals hidden). Choose "HCFCD segment table"
-   under Report, type an OHWM elevation, press Regenerate and compare with "HCFCD preset".
+   under Report, press Regenerate and compare with "HCFCD preset" (rev 3: the artboard's OHWM field and column are gone).
 
 6. Then the M rows, in the same session (table below). Record what you see in NOW.md.
 
@@ -150,3 +150,7 @@ Goal: open `SVDIALOG` once in Civil 3D, run T2's breaks through it, compare it w
 | E911 | Select a row (fixture mode: in a drawing where model space has room at 0..2000 along X); press Zoom to; close the dialog | The segment's boundary is highlighted; Zoom to frames it; the highlight goes away on close |
 | E913 | In the interval card type Every 8, Fill table, Regenerate | 250 rows scroll smoothly; selecting a row far down moves the chart to it |
 | E915 | Core Console run of any script | The UI assembly is never loaded (nothing in the engine references it) |
+
+## Rev 3
+
+- The OHWM field (Boundary offsets card), the per-segment OHWM grid column and `GridEdit.Ohwm` are removed (X6); the smoke check's HCFCD visible-column count is 9.

@@ -58,7 +58,7 @@ public sealed record ExportInterval(double From, double To);
 /// units; the others are in the run's units. Cut volume and average (CSV and JSON
 /// <c>impact_cut_volume</c>, <c>impact_average</c>) are the in-place (bank), UNFACTORED cut
 /// when <see cref="HcfcdConfig.ImpactVolumesUseCutFactor"/> is off, the default (D7); they take
-/// the cut factor only when it is on. The QA fields are unit-converted only.
+/// the cut factor only when it is on. Rev 3: the two OHWM QA fields are gone (X5).
 /// </summary>
 /// <param name="Material">Material (analysis) name.</param>
 /// <param name="ImpactedLengthRaw">Drawing length units.</param>
@@ -69,19 +69,13 @@ public sealed record ExportInterval(double From, double To);
 /// <param name="CutVolume">Run volume unit; unfactored unless <see cref="HcfcdConfig.ImpactVolumesUseCutFactor"/> is on.</param>
 /// <param name="Average">Cut volume ÷ impacted length from unrounded values (E1019); null when the length is 0.</param>
 /// <param name="Intervals">Raw station intervals with cut below OHWM (E1005, E1006).</param>
-/// <param name="CutAboveOhwmRaw">QA: cut where existing ground is above OHWM, cubic drawing units (E1003).</param>
-/// <param name="CutAboveOhwm">QA, run volume unit, no factor.</param>
-/// <param name="FillBelowOhwmRaw">QA: fill below OHWM, cubic drawing units (E1004).</param>
-/// <param name="FillBelowOhwm">QA, run volume unit, no factor.</param>
-/// <param name="TouchesSearchLimit">Ground below OHWM reaches the lateral search limit (E1002).</param>
+/// <param name="TouchesSearchLimit">Cut reaches the lateral search limit (E1002).</param>
 public sealed record ExportImpact(
     string Material,
     double ImpactedLengthRaw, double ImpactedLength,
     double ImpactedAreaRaw, double ImpactedArea,
     double CutVolumeRaw, double CutVolume, double? Average,
     IReadOnlyList<ExportInterval> Intervals,
-    double CutAboveOhwmRaw, double CutAboveOhwm,
-    double FillBelowOhwmRaw, double FillBelowOhwm,
     bool TouchesSearchLimit);
 
 /// <summary>One segment under one analysis.</summary>
@@ -144,8 +138,8 @@ public sealed record ExportDocument(
 /// <summary>Builds the export document from a reconciled run.</summary>
 public static class ExportBuilder
 {
-    /// <summary>Export schema version. Bumped whenever a field changes meaning or is removed.</summary>
-    public const int SchemaVersion = 1;
+    /// <summary>Export schema version. Bumped whenever a field changes meaning or is removed. 2 (contract rev 3): the cut_above_ohwm and fill_below_ohwm QA columns are gone.</summary>
+    public const int SchemaVersion = 2;
 
     /// <summary>
     /// Builds the document. Refuses a run that did not reconcile (SV-E535) and impact values
@@ -185,10 +179,10 @@ public static class ExportBuilder
                 ExportImpact? impact = null;
                 // D10/D18: an HCFCD station segment with no impact result (SV-E827) exports zero impact, never blank.
                 var source = r.Impact ?? (run.Preset == ReportPreset.HcfcdSegment && double.IsFinite(r.StartStation)
-                    ? new ImpactResult(r.SegmentId, def.Name, 0, 0, 0, [], 0, 0, false) : null);
+                    ? new ImpactResult(r.SegmentId, def.Name, 0, 0, 0, [], [], false) : null);
                 if (source is { } i)
                 {
-                    bool finite = new[] { i.ImpactedLength, i.ImpactedArea, i.CutVolume, i.CutAboveOhwm, i.FillBelowOhwm }.All(double.IsFinite)
+                    bool finite = new[] { i.ImpactedLength, i.ImpactedArea, i.CutVolume }.All(double.IsFinite)
                                   && i.Intervals.All(iv => double.IsFinite(iv.From) && double.IsFinite(iv.To));
                     if (!finite)
                         return Outcome<ExportDocument>.Fail(new Problem(VolumeCodes.InvalidSourceValue, Severity.Error,
@@ -201,8 +195,6 @@ public static class ExportBuilder
                         i.ImpactedArea, units.ToArea(i.ImpactedArea, unit),
                         i.CutVolume, volume, length > 0 ? volume / length : null,
                         i.Intervals.Select(iv => new ExportInterval(iv.From, iv.To)).ToList(),
-                        i.CutAboveOhwm, units.ToVolumeUnit(i.CutAboveOhwm),
-                        i.FillBelowOhwm, units.ToVolumeUnit(i.FillBelowOhwm),
                         i.TouchesSearchLimit);
                 }
                 rows.Add(new ExportRow(

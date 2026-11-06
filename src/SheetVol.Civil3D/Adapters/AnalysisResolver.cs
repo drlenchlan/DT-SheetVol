@@ -107,6 +107,9 @@ public static class AnalysisResolver
         IReadOnlyDictionary<Guid, StoredAnalysisRefs>? stored, AdapterConfig cfg, VolumeConfig volumeConfig)
     {
         ArgumentNullException.ThrowIfNull(analyses);
+        // Rev 3 adoption: pair-only; the rev3-adapters package resolves volume-surface sources.
+        if (analyses.Any(a => a.VolumeSurface is not null))
+            return Outcome<IReadOnlyList<AnalysisBinding>>.Fail(AdapterCodes.VolumeSurfaceNotYet());
         var cfgProblems = cfg.Validate();
         if (cfgProblems.Count > 0) return Outcome<IReadOnlyList<AnalysisBinding>>.Fail(cfgProblems);
         var plan = OwnedVolumeSurfaces.Plan(analyses, volumeConfig);

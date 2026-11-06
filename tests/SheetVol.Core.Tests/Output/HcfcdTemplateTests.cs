@@ -24,7 +24,7 @@ public class HcfcdTemplateTests
 
     /// <summary>T25 per segment: length 500 ft, area 16,000 ft², cut 962.963 CY (26,000 ft³).</summary>
     private static HcfcdMaterial T25(string name = "SEDIMENT", double length = 500, double cutFt3 = 26_000, double factor = 1)
-        => new(Sediment.Id, name, new ImpactResult(Seg, name, length, 16_000, cutFt3, [(0, 500)], 0, 0, false), factor);
+        => new(Sediment.Id, name, new ImpactResult(Seg, name, length, 16_000, cutFt3, [(0, 500)], [], false), factor);
 
     private static List<List<string>> Created(params AnalysisDef[] materials)
         => Cells(Shipped().CreateTable(Seg, materials, AreaUnit.Acres, F.Units, Cfg).Value);
@@ -143,7 +143,7 @@ public class HcfcdTemplateTests
     public void E1018_core_a_material_without_a_row_is_reported()
     {
         var cells = Created(Sediment);
-        var gravel = new HcfcdMaterial(Guid.NewGuid(), "GRAVEL", new ImpactResult(Seg, "GRAVEL", 500, 16_000, 2700, [], 0, 0, false), 1);
+        var gravel = new HcfcdMaterial(Guid.NewGuid(), "GRAVEL", new ImpactResult(Seg, "GRAVEL", 500, 16_000, 2700, [], [], false), 1);
 
         var b = Shipped().Bind(Ro(cells), Seg, [T25(), gravel], AreaUnit.Acres, F, Cfg);
 
@@ -157,7 +157,7 @@ public class HcfcdTemplateTests
     public void T27_average_is_NA_when_the_length_is_zero()
     {
         var cells = Created(Sediment);
-        var none = new HcfcdMaterial(Sediment.Id, "SEDIMENT", new ImpactResult(Seg, "SEDIMENT", 0, 0, 0, [], 0, 0, false), 1);
+        var none = new HcfcdMaterial(Sediment.Id, "SEDIMENT", new ImpactResult(Seg, "SEDIMENT", 0, 0, 0, [], [], false), 1);
 
         var b = Shipped().Bind(Ro(cells), Seg, [none], AreaUnit.Acres, F, Cfg);
         Apply(cells, b.Changes);
@@ -172,7 +172,7 @@ public class HcfcdTemplateTests
     {
         var cells = Created(Sediment);
         // 10.4 CY over 3.4 ft = 3.0588; from rounded inputs it would be 10 / 3 = 3.33.
-        var m = new HcfcdMaterial(Sediment.Id, "SEDIMENT", new ImpactResult(Seg, "SEDIMENT", 3.4, 100, 10.4 * 27, [], 0, 0, false), 1);
+        var m = new HcfcdMaterial(Sediment.Id, "SEDIMENT", new ImpactResult(Seg, "SEDIMENT", 3.4, 100, 10.4 * 27, [], [], false), 1);
 
         var b = Shipped().Bind(Ro(cells), Seg, [m], AreaUnit.Acres, F, Cfg);
         Apply(cells, b.Changes);
@@ -221,7 +221,7 @@ public class HcfcdTemplateTests
     public void Impact_values_for_another_segment_are_refused()
     {
         var cells = Created(Sediment);
-        var wrong = new HcfcdMaterial(Sediment.Id, "SEDIMENT", new ImpactResult(Guid.NewGuid(), "SEDIMENT", 1, 1, 1, [], 0, 0, false), 1);
+        var wrong = new HcfcdMaterial(Sediment.Id, "SEDIMENT", new ImpactResult(Guid.NewGuid(), "SEDIMENT", 1, 1, 1, [], [], false), 1);
         var b = Shipped().Bind(Ro(cells), Seg, [wrong], AreaUnit.Acres, F, Cfg);
         Assert.Equal(VolumeCodes.InvalidSourceValue, b.Problems.Single().Code);
         Assert.Empty(b.Bound);

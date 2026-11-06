@@ -1,6 +1,10 @@
-// Overlay integrator and impacts below OHWM (HANDOFF.md 6.15). Owner: C5.
+// Overlay integrator and impacts (HANDOFF.md 6.15). Owner: C5.
 //
-// Method (6.15 steps 1 to 7):
+// Rev 3 (NOW.md X5): OHWM is a surface, never an elevation. Under the HCFCD preset the analysis's
+// base IS the OHWM surface, so impact cut is simply d = base - comparison > MinCutDepth. The
+// base < OHWM clip, the OHWM-elevation snap and the step 7 QA accumulators are gone.
+//
+// Method (6.15 steps 1 to 6):
 //  1. The boundary is validated and translated to a local origin (its bounding-box minimum);
 //     every triangle is translated the same way before any area math (E1009).
 //  2. Base triangles are indexed on a uniform grid. Each comparison triangle is intersected with
@@ -10,26 +14,26 @@
 //     piece is clipped against each triangle it meets (correct for concave boundaries).
 //  4. Band totals: plan area, cut where d > 0, fill where d < 0. A piece where d changes sign is
 //     split on d = 0 first; each part is integrated exactly (fan triangles, area * mean of vertex d).
-//  5. Clip to base < OHWM, then to d > MinCutDepth (both half-plane clips on the linear vertex
-//     attributes). What remains adds impacted area, cut volume, and the station interval spanned
-//     by its vertices (station extremes of a convex piece inside the band are at its vertices).
+//  5. Clip to d > MinCutDepth (half-plane clip on the linear vertex depth). What remains adds
+//     impacted area, cut volume, and the station interval spanned by its vertices (station
+//     extremes of a convex piece inside the band are at its vertices).
 //  6. Impacted length = union of those intervals clamped to the segment, gaps shorter than
 //     GapTolerance bridged, measured along the alignment (E1005, E1007, E1008).
-//  7. QA: cut where base >= OHWM and fill where base < OHWM (E1003, E1004).
-// Plus: plan area of base-below-OHWM ground (E1001) and the lateral search-limit test (E1002).
+// Plus: plan area where the base surface exists inside the boundary (BaseArea), E1001 when no cut
+// is counted, and the lateral search-limit test (E1002): a cut piece from step 5 has an edge on a
+// lateral edge of the boundary.
 //
 // Numerical tolerances (never user-visible thresholds):
 //  - snap = 1e-12 * S (S = boundary extent): a point this close to a clip line is on it, so
 //    coincident TIN edges never produce slivers;
 //  - a piece thinner than snap (2 * area / perimeter) adds its area and volume but no station
-//    interval (it can only be a clipping artifact);
-//  - plane noise: on the impact path only (steps 5 to 7, ground below OHWM, search limit), a
-//    vertex depth within the two triangles' evaluation error bound (SurfaceTriangle.Noise, about
-//    1e-12 ft near the origin, 1e-6 ft at state-plane coordinates) is set to exactly 0, and a base
-//    elevation within the base triangle's bound of OHWM is set to exactly OHWM. Without this, two
-//    surfaces that coincide but are triangulated differently report rounding noise (about 1e-13)
-//    as cut, and the impacted length runs the whole segment (measured: T28 gave 500 instead of
-//    310 on a rotated Fixture H). Band totals (step 4) are never snapped;
+//    interval and no search-limit hit (it can only be a clipping artifact);
+//  - plane noise: on the impact path only (step 5 and the search limit), a vertex depth within the
+//    two triangles' evaluation error bound (SurfaceTriangle.Noise, about 1e-12 ft near the origin,
+//    1e-6 ft at state-plane coordinates) is set to exactly 0. Without this, two surfaces that
+//    coincide but are triangulated differently report rounding noise (about 1e-13) as cut, and the
+//    impacted length runs the whole segment (measured pre-rev-3: T28 gave 500 instead of 310 on a
+//    rotated Fixture H). Band totals (step 4) are never snapped;
 //  - station intervals closer than 1e-9 * segment length merge (StationIntervals).
 
 namespace SheetVol.Core.Volumes.Integrator;
@@ -42,7 +46,7 @@ namespace SheetVol.Core.Volumes.Integrator;
 public static class OverlayIntegrator
 {
     /// <summary>
-    /// Band totals inside a closed boundary with no OHWM limit: plan area where both surfaces
+    /// Band totals inside a closed boundary: plan area where both surfaces
     /// exist (the integrator's 2D area), cut and fill (unadjusted, cubic drawing units). This is the
     /// cross-check against GetBoundedVolumes (6.15, T29).
     /// </summary>
@@ -68,38 +72,34 @@ public static class OverlayIntegrator
     }
 
     /// <summary>
-    /// Band totals plus the HCFCD impact quantities below OHWM for one station segment (6.15, 6.16).
+    /// Band totals plus the HCFCD impact quantities for one station segment (6.15, 6.16). Rev 3:
+    /// impact cut is where the comparison is below the base by more than MinCutDepth; under the
+    /// HCFCD preset the base is the OHWM surface.
     /// </summary>
-    /// <param name="baseSurface">Existing ground (base).</param>
-    /// <param name="comparisonSurface">Design (comparison).</param>
+    /// <param name="baseSurface">Base (the OHWM surface under the HCFCD preset).</param>
+    /// <param name="comparisonSurface">Comparison (proposed).</param>
     /// <param name="alignment">The run's alignment; stations of impacted pieces are measured along it (E1008).</param>
     /// <param name="segment">Station range (raw, End &gt; Start) and signed offsets (Left &lt; Right) of the segment.</param>
     /// <param name="closedBoundary">The segment's tessellated boundary, world coordinates, first == last.</param>
-    /// <param name="ohwm">OHWM default elevation and per-segment overrides (A11, E1010), drawing units.</param>
     /// <param name="material">Material label for the result row (the analysis name, 6.16).</param>
     /// <param name="settings">MinCutDepth and GapTolerance from config (E1007); null = defaults (count everything).</param>
     public static SegmentImpactResult IntegrateSegment(
         ITriangleSource baseSurface, ITriangleSource comparisonSurface,
         IAlignmentGeometry alignment, SegmentDef segment, IReadOnlyList<Pt> closedBoundary,
-        OhwmSpec ohwm, string material, IntegratorSettings? settings = null)
+        string material, IntegratorSettings? settings = null)
     {
         ArgumentNullException.ThrowIfNull(baseSurface);
         ArgumentNullException.ThrowIfNull(comparisonSurface);
         ArgumentNullException.ThrowIfNull(alignment);
         ArgumentNullException.ThrowIfNull(segment);
-        ArgumentNullException.ThrowIfNull(ohwm);
         ArgumentNullException.ThrowIfNull(material);
         if (!double.IsFinite(segment.StartStation) || !double.IsFinite(segment.EndStation) || !(segment.EndStation > segment.StartStation))
             throw new ArgumentException("Segment end station must be greater than its start station.", nameof(segment));
         settings ??= IntegratorSettings.Default;
 
         var problems = new List<Problem>();
-        double elev = ImpactQuantities.OhwmFor(ohwm, segment.Id);
-        SegmentImpactResult Failed() => new(segment.Id, elev, null, null, double.NaN, problems);
+        SegmentImpactResult Failed() => new(segment.Id, null, null, double.NaN, problems);
 
-        if (!double.IsFinite(elev))
-            problems.Add(new Problem(IntegratorCodes.InvalidOhwm, Severity.Error,
-                $"OHWM elevation for this segment is not a finite number ({elev}).", segment.Id, "Enter an OHWM elevation."));
         if (!double.IsFinite(settings.MinCutDepth) || settings.MinCutDepth < 0 ||
             !double.IsFinite(settings.GapTolerance) || settings.GapTolerance < 0)
             problems.Add(new Problem(IntegratorCodes.InvalidSettings, Severity.Error,
@@ -131,16 +131,17 @@ public static class OverlayIntegrator
         // Station search window: points inside the band project into [Start, End] except near a
         // mitred angle point, where they can sit up to about 4 offsets beyond it.
         double margin = 4.0 * Math.Max(Math.Abs(segment.OffsetLeft), Math.Abs(segment.OffsetRight)) + 1e-6 * poly.Extent;
-        var ctx = new ImpactContext(elev, settings.MinCutDepth, locator,
-                                    segment.StartStation - margin, segment.EndStation + margin);
+        var ctx = new ImpactContext(settings.MinCutDepth, locator,
+                                    segment.StartStation - margin, segment.EndStation + margin, lateral);
         run.Overlay(ctx);
-        double ground = run.GroundBelow(elev);
-        bool touches = lateral is not null && run.TouchesSearchLimit(lateral, elev);
+        double baseArea = run.BaseArea();
+        bool touches = ctx.TouchesLateral;
         var union = StationIntervals.Union(ctx.Intervals, segment.StartStation, segment.EndStation, settings.GapTolerance);
         var totals = run.Totals();
         var impact = new ImpactResult(segment.Id, material,
             union.TotalLength, ctx.ImpactedArea.Value, ctx.CutVolume.Value, union.Intervals,
-            ctx.CutAbove.Value, ctx.FillBelow.Value, touches);
+            Array.Empty<IReadOnlyList<Pt>>(),   // rev 3 (D13): outlines are filled by the rev3-integrator package
+            touches);
 
         run.ReportCoverage(totals);
         if (lateral is null)
@@ -149,26 +150,29 @@ public static class OverlayIntegrator
                 segment.Id, "Check that the boundary was generated from this segment's stations and offsets."));
         if (touches)
             problems.Add(new Problem(IntegratorCodes.SearchLimit, Severity.Warning,
-                $"Ground below OHWM {elev:0.00} reaches a lateral edge of the boundary; impacts may continue outside the offsets.",
+                "Cut reaches a lateral edge of the boundary; impacts may continue outside the offsets.",
                 segment.Id, "Widen the offsets."));
-        if (!(ground > 0))
-            problems.Add(new Problem(IntegratorCodes.NoGroundBelowOhwm, Severity.Info,
-                $"No existing ground in this segment is below OHWM {elev:0.00}.", segment.Id));
-        return new SegmentImpactResult(segment.Id, elev, totals, impact, ground, problems);
+        if (!(impact.ImpactedArea > 0))
+            problems.Add(new Problem(IntegratorCodes.NoCut, Severity.Info,
+                "No cut in this segment: the comparison surface is nowhere below the base surface, or the two do not overlap.", segment.Id));
+        return new SegmentImpactResult(segment.Id, totals, impact, baseArea, problems);
     }
 }
 
 /// <summary>Per-segment impact state threaded through the overlay loop.</summary>
 internal sealed class ImpactContext
 {
-    public readonly double Ohwm, MinCutDepth, WindowFrom, WindowTo;
+    public readonly double MinCutDepth, WindowFrom, WindowTo;
     public readonly StationLocator Locator;
-    public NeumaierSum ImpactedArea, CutVolume, CutAbove, FillBelow;
+    public readonly List<(double Ax, double Ay, double Bx, double By)>? Lateral;
+    public NeumaierSum ImpactedArea, CutVolume;
+    public bool TouchesLateral;
     public readonly List<(double From, double To)> Intervals = [];
 
-    public ImpactContext(double ohwm, double minCutDepth, StationLocator locator, double windowFrom, double windowTo)
+    public ImpactContext(double minCutDepth, StationLocator locator, double windowFrom, double windowTo,
+                         List<(double Ax, double Ay, double Bx, double By)>? lateral)
     {
-        Ohwm = ohwm; MinCutDepth = minCutDepth; Locator = locator; WindowFrom = windowFrom; WindowTo = windowTo;
+        MinCutDepth = minCutDepth; Locator = locator; WindowFrom = windowFrom; WindowTo = windowTo; Lateral = lateral;
     }
 }
 
@@ -184,7 +188,6 @@ internal sealed class OverlayRun
     private readonly PieceVertex[] _t0 = new PieceVertex[PieceMath.MaxVertices], _t1 = new PieceVertex[PieceMath.MaxVertices],
                                    _t2 = new PieceVertex[PieceMath.MaxVertices], _t3 = new PieceVertex[PieceMath.MaxVertices],
                                    _t4 = new PieceVertex[PieceMath.MaxVertices], _s0 = new PieceVertex[PieceMath.MaxVertices],
-                                   _s1 = new PieceVertex[PieceMath.MaxVertices], _s2 = new PieceVertex[PieceMath.MaxVertices],
                                    _s3 = new PieceVertex[PieceMath.MaxVertices], _s4 = new PieceVertex[PieceMath.MaxVertices];
     private NeumaierSum _plan, _cut, _fill;
 
@@ -259,7 +262,7 @@ internal sealed class OverlayRun
     private static bool Disjoint(in ClipTriangle a, double minX, double minY, double maxX, double maxY, double s)
         => a.MaxX < minX - s || a.MinX > maxX + s || a.MaxY < minY - s || a.MinY > maxY + s;
 
-    /// <summary>Steps 2 to 5 and 7: every comparison/base piece inside the boundary.</summary>
+    /// <summary>Steps 2 to 5: every comparison/base piece inside the boundary.</summary>
     public void Overlay(ImpactContext? ctx)
     {
         double snap = _poly.Snap;
@@ -293,22 +296,17 @@ internal sealed class OverlayRun
                     var q = t.Clip(piece, _t3, _t4, snap);
                     if (q.Length < 3) continue;
                     for (int k = 0; k < q.Length; k++)
-                    {
-                        double zb = b.Eval(q[k].X, q[k].Y);
-                        q[k].Zb = zb;
-                        q[k].D = zb - c.Eval(q[k].X, q[k].Y);
-                    }
-                    ProcessPiece(q, ctx, b.Noise + c.Noise, b.Noise);
+                        q[k].D = b.Eval(q[k].X, q[k].Y) - c.Eval(q[k].X, q[k].Y);
+                    ProcessPiece(q, ctx, b.Noise + c.Noise);
                 }
             }
         }
     }
 
-    /// <param name="q">Piece with Zb and D at its vertices.</param>
+    /// <param name="q">Piece with D at its vertices.</param>
     /// <param name="ctx">Impact state, or null for band totals only.</param>
     /// <param name="depthNoise">Evaluation error bound on D (base plus comparison triangle), drawing units.</param>
-    /// <param name="baseNoise">Evaluation error bound on Zb, drawing units.</param>
-    private void ProcessPiece(ReadOnlySpan<PieceVertex> q, ImpactContext? ctx, double depthNoise, double baseNoise)
+    private void ProcessPiece(ReadOnlySpan<PieceVertex> q, ImpactContext? ctx, double depthNoise)
     {
         PieceMath.Integrate(q, out double area, out double vol);
         if (!(area > 0)) return;
@@ -328,33 +326,15 @@ internal sealed class OverlayRun
         }
         if (ctx is null) return;
 
-        // Impact path: snap plane noise (see the header) on a copy, then clip.
-        double ohwm = ctx.Ohwm;
-        double minZ = double.PositiveInfinity, maxZ = double.NegativeInfinity;
+        // Impact path: snap plane noise (see the header) on a copy, then clip to d > MinCutDepth.
         for (int k = 0; k < q.Length; k++)
         {
             var v = q[k];
             if (Math.Abs(v.D) <= depthNoise) v.D = 0;
-            if (Math.Abs(v.Zb - ohwm) <= baseNoise) v.Zb = ohwm;
-            minZ = Math.Min(minZ, v.Zb); maxZ = Math.Max(maxZ, v.Zb);
             _s4[k] = v;
         }
         q = _s4.AsSpan(0, q.Length);
-        ReadOnlySpan<PieceVertex> below, above;
-        if (maxZ < ohwm) { below = q; above = default; }
-        else if (minZ >= ohwm) { below = default; above = q; }
-        else
-        {
-            int nb = PieceMath.ClipScalar(q, _s1, PieceAttr.Zb, ohwm, keepAbove: false, strict: true);
-            int na = PieceMath.ClipScalar(q, _s2, PieceAttr.Zb, ohwm, keepAbove: true, strict: false);
-            below = _s1.AsSpan(0, nb);
-            above = _s2.AsSpan(0, na);
-        }
-        if (above.Length >= 3) ctx.CutAbove.Add(PieceMath.PositivePart(above, _s0));
-        if (below.Length < 3) return;
-
-        ctx.FillBelow.Add(PieceMath.NegativePart(below, _s0));
-        int ni = PieceMath.ClipScalar(below, _s3, PieceAttr.D, ctx.MinCutDepth, keepAbove: true, strict: true);
+        int ni = PieceMath.ClipScalar(q, _s3, PieceAttr.D, ctx.MinCutDepth, keepAbove: true, strict: true);
         if (ni < 3) return;
         var imp = _s3.AsSpan(0, ni);
         PieceMath.Integrate(imp, out double ia, out double iv);
@@ -370,10 +350,42 @@ internal sealed class OverlayRun
             sMin = Math.Min(sMin, st); sMax = Math.Max(sMax, st);
         }
         ctx.Intervals.Add((sMin, sMax));
+        if (!ctx.TouchesLateral && ctx.Lateral is not null && OnLateralEdge(imp, ctx.Lateral, ctx.MinCutDepth))
+            ctx.TouchesLateral = true;
     }
 
-    /// <summary>Plan area inside the boundary where the base exists and is strictly below <paramref name="ohwm"/>, square drawing units (E1001).</summary>
-    public double GroundBelow(double ohwm)
+    /// <summary>
+    /// True when an edge of the cut piece, longer than snap and deeper than <paramref name="minCutDepth"/>
+    /// at one end at least, lies on a lateral edge of the boundary (both its end points within 2 * snap
+    /// of that edge): the cut reaches the search limit (E1002). An edge where the cut has died out to
+    /// the threshold along the boundary (depth equal to it at both ends) does not count.
+    /// </summary>
+    private bool OnLateralEdge(ReadOnlySpan<PieceVertex> imp, List<(double Ax, double Ay, double Bx, double By)> lateral, double minCutDepth)
+    {
+        double tol = 2.0 * _poly.Snap;
+        for (int k = 0; k < imp.Length; k++)
+        {
+            var p = imp[k];
+            var r = imp[(k + 1) % imp.Length];
+            if (!(Math.Max(p.D, r.D) > minCutDepth)) continue;
+            if (!(Math.Sqrt((r.X - p.X) * (r.X - p.X) + (r.Y - p.Y) * (r.Y - p.Y)) > _poly.Snap)) continue;
+            foreach (var (ax, ay, bx, by) in lateral)
+                if (DistanceToSegment(p.X, p.Y, ax, ay, bx, by) <= tol && DistanceToSegment(r.X, r.Y, ax, ay, bx, by) <= tol)
+                    return true;
+        }
+        return false;
+    }
+
+    private static double DistanceToSegment(double px, double py, double ax, double ay, double bx, double by)
+    {
+        double dx = bx - ax, dy = by - ay, len2 = dx * dx + dy * dy;
+        double t = len2 > 0 ? Math.Clamp(((px - ax) * dx + (py - ay) * dy) / len2, 0.0, 1.0) : 0.0;
+        double ex = ax + t * dx - px, ey = ay + t * dy - py;
+        return Math.Sqrt(ex * ex + ey * ey);
+    }
+
+    /// <summary>Plan area inside the boundary where the base surface exists, square drawing units.</summary>
+    public double BaseArea()
     {
         double snap = _poly.Snap;
         var bt = _poly.Triangles;
@@ -391,62 +403,11 @@ internal sealed class OverlayRun
                 _t0[2] = new PieceVertex(bp.X2, bp.Y2);
                 var q = t.Clip(_t0.AsSpan(0, 3), _t3, _t4, snap);
                 if (q.Length < 3) continue;
-                double minZ = double.PositiveInfinity, maxZ = double.NegativeInfinity;
-                for (int k = 0; k < q.Length; k++)
-                {
-                    double zb = b.Eval(q[k].X, q[k].Y);
-                    q[k].Zb = Math.Abs(zb - ohwm) <= b.Noise ? ohwm : zb;
-                    minZ = Math.Min(minZ, q[k].Zb); maxZ = Math.Max(maxZ, q[k].Zb);
-                }
-                if (minZ >= ohwm) continue;
-                double area;
-                if (maxZ < ohwm) PieceMath.Integrate(q, out area, out _);
-                else
-                {
-                    int n = PieceMath.ClipScalar(q, _s1, PieceAttr.Zb, ohwm, keepAbove: false, strict: true);
-                    PieceMath.Integrate(_s1.AsSpan(0, n), out area, out _);
-                }
+                PieceMath.Integrate(q, out double area, out _);
                 if (area > 0) sum.Add(area);
             }
         }
         return sum.Value;
-    }
-
-    /// <summary>True when the base surface is strictly below <paramref name="ohwm"/> anywhere along a lateral edge (E1002).</summary>
-    public bool TouchesSearchLimit(List<(double Ax, double Ay, double Bx, double By)> edges, double ohwm)
-    {
-        double snap = _poly.Snap;
-        foreach (var (ax, ay, bx, by) in edges)
-        {
-            _baseGrid.Query(Math.Min(ax, bx) - snap, Math.Min(ay, by) - snap, Math.Max(ax, bx) + snap, Math.Max(ay, by) + snap, _cand);
-            foreach (int bi in _cand)
-            {
-                ref readonly var b = ref _base[bi];
-                if (!ClipSegment(b.Plan, ax, ay, bx, by, snap, out double t0, out double t1) || !(t1 > t0)) continue;
-                double z0 = b.Eval(ax + t0 * (bx - ax), ay + t0 * (by - ay));
-                double z1 = b.Eval(ax + t1 * (bx - ax), ay + t1 * (by - ay));
-                if (Math.Min(z0, z1) < ohwm - b.Noise) return true;
-            }
-        }
-        return false;
-    }
-
-    /// <summary>Parametric clip of segment A-B to a triangle grown by <paramref name="snap"/> (Cyrus-Beck).</summary>
-    private static bool ClipSegment(in ClipTriangle t, double ax, double ay, double bx, double by, double snap, out double t0, out double t1)
-    {
-        t0 = 0; t1 = 1;
-        return Edge(t.N0x, t.N0y, t.C0, ax, ay, bx, by, snap, ref t0, ref t1)
-            && Edge(t.N1x, t.N1y, t.C1, ax, ay, bx, by, snap, ref t0, ref t1)
-            && Edge(t.N2x, t.N2y, t.C2, ax, ay, bx, by, snap, ref t0, ref t1);
-    }
-
-    private static bool Edge(double nx, double ny, double c, double ax, double ay, double bx, double by, double snap, ref double t0, ref double t1)
-    {
-        double sa = nx * ax + ny * ay - c + snap, sb = nx * bx + ny * by - c + snap;
-        if (sa < 0 && sb < 0) return false;
-        if (sa < 0) t0 = Math.Max(t0, sa / (sa - sb));
-        else if (sb < 0) t1 = Math.Min(t1, sa / (sa - sb));
-        return t1 >= t0;
     }
 
     public BandTotals Totals() => new(_poly.Area, _plan.Value, _cut.Value, _fill.Value);

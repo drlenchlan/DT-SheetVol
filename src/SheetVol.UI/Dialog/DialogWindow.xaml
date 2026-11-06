@@ -76,7 +76,7 @@
                             </StackPanel>
                         </Border>
 
-                        <!-- Boundary offsets; OHWM beside them with the HCFCD preset -->
+                        <!-- Boundary offsets (rev 3: no OHWM field, X6) -->
                         <Border Style="{DynamicResource SV.CardStyle}">
                             <StackPanel>
                                 <TextBlock Text="{Binding OffsetsHeader}" Style="{DynamicResource SV.CardHeaderStyle}"/>
@@ -95,11 +95,6 @@
                                           AutomationProperties.Name="{x:Static pres:DialogText.SameOnBothSides}">
                                     <TextBlock Text="{x:Static pres:DialogText.SameOnBothSides}" TextWrapping="Wrap"/>
                                 </CheckBox>
-                                <StackPanel Margin="0,10,0,0" Visibility="{Binding IsHcfcd, Converter={x:Static dlg:Converters.TrueToVisible}}">
-                                    <TextBlock Text="{Binding OhwmLabel}" Style="{DynamicResource SV.FieldLabelStyle}"/>
-                                    <ContentControl Content="{Binding Ohwm}" Style="{DynamicResource SV.FieldHostStyle}"
-                                                    ContentTemplate="{DynamicResource SV.FieldTemplate}"/>
-                                </StackPanel>
                             </StackPanel>
                         </Border>
 
@@ -514,29 +509,7 @@
                                 </DataGridTemplateColumn.CellTemplate>
                             </DataGridTemplateColumn>
 
-                            <!-- 10 OHWM elevation (HCFCD, editable per segment) -->
-                            <DataGridTemplateColumn Width="92" MinWidth="92" dlg:GridEdit.Field="Ohwm"
-                                                    Header="{Binding Data.Grid.OhwmHeader, Source={StaticResource GridProxy}}"
-                                                    Visibility="{Binding Data.Grid.IsHcfcd, Source={StaticResource GridProxy}, Converter={x:Static dlg:Converters.TrueToVisible}}">
-                                <DataGridTemplateColumn.CellTemplate>
-                                    <DataTemplate>
-                                        <ContentPresenter x:Name="Field" Content="{Binding Ohwm}" ContentTemplate="{DynamicResource SV.CellFieldTemplate}"/>
-                                        <DataTemplate.Triggers>
-                                            <DataTrigger Binding="{Binding OhwmIsOverride}" Value="True">
-                                                <Setter TargetName="Field" Property="TextElement.FontWeight" Value="SemiBold"/>
-                                            </DataTrigger>
-                                        </DataTemplate.Triggers>
-                                    </DataTemplate>
-                                </DataGridTemplateColumn.CellTemplate>
-                                <DataGridTemplateColumn.CellEditingTemplate>
-                                    <DataTemplate>
-                                        <TextBox Text="{Binding Ohwm.Text, UpdateSourceTrigger=Explicit, ValidatesOnNotifyDataErrors=False}"
-                                                 TextAlignment="Right" AutomationProperties.Name="{x:Static pres:DialogText.ColumnOhwm}"/>
-                                    </DataTemplate>
-                                </DataGridTemplateColumn.CellEditingTemplate>
-                            </DataGridTemplateColumn>
-
-                            <!-- 11 Impacted length (HCFCD) -->
+                            <!-- 10 Impacted length (HCFCD; rev 3: the OHWM elevation column is gone, X6) -->
                             <DataGridTemplateColumn Width="92" MinWidth="92" IsReadOnly="True"
                                                     Header="{Binding Data.Grid.ImpactedLengthHeader, Source={StaticResource GridProxy}}"
                                                     Visibility="{Binding Data.Grid.IsHcfcd, Source={StaticResource GridProxy}, Converter={x:Static dlg:Converters.TrueToVisible}}">
@@ -547,7 +520,7 @@
                                 </DataGridTemplateColumn.CellTemplate>
                             </DataGridTemplateColumn>
 
-                            <!-- 12 Impacted area with the unit dropdown (HCFCD, acres by default) -->
+                            <!-- 11 Impacted area with the unit dropdown (HCFCD, acres by default) -->
                             <DataGridTemplateColumn Width="132" MinWidth="132" IsReadOnly="True"
                                                     Visibility="{Binding Data.Grid.IsHcfcd, Source={StaticResource GridProxy}, Converter={x:Static dlg:Converters.TrueToVisible}}">
                                 <DataGridTemplateColumn.Header>
@@ -566,7 +539,7 @@
                                 </DataGridTemplateColumn.CellTemplate>
                             </DataGridTemplateColumn>
 
-                            <!-- 13 Cut volume (HCFCD) -->
+                            <!-- 12 Cut volume (HCFCD) -->
                             <DataGridTemplateColumn Width="84" MinWidth="84" IsReadOnly="True"
                                                     Header="{Binding Data.Grid.CutVolumeHeader, Source={StaticResource GridProxy}}"
                                                     Visibility="{Binding Data.Grid.IsHcfcd, Source={StaticResource GridProxy}, Converter={x:Static dlg:Converters.TrueToVisible}}">
@@ -577,7 +550,7 @@
                                 </DataGridTemplateColumn.CellTemplate>
                             </DataGridTemplateColumn>
 
-                            <!-- 14 Average (HCFCD) -->
+                            <!-- 13 Average (HCFCD) -->
                             <DataGridTemplateColumn Width="84" MinWidth="84" IsReadOnly="True"
                                                     Header="{Binding Data.Grid.AverageHeader, Source={StaticResource GridProxy}}"
                                                     Visibility="{Binding Data.Grid.IsHcfcd, Source={StaticResource GridProxy}, Converter={x:Static dlg:Converters.TrueToVisible}}">
@@ -588,7 +561,7 @@
                                 </DataGridTemplateColumn.CellTemplate>
                             </DataGridTemplateColumn>
 
-                            <!-- 15 Status chip -->
+                            <!-- 14 Status chip -->
                             <DataGridTemplateColumn Width="*" MinWidth="96" IsReadOnly="True"
                                                     Header="{Binding Data.Grid.StatusHeader, Source={StaticResource GridProxy}}">
                                 <DataGridTemplateColumn.CellTemplate>
@@ -625,8 +598,6 @@
                                                Visibility="{Binding BeginStation.HasError, Converter={x:Static dlg:Converters.TrueToVisible}}"/>
                                     <TextBlock Text="{Binding EndStation.Error}" Style="{DynamicResource SV.ErrorTextStyle}" Margin="0,0,0,4"
                                                Visibility="{Binding EndStation.HasError, Converter={x:Static dlg:Converters.TrueToVisible}}"/>
-                                    <TextBlock Text="{Binding Ohwm.Error}" Style="{DynamicResource SV.ErrorTextStyle}" Margin="0,0,0,4"
-                                               Visibility="{Binding Ohwm.HasError, Converter={x:Static dlg:Converters.TrueToVisible}}"/>
                                     <WrapPanel Margin="0,0,0,6" Orientation="Horizontal"
                                                Visibility="{Binding ShowOffsetFix, Converter={x:Static dlg:Converters.TrueToVisible}}">
                                         <TextBlock Text="{x:Static pres:DialogText.OffsetFixLeft}" VerticalAlignment="Center" Margin="0,0,6,0"

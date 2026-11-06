@@ -130,3 +130,7 @@ engine's config file (A4) carries a UI section.
 
 - **Not run in Civil 3D yet:** every editor member and the command-context route compile against
   the AutoCAD 2025 reference set; their live behaviour is the M rows in `Dialog/README.md`.
+
+## Rev 3
+
+- `EditorSession.VolumeSurfaces` forwards the engine's list and `DesignSession.VolumeSurfaces` is empty; `UiSmoke` no longer types an OHWM elevation.

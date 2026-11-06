@@ -113,7 +113,6 @@ internal sealed class DisplayFormatter
     public string Coverage(double fraction) => Config.CoveragePercent.Format(fraction * 100, Culture) + DialogText.PercentSuffix;
     public string Offset(double value) => Config.Offset.Format(value, Culture);
     public string Factor(double value) => Config.Factor.Format(value, Culture);
-    public string Elevation(double value) => Config.Elevation.Format(value, Culture);
 
     public string Header(string header, string unit) => string.Format(Culture, DialogText.HeaderWithUnitFormat, header, unit);
 

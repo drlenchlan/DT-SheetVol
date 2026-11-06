@@ -29,3 +29,7 @@ Rollback (MEASURED with `SVADAPTERS_ABORT`, one case per script `tools/scripts/a
 ```
 
 `SVADAPTERS` builds FX's fixtures in the open drawing and prints T1/T2 (adapter + C1 planner + C2 reconciler), T10, T24, T29/E1012 (C5 integrator on these triangles vs `GetBoundedVolumes`), the Fixture H reconciliation, E1013, E208, E213, E214, E401 to E404, E410 to E412, E445, E803 and the P23 scale run. `SVADAPTERS_E404` runs next: Civil 3D sets `IsOutOfDate` on a point-group surface only after the command that moved the point ends. A step that throws prints SV-E195.
+
+## Rev 3
+
+- `AnalysisResolver.EnsureAnalyses` refuses any analysis with `VolumeSurface` set with the single Error `AdapterCodes.VolumeSurfaceNotYet()` (SV-E423), which rev3-adapters replaces.

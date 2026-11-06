@@ -72,9 +72,6 @@ internal static class C5
     public static SegmentDef Seg(double s0, double s1, double offL = -100, double offR = 100)
         => new(Guid.NewGuid(), $"{s0}-{s1}", s0, s1, offL, offR);
 
-    public static OhwmSpec Ohwm(double elevation, IReadOnlyDictionary<Guid, double>? bySegment = null)
-        => new(elevation, bySegment ?? new Dictionary<Guid, double>());
-
     /// <summary>Asserts |actual - expected| &lt;= rel * max(|expected|, floor).</summary>
     public static void Rel(double expected, double actual, double rel, double floor = 1.0, string? what = null)
     {

@@ -49,29 +49,28 @@ public sealed record BandResult(Guid? SegmentId, BandTotals? Totals, IReadOnlyLi
 
 /// <summary>
 /// Output of <see cref="OverlayIntegrator.IntegrateSegment"/>: band totals plus the HCFCD impact
-/// quantities below OHWM. When <see cref="Band"/> or <see cref="Impact"/> is null the run failed,
-/// <see cref="Problems"/> holds at least one Error, and <see cref="GroundBelowOhwmArea"/> is NaN.
+/// quantities (rev 3: cut where the comparison is below the base, which is the OHWM surface under
+/// the HCFCD preset). When <see cref="Band"/> or <see cref="Impact"/> is null the run failed,
+/// <see cref="Problems"/> holds at least one Error, and <see cref="BaseArea"/> is NaN.
 /// </summary>
 /// <param name="SegmentId">The segment this result belongs to.</param>
-/// <param name="OhwmElevation">The OHWM elevation used for this segment (default or per-segment override, E1010), drawing units.</param>
-/// <param name="Band">Band totals with no OHWM limit.</param>
-/// <param name="Impact">Rows 6 to 9 quantities plus the QA accumulators (6.15 steps 5 to 7).</param>
-/// <param name="GroundBelowOhwmArea">Plan area inside the boundary where the base surface exists and is
-/// strictly below OHWM, square drawing units, independent of the comparison surface (E1001).</param>
+/// <param name="Band">Band totals.</param>
+/// <param name="Impact">Rows 6 to 9 quantities (6.15 steps 5 and 6).</param>
+/// <param name="BaseArea">Plan area inside the boundary where the base surface exists, square drawing
+/// units, independent of the comparison surface.</param>
 /// <param name="Problems">Errors, warnings and notes, each with a stable SV-Exxx code (see <see cref="IntegratorCodes"/>).</param>
 public sealed record SegmentImpactResult(
     Guid SegmentId,
-    double OhwmElevation,
     BandTotals? Band,
     ImpactResult? Impact,
-    double GroundBelowOhwmArea,
+    double BaseArea,
     IReadOnlyList<Problem> Problems)
 {
     /// <summary>True when band totals and impact quantities were computed.</summary>
     public bool Succeeded => Band is not null && Impact is not null;
 
-    /// <summary>False when no existing ground inside the segment is below OHWM (E1001).</summary>
-    public bool HasGroundBelowOhwm => GroundBelowOhwmArea > 0;
+    /// <summary>False when the base surface has no data inside the segment's boundary.</summary>
+    public bool HasBase => BaseArea > 0;
 
     /// <summary>
     /// Cut volume / impacted length from unrounded values (E1019), cubic drawing units per drawing unit.
@@ -80,7 +79,7 @@ public sealed record SegmentImpactResult(
     public double? AveragePerLength => Impact is null ? null : ImpactQuantities.Average(Impact);
 }
 
-/// <summary>Derived impact quantities and the OHWM lookup.</summary>
+/// <summary>Derived impact quantities.</summary>
 public static class ImpactQuantities
 {
     /// <summary>
@@ -91,13 +90,6 @@ public static class ImpactQuantities
     {
         ArgumentNullException.ThrowIfNull(impact);
         return impact.ImpactedLength > 0 ? impact.CutVolume / impact.ImpactedLength : null;
-    }
-
-    /// <summary>The OHWM elevation for a segment: its override in <see cref="OhwmSpec.BySegment"/> if present, else the default (A11, E1010).</summary>
-    public static double OhwmFor(OhwmSpec spec, Guid segmentId)
-    {
-        ArgumentNullException.ThrowIfNull(spec);
-        return spec.BySegment is not null && spec.BySegment.TryGetValue(segmentId, out double e) ? e : spec.DefaultElevation;
     }
 }
 
@@ -122,10 +114,10 @@ public static class IntegratorCodes
     /// <summary>Warning: either surface is missing over part of the boundary; that part contributes nothing (E1011).</summary>
     public const string PartialCoverage = "SV-E1011";
 
-    /// <summary>Note: no existing ground inside the segment is below OHWM (E1001).</summary>
-    public const string NoGroundBelowOhwm = "SV-E1001";
+    /// <summary>Note: no cut in the segment; the comparison is nowhere below the base (the OHWM surface under the HCFCD preset), or the two do not overlap (E1001, rev 3).</summary>
+    public const string NoCut = "SV-E1001";
 
-    /// <summary>Warning: ground below OHWM reaches a lateral edge of the boundary; widen the offsets (E1002). Also raised when the lateral edges could not be identified and the check did not run.</summary>
+    /// <summary>Warning: cut reaches a lateral edge of the boundary; widen the offsets (E1002, rev 3). Also raised when the lateral edges could not be identified and the check did not run.</summary>
     public const string SearchLimit = "SV-E1002";
 
     /// <summary>Error: MinCutDepth or GapTolerance negative or not finite (E1007).</summary>
@@ -133,7 +125,4 @@ public static class IntegratorCodes
 
     /// <summary>Error: station-of-point could not be set up from the alignment geometry (E1008).</summary>
     public const string StationGeometry = "SV-E1008";
-
-    /// <summary>Error: the OHWM elevation for the segment is not finite (E1010).</summary>
-    public const string InvalidOhwm = "SV-E1010";
 }

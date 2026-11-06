@@ -36,3 +36,7 @@ SV-E308 erased (segment removed), SV-E501 missing style or layer, SV-E503 table 
 - The outline is the band between the impacted station intervals, full offset width. The integrator does not return the plan polygon of the impacted pieces; a true outline needs that from C5.
 - Table cell text is written MTEXT-escaped. `GetTextString(IgnoreMtextFormat)` drops escaped braces, so a cell is compared by plain text or by raw contents. HCFCD material names containing braces cannot be found by C2's label binding.
 - Column widths are estimated from text length at creation (factors in config) and never changed afterwards.
+
+## Rev 3
+
+- The HCFCD check (`WritersModelCheckHcfcd`) builds its run with no `OhwmSpec` and its hand-built impacts with empty `Outlines`; the band outline stays until rev3-output.

@@ -4,12 +4,20 @@ Readable twin of `src/SheetVol.Core/Contracts.cs`, which is the compiled source 
 
 Revision 2 (G1 contract review, 2026-11-05): dialog host members on `ISheetVolSession`, `DrawOptions`, per-segment offset overrides, `OutsideLimits` per analysis, `SchemaVersion` 2. Frozen after Wave 1. A worker that needs a change stops and reports it (HANDOFF.md section 9; stop condition 12.6).
 
+Revision 3 (2026-11-06, NOW.md X5, X6 and rulings D4, D9, D13, D21): OHWM is a surface, never an elevation (`OhwmSpec` and `RunDefinition.Ohwm` retired); an analysis may take an existing user TIN volume surface as its source (`AnalysisDef.VolumeSurface`, `VolumeSurfaceInfo`, `ISheetVolSession.VolumeSurfaces`); `ImpactResult` gains `Outlines` (the drawn impact outline) and drops `CutAboveOhwm` / `FillBelowOhwm`; `SchemaVersion` 3 (schema 2 JSON loads: `Ohwm` ignored, `VolumeSurface` null). Frozen again once the rev 3 adoption merges.
+
 ```csharp
 // Frozen contracts. HANDOFF.md section 6.2 verbatim, plus the session surface from
 // section 6.14 and the three records it told the orchestrator to define in Wave 0
 // (RunDefinition, ValidationResult, RegenResult). docs/contracts.md is the
 // readable twin; the two must match. A worker that needs a change here stops
 // and reports it (HANDOFF.md section 9, stop condition 12.6 after Wave 1).
+//
+// Revision 3 (2026-11-06, NOW.md X5, X6, D4, D9, D13, D21): OHWM is a surface, never an
+// elevation (OhwmSpec retired, RunDefinition.Ohwm gone); an analysis may take an existing
+// TIN volume surface as its source (AnalysisDef.VolumeSurface, VolumeSurfaceInfo,
+// ISheetVolSession.VolumeSurfaces); ImpactResult carries the plan outlines of the impacted
+// area and drops the two QA accumulators; SchemaVersion 3.
 
 namespace SheetVol.Core;
 
@@ -81,16 +89,21 @@ public interface ITriangleSource                       // one per TIN surface
 {
     IEnumerable<Tri3> Triangles(Pt windowMin, Pt windowMax);   // visible triangles overlapping the window
 }
+// Rev 3: for a VolumeSurface analysis source the adapter hands the integrator ONE ITriangleSource
+// read from the volume surface's own TIN, with Z normalised to depth d = base - comparison
+// (d > 0 is cut). Civil 3D's stored sign is MEASURED by the rev 3 Civil3D worker and recorded in
+// docs/api-findings.md; the integrator never sees the raw sign.
 
-public sealed record OhwmSpec(double DefaultElevation, IReadOnlyDictionary<Guid, double> BySegment);
+// Rev 3: OhwmSpec retired (X5). OHWM is a surface in the drawing; the HCFCD preset's analyses
+// name it as their base surface. Nothing in the contract carries an OHWM elevation.
 
 public sealed record ImpactResult(
     Guid SegmentId, string Material,
     double ImpactedLength,                             // drawing length units
     double ImpactedArea,                               // square drawing units
     double CutVolume,                                  // cubic drawing units, unadjusted
-    IReadOnlyList<(double From, double To)> Intervals, // raw stations that have cut below OHWM
-    double CutAboveOhwm, double FillBelowOhwm,         // for QA and export, not in the table
+    IReadOnlyList<(double From, double To)> Intervals, // raw stations that have cut (proposed below the base, which is OHWM under the HCFCD preset)
+    IReadOnlyList<IReadOnlyList<Pt>> Outlines,         // rev 3 (D13): closed rings (first == last, world coordinates) bounding the plan area counted in ImpactedArea; holes are rings too; empty when nothing is impacted. This is what the impact outline draws
     bool TouchesSearchLimit);
 
 // ----------------------------------------------------------------------------
@@ -105,11 +118,20 @@ public enum AutoMode { Off, Views, All }                            // 6.11, A4:
 public enum ReportPreset { Standard, HcfcdSegment }                 // 6.16
 public enum AreaUnit { SquareFeet, Acres, SquareMetres, Hectares }  // 6.5
 
-/// <summary>One base/comparison pair with its factors. Two analyses that share a pair share one owned volume surface (E411).</summary>
+/// <summary>
+/// One analysis: a base/comparison pair with its factors, or (rev 3, X6) an existing user TIN volume
+/// surface that already carries a pair and factors. Two pair analyses that share a pair share one
+/// owned volume surface (E411). When <see cref="VolumeSurface"/> is set: BaseSurface and
+/// ComparisonSurface hold the pair as last resolved from it (display only; the adapter re-reads
+/// them every regen), CutFactor and FillFactor are IGNORED and the surface's own factors govern,
+/// no owned surface is created, the surface is rebuilt under RebuildSources like any source and
+/// never otherwise written (D21, E404, E422), and the integrator reads its TIN (ITriangleSource note).
+/// </summary>
 public sealed record AnalysisDef(
     Guid Id, string Name,
     string BaseSurface, string ComparisonSurface,  // surface names; handles are resolved and stored by the adapter
-    double CutFactor = 1.0, double FillFactor = 1.0);
+    double CutFactor = 1.0, double FillFactor = 1.0,
+    string? VolumeSurface = null);                 // rev 3: name of the user TIN volume surface that is this analysis's source; null = the pair above
 
 /// <summary>A user-drawn closed polyline used as-is and never regenerated (6.3).</summary>
 public sealed record ManualSegmentDef(Guid Id, string Label, string PolylineHandle, string? TargetLayout = null);
@@ -156,10 +178,12 @@ public sealed record RunDefinition(
     ViewOptions Views,
     ReportPreset Preset = ReportPreset.Standard,
     AreaUnit AreaUnit = AreaUnit.SquareFeet,
-    OhwmSpec? Ohwm = null,                         // required when Preset == HcfcdSegment
     AutoMode AutoMode = AutoMode.Views,
-    int SchemaVersion = 2,                         // rev 2: DrawOptions and offset overrides added
+    int SchemaVersion = 3,                         // rev 2: DrawOptions and offset overrides; rev 3: Ohwm removed, AnalysisDef.VolumeSurface added (schema 2 JSON loads: Ohwm ignored, VolumeSurface null)
     DrawOptions? Draw = null);                     // null = all on
+// Rev 3: under Preset == HcfcdSegment every analysis is one material row (6.16); each is expected to
+// have the OHWM surface as its base. The preset names no "feeding" analysis: a run that also wants a
+// plain earthwork pair defines a second run (NOW.md rev 3 note).
 
 // ----------------------------------------------------------------------------
 // Results
@@ -226,6 +250,18 @@ public sealed record DrawingInfo(string Name, UnitSystem Units);
 /// <summary>What the change tracker knows about a run (6.11, E912). IsStale is true when the fingerprint differs from the current sources, or the host cannot tell. LastResult is the last successful regen in this session, from the dialog or a typed SVREGEN; null when none.</summary>
 public sealed record RunStatus(bool IsStale, RegenResult? LastResult);
 
+/// <summary>
+/// Rev 3 (X6): one user TIN volume surface the dialog may offer as an analysis source. SheetVol-owned
+/// surfaces (SV-&lt;base&gt;-&lt;comparison&gt;, tagged) are never listed. SourcesIntact is false when the
+/// base or comparison has been erased (S4: the object then opens as a plain TinSurface next command);
+/// such a surface is listed, disabled, with the reason, so the user learns why it cannot be picked.
+/// </summary>
+public sealed record VolumeSurfaceInfo(
+    string Name,
+    string BaseSurface, string ComparisonSurface,  // names of its pair now
+    double CutFactor, double FillFactor,           // its own factors now (these govern, AnalysisDef note)
+    bool SourcesIntact);
+
 // ----------------------------------------------------------------------------
 // Section 6.14: the only door between the UI and the engine
 // ----------------------------------------------------------------------------
@@ -250,5 +286,8 @@ public interface ISheetVolSession
     RunStatus GetRunStatus(string runName);                               // called on open and after every SourcesChanged (E912)
     bool IsCommandActive { get; }                                         // Regenerate disabled while true (E905)
     Task<RegenResult?> ExportAsync(RunDefinition run, CancellationToken ct);   // SVEXPORT: CSV and JSON only, no drawing writes; null when the run has no result yet
+
+    // Rev 3 (X6)
+    IReadOnlyList<VolumeSurfaceInfo> VolumeSurfaces { get; }               // user TIN volume surfaces in the drawing, never SheetVol-owned ones; re-read on SourcesChanged
 }
 ```

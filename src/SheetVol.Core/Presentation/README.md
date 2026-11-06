@@ -30,3 +30,7 @@ What the dialog writes into the run (contract rev 2):
   carries no override. The planner must read these for the fix to change a row's validation.
 - The reconciliation line shows the `RegenResult.OutsideLimits` entry of the analysis the
   comparison selector drives (E916).
+
+## Rev 3
+
+- OHWM field, per-segment OHWM column and their members removed (`DialogViewModel.Ohwm`/`OhwmLabel`, `SegmentRowViewModel.Ohwm`/`OhwmIsOverride`, `SegmentsGridViewModel.OhwmHeader`, `RowModel` OHWM fields, `IGridOwner.EditOhwm`, `RunComparison.EffectiveOhwm`, the OHWM `DialogText` strings, `PresentationConfig.Elevation`); `AnalysisDef.VolumeSurface` is ignored here until rev3-dialog.

@@ -8,8 +8,6 @@ namespace SheetVol.Core.Presentation;
 /// <param name="Status">Status chip.</param>
 /// <param name="Problem">The most severe problem for the row, shown under it with its fix.</param>
 /// <param name="SheetLayout">Layout that receives the segment's table (A14), or null.</param>
-/// <param name="OhwmEffective">OHWM elevation that applies to the segment, or null.</param>
-/// <param name="OhwmIsOverride">True when the segment overrides the run's OHWM.</param>
 /// <param name="OffsetFixAvailable">True when the row shows the per-segment offset fix: a station segment in Error, or one that already overrides the offsets (6.14, D8).</param>
 /// <param name="OffsetLeftEffective">Signed left offset that applies to the segment: its override, else the run's.</param>
 /// <param name="OffsetRightEffective">Signed right offset that applies to the segment: its override, else the run's.</param>
@@ -22,8 +20,6 @@ internal sealed record RowModel(
     SegmentStatus Status,
     Problem? Problem,
     string? SheetLayout,
-    double? OhwmEffective,
-    bool OhwmIsOverride,
     bool OffsetFixAvailable,
     double OffsetLeftEffective,
     double OffsetRightEffective,
@@ -43,7 +39,6 @@ internal sealed record GridContext(
 internal interface IGridOwner
 {
     string? EditStation(Guid segmentId, bool isEnd, string text);
-    string? EditOhwm(Guid segmentId, string text);
     string? ApplyOffsetOverride(Guid segmentId, string leftText, string rightText);
     void AddStation(Guid segmentId);
     Task PickStationAsync();

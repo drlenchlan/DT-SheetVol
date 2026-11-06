@@ -106,8 +106,8 @@ Each is a config value or an isolated module. Dan corrects them in `NOW.md`.
 | A7 | Table style, layers, text height, template path and anchor names come from config. Built-in defaults are placeholders until Dan supplies LAN names |
 | A8 | Plan-only sheets. Profile viewports and Sheet Set Manager integration are out of scope |
 | A9 | The engine has no dialogs and stays fully scriptable. A modeless dialog (`SVDIALOG`, section 6.14) and the ribbon live in a separate UI assembly |
-| A10 | "Below OHWM" means the plan area where existing ground (the base surface) is lower than the OHWM elevation. All cut inside that area counts. Excavation under banks that stand above OHWM is not counted; it is reported separately in the export |
-| A11 | OHWM is one elevation per run with an optional override per segment. A station-interpolated OHWM profile or an OHWM surface is a later option |
+| A10 | "Below OHWM" means the plan area where existing ground (the base surface) is lower than the OHWM elevation. All cut inside that area counts. Excavation under banks that stand above OHWM is not counted; it is reported separately in the export. **Rev 3 (2026-11-06, NOW.md X5): superseded. OHWM is a surface; the HCFCD analysis is base = OHWM surface, comparison = proposed; impact is the cut of that pair (proposed below OHWM), its plan area and its station extent. Existing ground is not part of rows 6 to 9** |
+| A11 | OHWM is one elevation per run with an optional override per segment. A station-interpolated OHWM profile or an OHWM surface is a later option. **Rev 3: superseded by X5; there is no OHWM elevation anywhere in the tool** |
 | A12 | HCFCD formats: length in whole feet, area in acres to 2 decimals, volume in whole cubic yards, average to 2 decimals. The template shows `XX` for acres, so the decimals need confirming |
 | A13 | In the HCFCD table the tool fills rows 6 to 9 only. Center coordinates and the other-aquatic-feature rows stay manual |
 | A14 | Each segment can name the layout its table goes on. With no layout named, the table is placed in model space at the segment |
@@ -374,7 +374,7 @@ The per-sheet table gets an `AREA` row only when `AreaInSegmentTable` is on in c
 
 ### 6.9 Persistence and identity
 
-Named Objects Dictionary → `DBDictionary "SHEETVOL"` → one `Xrecord` per run. JSON chunked into strings of 250 characters or fewer per `TypedValue`. Stores the run definition, per-segment handles (boundary, layout, viewport, clip, tables, marks), source references by handle **and** name, `schemaVersion`, and the last source fingerprint. A plugin older than the stored schema refuses to modify the run.
+Named Objects Dictionary → `DBDictionary "SHEETVOL"` → one `Xrecord` per run. JSON chunked into strings of 250 characters or fewer per `TypedValue`. Stores the run definition, per-segment handles (boundary, layout, viewport, clip, tables, marks), source references by handle **and** name, `schemaVersion`, and the last source fingerprint. A plugin older than the stored schema refuses to modify the run. **Rev 3: run schema 3. A schema 2 record loads with its `ohwm` ignored and every analysis a pair source; a schema 3 record is refused by a schema 2 plugin as before.**
 
 ### 6.10 Regen pipeline (`SVREGEN`)
 
@@ -442,7 +442,7 @@ The phase 1 front end: alignment, offsets, base and comparison surfaces, and an 
   - Strip chart "Cut and fill by segment": segment width proportional to length, fill above the axis, cut below, station labels at each break, selected segment outlined.
   - Segments grid: #, begin station and end station (editable), length, 2D area, cut, fill, net with a CUT or FILL tag, coverage, status chip (Current, Out of date, Error). Total row. One reconciliation line under the grid.
   - The 2D area column header holds a unit dropdown: SF (default) and AC, or m² and ha in a metric drawing. Changing it reformats the grid at once and sets the run's area unit for the drawn tables and export.
-  - With the HCFCD preset (6.16) the left panel gains a Report selector and an OHWM elevation field next to the offsets, and the surfaces card is labelled table row, existing, design. The grid columns become: #, begin, end, sheet (layout), OHWM elevation, impacted length, impacted area with the unit dropdown (acres by default), cut volume, average, status. The chart shows cut volume per segment with a strip under it marking the stations that have cut.
+  - With the HCFCD preset (6.16) the left panel gains a Report selector and an OHWM elevation field next to the offsets, and the surfaces card is labelled table row, existing, design. The grid columns become: #, begin, end, sheet (layout), OHWM elevation, impacted length, impacted area with the unit dropdown (acres by default), cut volume, average, status. The chart shows cut volume per segment with a strip under it marking the stations that have cut. **Rev 3 (NOW.md X6): no OHWM field and no OHWM column. The surfaces card is Base and Comparison under every preset (labelled table row, OHWM, proposed under HCFCD), with a source switch per analysis: "Base and comparison" or "Volume surface" (dropdown of the drawing's user TIN volume surfaces; base, comparison and factors then show read-only from the surface, E918). HCFCD grid: #, begin, end, sheet, impacted length, impacted area with the unit dropdown, cut volume, average, status.**
   - Grid toolbar: Add station, Pick in drawing, Remove, Zoom to.
 - **Footer.** "Regenerate when the alignment or stations change" checkbox, Export CSV, Close, Regenerate (primary).
 - **Problems.** A stale run shows one banner above the chart. A failing row is tinted and carries its message directly under it in plain words with the fix beside it (for example a per-segment offset field and Apply). Totals are hidden until every segment has a result.
@@ -491,6 +491,8 @@ public interface ISheetVolSession
 
 Station of a point is computed in Core from `AlignSeg` geometry (closed form on lines and arcs, iterative on spirals) and cross-checked against `Alignment.StationOffset` in the self-test.
 
+**Rev 3 (2026-11-06, NOW.md X5, X6, D9, D13).** The inputs are the base and comparison triangles only; there is no OHWM elevation. Under the HCFCD preset the base IS the OHWM surface, so step 5 is one clip, `d > MinCutDepth`, and step 7 is gone (the band fill is "proposed above OHWM" and is exported as the analysis's fill). The OHWM-elevation snap of D9 retires with it; the depth snap stays. Step 5 also keeps every surviving piece's plan polygon; the impact outline is the union of those pieces by edge cancellation (a piece's edge that is matched by an equal opposite edge of another piece is interior; what remains forms the rings), returned in `ImpactResult.Outlines` and drawn as-is (D13). For a volume-surface source (6.16) the adapter hands the integrator one triangle source read from the volume surface's TIN with Z normalised to `d`; steps 2 and 3 reduce to clipping those triangles to the boundary, and the cross-check against `GetBoundedVolumes` on the same surface must agree to the fixture tolerance.
+
 **Quantities per segment and material.**
 
 | Quantity | Definition | HCFCD row |
@@ -526,6 +528,8 @@ Only those cells are written. Center coordinates, the other-aquatic-feature rows
 **Placement.** One table per segment. If the segment names a layout (`TargetLayout`), the table goes in that layout's paper space at the `SV_TABLE_ANCHOR` block or the configured point. Otherwise it goes in model space at the segment. The table is created once and only updated afterwards, so a table the user moved stays where it is.
 
 **More than one material.** Each analysis adds one row under the `TOTAL CUT MATERIAL` header when the table is first created. The row label is the analysis name.
+
+**Rev 3 (NOW.md X5, X6).** Under the HCFCD preset every analysis is one material row and each is expected to have the OHWM surface as its base; the preset names no feeding analysis (a run that also wants a plain earthwork pair is a second run). An analysis may instead name an existing user TIN volume surface as its source (`AnalysisDef.VolumeSurface`): its pair and factors are read from the surface every regen and govern, no owned surface is created for it, it is rebuilt under `RebuildSources` like any source (E404) and never otherwise written (D21), and the export names the source kind per analysis (pair or volume surface) with the surface name.
 
 ---
 
@@ -609,6 +613,8 @@ Each row is a requirement. Workers implement the behavior and cover it with the 
 | E419 | Surface does not fill the boundary (edge of surface, holes) | 2D area is the surface area inside the boundary, smaller than the boundary area; coverage below 100% | H |
 | E420 | Rounded acre rows do not sum to the rounded total | Same rule as volumes (A6): total = sum of displayed rows, unrounded total in export and footnote | U |
 | E421 | Two analyses whose surfaces cover different extents | 2D area is per analysis, not per segment alone | H |
+| E422 | (Rev 3) Analysis source is a user volume surface that is no longer a `TinVolumeSurface`, or whose base or comparison was erased | Fail the run naming the surface and the missing source before any read; never compute on it (S4: the erased source is silent, the object opens as a plain `TinSurface` next command). Guarded on every regen and on every dialog listing (`VolumeSurfaceInfo.SourcesIntact`) | H |
+| E423 | (Rev 3) User volume surface source with its own outer boundary, or with factors other than 1.0 | Bounded volumes and the integrator honour the boundary alike (both read the surface's TIN); the surface's factors govern and the analysis's stored factors are ignored; the export names the source kind and surface. E404 applies to it: rebuilt when `RebuildSources` is on, else fail naming it (D21); its factors, pair and boundary are never written | H |
 
 ### 7.5 Tables and exports
 
@@ -699,8 +705,11 @@ Each row is a requirement. Workers implement the behavior and cover it with the 
 | E915 | Core Console | UI assembly is never loaded; engine unaffected | H |
 | E916 | More than one comparison | A comparison selector above the grid drives the 2D area, cut, fill and net columns and the chart | U |
 | E917 | Area unit dropdown changed | Grid reformats immediately; choice saved with the run; offered units follow the drawing (SF/AC or m²/ha) | U |
+| E918 | (Rev 3) Analysis source switched to a volume surface, or back | Base, comparison and factors show read-only from the surface while it is the source; switching back restores the editable pair fields with their last values; a volume surface whose sources are erased is listed disabled with the reason; the list never shows SheetVol-owned surfaces | U |
 
 ### 7.10 Impacts below OHWM and the HCFCD table
+
+**Rev 3 (2026-11-06, NOW.md X5): read every row below with OHWM as the base surface of the analysis.** E1001 becomes "no cut in the segment" (the OHWM surface is below the proposed everywhere it exists, or the two do not overlap): same zeros and `N/A`, same note. E1002 becomes "cut reaches a lateral search limit". E1003, E1004, E1006 and E1010 are retired: there is no existing ground, no OHWM elevation and no per-segment OHWM in rows 6 to 9; the band fill (proposed above OHWM) is exported as the analysis's fill. The rest stand as written.
 
 | ID | Case | Required behavior | Test |
 |---|---|---|---|

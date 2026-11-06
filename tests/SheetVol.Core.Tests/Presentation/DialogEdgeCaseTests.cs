@@ -407,8 +407,7 @@ public class DialogEdgeCaseTests
         Assert.Equal("Impacted length (m)", vm.Grid.ImpactedLengthHeader);
         Assert.Equal("Cut volume (m³)", vm.Grid.CutVolumeHeader);
         Assert.Equal("Average (m³/m)", vm.Grid.AverageHeader);
-        Assert.Equal("OHWM elevation (m)", vm.Grid.OhwmHeader);
-        Assert.Equal("OHWM elevation (m)", vm.OhwmLabel);
+        // Rev 3 (X6): the OHWM elevation header and label are gone; nothing else changes with the unit.
     }
 
     // ---- E916 ---------------------------------------------------------------------

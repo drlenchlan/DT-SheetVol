@@ -143,6 +143,10 @@ public sealed class SheetVolSession : ISheetVolSession, IDisposable
     public IReadOnlyList<string> TinSurfaceNames => Read(src => src.TinSurfaceNames(), []);
 
     /// <inheritdoc />
+    /// <remarks>Rev 3 adoption: always empty; the rev3-adapters package lists the drawing's user TIN volume surfaces.</remarks>
+    public IReadOnlyList<VolumeSurfaceInfo> VolumeSurfaces => [];
+
+    /// <inheritdoc />
     public DrawingInfo? ActiveDrawing
     {
         get
