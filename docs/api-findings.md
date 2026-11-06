@@ -1810,3 +1810,119 @@ registered application, XData, or an extension-dictionary entry) is the "Plan" m
 | `SheetVol.UI.dll` not staged by `tools/test-headless.ps1` | WORKAROUND in part 0 | Orchestrator: stage the UI project's output too (the runner is not S3's) |
 | AeccUiMgd events (`AeccReferenceStatusUtils.ReferenceStatusChanged` and others) | NOT EXPLORED | Only if L2 finds Database events insufficient for synchronize; UI-only assembly, undocumented |
 | `Idle` in acad.exe | OPEN | Dan's P15 run |
+
+## D. Probe D: user volume surface as analysis source (S4)
+
+**Question** (Dan 2026-11-06, NOW.md X6): can a TIN volume surface the user already made be
+an analysis source in place of a Base + Comparison pair, since it already carries both and
+its own cut/fill factors? MEASURED 2026-11-06 in the Civil 3D 2026 Core Console (loaded
+`AeccDbMgd 13.8.0.1873`); the plugin compiles against `AutoCAD 2025\C3D\AeccDbMgd.dll`
+(`13.7.0.1519`). "The user's surface" is `FX-VOL-EG-FG_A` from `SVFIXTURE VOLUMES`; the
+owned surface is `SV-EG-FG_A` from A1's `AnalysisResolver.EnsureAnalyses`.
+
+### D.0 How to rerun
+
+```powershell
+dotnet build .\SheetVol.slnx -c Debug
+.\tools\test-headless.ps1 -Script tools\scripts\probeD.scr
+```
+
+Log: `%TEMP%\sheetvol\probeD.log` (exit 0, 6 s). Code: `src/SheetVol.Civil3D/SelfTest/ProbeDCommon.cs`,
+`ProbeDSource.cs`. The script builds `SVFIXTURE A`, `S`, `VOLUMES`, then runs `SVPROBED`
+(items 1 to 3), `SVPROBED_OUTER` (6), `SVPROBED_EDIT`, `_STALE`, `_REBUILD`, `_.UNDO 1`,
+`_UNDONE`, `_OWNED` (4), `SVPROBED_ERASE`, `_AFTERERASE` (5). T2 has four segments (breaks
+0, 500, 1300, 1800, 2000), not five.
+
+### D.1 Summary
+
+| Item | Measured | Usable as an analysis source |
+|---|---|---|
+| 1 Members | No `BaseSurfaceId` / `ComparisonSurfaceId` member exists in 13.7 or 13.8: those strings are only parameter names of `TinVolumeSurface.Create` and `GridVolumeSurface.Create` (metadata scan). The pair is `TinVolumeSurface.GetVolumeProperties().BaseSurface` / `.ComparisonSurface` (`ObjectId`, get only). Factors: `TinVolumeSurface.CutFactor` / `FillFactor` (get/set) and the same names on `VolumeSurfaceProperties` (get). Read back: base `EG`, comparison `FG_A`, factors 1/1, cut 5400, fill 5400 | yes |
+| 2 Bounded, user vs owned | Identical on all four T2 segments, diff 0.00E+00 for cut and fill | yes |
+| 3 Factors 1.25 / 0.9 | `GetBoundedVolumes` returns raw (seg 1: 2700 / 1350, not 3375 / 1215); `AdjustedCut` 6750 and `AdjustedFill` 4860 take the factors at once, no Rebuild, `IsOutOfDate` stays False | yes, with condition: read the factors from the surface and apply them in Core, as the owned path does |
+| 4 Staleness | FG_A apex lowered 1.0: user and owned surfaces both read `IsOutOfDate=False` in the same command, `True` in the next, and return the stale 2700 until Rebuild; after Rebuild 5400. One `UNDO` after the Rebuild command removed the marker and put the user surface back to stale (`IsOutOfDate=True`, 2700) | yes, with condition: needs Rebuild like the owned one, and that Rebuild is an undoable change to the user's drawing |
+| 5 Base erased | `EG.Erase()` succeeds with three volume surfaces on it. Same command: still `TinVolumeSurface`, `BaseSurface` reads `IsErased=True`, `CutFactor` getter throws `CivilException('Retrieve attribute failed.')`, `GetBoundedVolumes` returns the old 2700 / 1350. Next command: the object is a plain `TinSurface` (`IsVolumeSurface=False`), stale numbers until Rebuild, then no triangles and 0 / 0 / 0. `SurfaceStatus.BaseSurfaceNotFound` (34) exists, but no public property or method returns `SurfaceStatus`; no call throws it | yes, with condition: check the type (`TinVolumeSurface`, `IsVolumeSurface`) and `BaseSurface` / `ComparisonSurface` not erased before every read; nothing else reports the loss |
+| 6 User outer boundary | `BoundariesDefinition.AddBoundaries(Outer)` works on a volume surface (inherited from `Surface`); after Rebuild 68 to 44 triangles, whole surface 2700 / 1350, and `GetBoundedVolumes` clips to it as well as to the polygon: seg 2 cut 2700 to 0, seg 3 fill 4050 to 0 | yes, with condition: the user's boundary is part of the answer, so a volume-surface source can differ from the same Base + Comparison as a pair |
+
+### D.2 Output (verbatim, `probeD.log`)
+
+```text
+D1 loaded AeccDbMgd 13.8.0.1873 from C:\Program Files\Autodesk\AutoCAD 2026\C3D\AeccDbMgd.dll
+D1 public properties named BaseSurfaceId: none
+D1 public properties named ComparisonSurfaceId: none
+D1 public properties named BaseSurface: Autodesk.Civil.DatabaseServices.VolumeSurfaceProperties.BaseSurface:ObjectId get
+D1 public properties named ComparisonSurface: Autodesk.Civil.DatabaseServices.VolumeSurfaceProperties.ComparisonSurface:ObjectId get
+D1 TinVolumeSurface declared public properties: FillFactor:Double get/set, CutFactor:Double get/set
+D1 FX-VOL-EG-FG_A handle 6EA: props.BaseSurface='EG' (1860997791808) (TinSurface) props.ComparisonSurface='FG_A' (1860997792000) (TinSurface)
+D1 FX-VOL-EG-FG_A: props.CutFactor=1 props.FillFactor=1 vol.CutFactor=1 vol.FillFactor=1
+D1 FX-VOL-EG-FG_A: UnadjustedCut=5400.000000000002 UnadjustedFill=5400 UnadjustedNet=-1.8189894035458565E-12 AdjustedCut=5400.000000000002 AdjustedFill=5400 AdjustedNet=-1.8189894035458565E-12
+D2 | seg | user Cut     | owned Cut    | diff Cut  | user Fill    | owned Fill   | diff Fill | expected C/F ft3
+D2 | 1   |         2700 |         2700 |  0.00E+00 |         1350 |         1350 |  0.00E+00 | 2700/1350
+D2 | 2   | 2700.0000000000023 | 2700.0000000000023 |  0.00E+00 |            0 |            0 |  0.00E+00 | 2700/0
+D2 | 3   |            0 |            0 |  0.00E+00 |         4050 |         4050 |  0.00E+00 | 0/4050
+D2 | 4   |            0 |            0 |  0.00E+00 |            0 |            0 |  0.00E+00 | 0/0
+[D3 same transaction as the set] FX-VOL-EG-FG_A: IsOutOfDate=False CutFactor=1.25 FillFactor=0.9 z(1125,0)=-1 UnadjustedCut=5400.000000000002 UnadjustedFill=5400 AdjustedCut=6750.000000000002 AdjustedFill=4860 props.CutFactor=1.25 props.FillFactor=0.9
+FX-VOL-EG-FG_A.GetBoundedVolumes(whole band [0,2000] user, factors 1.25/0.9): Cut=5400.000000000002 Fill=5400 Net=-1.8189894035458565E-12
+D3 seg 1: bounded Cut=2700 Fill=1350; raw x factor would be Cut=3375 Fill=1215; raw is Cut=2700 Fill=1350
+D3 seg 3: bounded Cut=0 Fill=4050; raw x factor would be Cut=0 Fill=3645; raw is Cut=0 Fill=4050
+D4 FG_A vertex at (1125, 0): (1125, 0, 99); setting z to 98
+FX-VOL-EG-FG_A.GetBoundedVolumes(T2 seg 2 [500,1300] same command as the edit, no Rebuild): Cut=2700.0000000000023 Fill=0 Net=-2700.0000000000023
+[D4 next command, no Rebuild] FX-VOL-EG-FG_A: IsOutOfDate=True CutFactor=1 FillFactor=1 z(1125,0)=-1 UnadjustedCut=5400.000000000002 UnadjustedFill=5400 AdjustedCut=5400.000000000002 AdjustedFill=5400 props.CutFactor=1 props.FillFactor=1
+FX-VOL-EG-FG_A.GetBoundedVolumes(T2 seg 2 [500,1300] next command, no Rebuild): Cut=2700.0000000000023 Fill=0 Net=-2700.0000000000023
+SV-EG-FG_A.GetBoundedVolumes(T2 seg 2 [500,1300] next command, no Rebuild): Cut=2700.0000000000023 Fill=0 Net=-2700.0000000000023
+D4 marker SV-PROBED-UNDO-MARKER written, handle 6EF
+FX-VOL-EG-FG_A.GetBoundedVolumes(T2 seg 2 [500,1300] after user-surface Rebuild): Cut=5400.000000000005 Fill=0 Net=-5400.000000000005
+D4 after UNDO 1: marker SV-PROBED-UNDO-MARKER present=False
+D4 after UNDO 1: FG_A z(1125,0)=98 (control: the edit was an earlier command)
+[D4 after UNDO 1] FX-VOL-EG-FG_A: IsOutOfDate=True CutFactor=1 FillFactor=1 z(1125,0)=-1 UnadjustedCut=5400.000000000002 UnadjustedFill=5400 AdjustedCut=5400.000000000002 AdjustedFill=5400 props.CutFactor=1 props.FillFactor=1
+FX-VOL-EG-FG_A.GetBoundedVolumes(T2 seg 2 [500,1300] after UNDO 1): Cut=2700.0000000000023 Fill=0 Net=-2700.0000000000023
+SV-EG-FG_A.GetBoundedVolumes(T2 seg 2 [500,1300] owned after EnsureAnalyses): Cut=5400.000000000005 Fill=0 Net=-5400.000000000005
+D5 before the erase: FX-VOL-EG-FG_A id (1860997792160) ObjectClass=AeccDbSurfaceTin wrapper=Autodesk.Civil.DatabaseServices.TinVolumeSurface
+D5 EG IsErased=True
+D5 same command as the erase: FX-VOL-EG-FG_A IsErased=False IsOutOfDate=True IsVolumeSurface=True CutFactor=threw CivilException('Retrieve attribute failed.') triangles=68
+D5 same command as the erase: GetVolumeProperties: BaseSurface=(1860997791808) (IsErased=True) ComparisonSurface='FG_A' (1860997792000) (TinSurface) UnadjustedCut=5400.000000000002 UnadjustedFill=5400
+D5 same command as the erase: public properties of type SurfaceStatus: none
+D5 same command as the erase: public methods returning SurfaceStatus: none
+FX-VOL-EG-FG_A.GetBoundedVolumes(T2 seg 1 [0,500] D5 same command as the erase): Cut=2700 Fill=1350 Net=-1350
+D5 next command: id (1860997792160) IsErased=False IsValid=True ObjectClass=AeccDbSurfaceTin; GetObject returned Autodesk.Civil.DatabaseServices.TinSurface
+D5 next command: FX-VOL-EG-FG_A IsErased=False IsOutOfDate=True IsVolumeSurface=False CutFactor=null triangles=68
+FX-VOL-EG-FG_A.GetBoundedVolumes(T2 seg 1 [0,500] D5 next command): Cut=2700 Fill=1350 Net=-1350
+D5 next command after Rebuild: IsOutOfDate=False triangles=threw InvalidOperationException('The surface has no point or triangle.')
+FX-VOL-EG-FG_A.GetBoundedVolumes(T2 seg 1 [0,500] D5 next command after Rebuild): Cut=0 Fill=0 Net=0
+[D5 A1 path with EG erased] EnsureAnalyses problem SV-E442 Error: Analysis 'EG vs FG_A': base surface 'EG' is not in the drawing.
+D6 AddBoundaries(Outer, nonDestructive=True) returned SurfaceOperationAddBoundary BoundaryType=Outer Count=1
+D6 IsOutOfDate after AddBoundaries (same transaction) = False
+D6 after Rebuild: triangles=44 BoundariesDefinition.Count=1
+FX-VOL-EG-FG_A-OUTER.GetBoundedVolumes(T2 seg 1 [0,500] outer boundary added): Cut=2700 Fill=1350 Net=-1350
+FX-VOL-EG-FG_A-OUTER.GetBoundedVolumes(T2 seg 2 [500,1300] outer boundary added): Cut=0 Fill=0 Net=0
+FX-VOL-EG-FG_A-OUTER.GetBoundedVolumes(T2 seg 3 [1300,1800] outer boundary added): Cut=0 Fill=0 Net=0
+```
+
+Metadata scan of `AutoCAD 2025\C3D\AeccDbMgd.dll` (13.7.0.1519, System.Reflection.Metadata,
+no load): `BaseSurfaceId` and `ComparisonSurfaceId` occur only as parameters of
+`TinVolumeSurface.Create`, `GridVolumeSurface.Create`, `Surface.InternalAddCreationVolumeData`
+and the module-level `CheckCreationVolumeArg`; `BaseSurface` / `ComparisonSurface` are
+properties of `VolumeSurfaceProperties` only; `BoundariesDefinition` is on `Surface`;
+`BaseSurfaceNotFound` is a field of the enum `Autodesk.Civil.SurfaceStatus`. 13.8 is the same.
+
+### D.3 What this means for X6 (orchestrator decides; no contract changed here)
+
+1. **Correction to NOW.md X6:** the members are `VolumeSurfaceProperties.BaseSurface` and
+   `.ComparisonSurface` (`ObjectId`, read through `TinVolumeSurface.GetVolumeProperties()`),
+   not `BaseSurfaceId` / `ComparisonSurfaceId`. The pair cannot be changed through them.
+2. A user volume surface gives the owned path's bounded numbers exactly when nothing else
+   differs (item 2). `GetBoundedVolumes` ignores its factors (item 3), so they are read from
+   the surface and applied in Core, as the owned path already does with the analysis factors.
+3. It needs `Rebuild()` after a source changes, exactly like the owned surface, and
+   `IsOutOfDate` flags only after the editing command ends (item 4; A1 saw a 3D-polyline
+   breakline TIN not flag at all). A regen that rebuilds it writes the user's object and
+   that write is one `UNDO` step. Whether a regen may do that, or must fail and name the
+   surface when it is out of date (as E404 does for sources with `RebuildSources` off), is
+   the decision item 4 leaves open.
+4. A lost base or comparison is silent (item 5): the surface turns into a plain TIN
+   surface after the command, and its numbers are stale, then zero after a Rebuild. The
+   check before every read is "still a `TinVolumeSurface`, `BaseSurface` and
+   `ComparisonSurface` not erased"; A1's own path reports SV-E442 for the same case.
+5. A boundary on the user's volume surface clips the result (item 6). The same
+   Base + Comparison picked as a pair would give different numbers, so the source kind has
+   to show in the report.
