@@ -67,9 +67,6 @@ public sealed record PresentationConfig
     /// <summary>HCFCD average volume per unit length (A12: 2 decimals).</summary>
     public NumberDisplay ImpactAverage { get; init; } = new(2, Grouped: false);
 
-    /// <summary>OHWM elevations.</summary>
-    public NumberDisplay Elevation { get; init; } = new(2, Grouped: false);
-
     /// <summary>Offsets in the left panel.</summary>
     public NumberDisplay Offset { get; init; } = new(2, Grouped: false, TrimZeros: true);
 

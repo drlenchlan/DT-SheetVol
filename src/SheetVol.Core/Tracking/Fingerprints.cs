@@ -28,7 +28,7 @@ public sealed record FingerprintInput(
 /// <param name="Format">Canonical format version; a different format always compares stale.</param>
 /// <param name="Value">Hash over the format and every component hash. Equal values mean nothing changed.</param>
 /// <param name="Alignment">Alignment geometry and displayed stationing.</param>
-/// <param name="Definition">Run definition parts that shape outputs: break spec, offsets, analyses, views, draw options, per-segment overrides (offsets included), preset, area unit, OHWM.</param>
+/// <param name="Definition">Run definition parts that shape outputs: break spec, offsets, analyses (volume-surface source included, rev 3), views, draw options, per-segment overrides (offsets included), preset, area unit.</param>
 /// <param name="Frames">View frame stations and corners.</param>
 /// <param name="Surfaces">Owned volume surface out-of-date state and last totals, per analysis.</param>
 /// <param name="ManualSegments">Manual segment polyline geometry.</param>
@@ -58,9 +58,11 @@ public static class Fingerprints
     /// <summary>
     /// Canonical format version. Changing the canonical text requires a new value. SVFP2
     /// (contract rev 2): the definition signature adds <see cref="RunDefinition.Draw"/> and the
-    /// per-segment offset overrides, so every SVFP1 fingerprint compares stale once.
+    /// per-segment offset overrides, so every SVFP1 fingerprint compares stale once. SVFP3
+    /// (contract rev 3): the ohwm section is gone and each analysis adds its
+    /// <see cref="AnalysisDef.VolumeSurface"/> presence and name.
     /// </summary>
-    public const string FormatVersion = "SVFP2";
+    public const string FormatVersion = "SVFP3";
 
     /// <summary>Component name: canonical format version.</summary>
     public const string FormatComponent = "format";
@@ -165,7 +167,8 @@ public static class Fingerprints
         IReadOnlyList<AnalysisDef> analyses = run.Analyses ?? [];
         w.Section("analyses").Add(analyses.Count);
         foreach (AnalysisDef a in analyses)
-            w.Add(a.Id).Add(a.Name).Add(a.BaseSurface).Add(a.ComparisonSurface).Add(a.CutFactor).Add(a.FillFactor);
+            w.Add(a.Id).Add(a.Name).Add(a.BaseSurface).Add(a.ComparisonSurface).Add(a.CutFactor).Add(a.FillFactor)
+             .Add(a.VolumeSurface is not null).Add(a.VolumeSurface);   // rev 3: presence and name; the rest of D4 is rev3-tracking's
 
         IReadOnlyList<ManualSegmentDef> manual = run.ManualSegments ?? [];
         w.Section("manualdefs").Add(manual.Count);
@@ -194,14 +197,6 @@ public static class Fingerprints
             AddOptional(w, o.OffsetRight);
         }
 
-        w.Section("ohwm").Add(run.Ohwm is not null);
-        if (run.Ohwm is OhwmSpec ohwm)
-        {
-            var bySegment = (ohwm.BySegment ?? new Dictionary<Guid, double>())
-                .OrderBy(kv => kv.Key.ToString("D"), StringComparer.Ordinal).ToArray();
-            w.Add(ohwm.DefaultElevation).Add(bySegment.Length);
-            foreach (var (id, elevation) in bySegment) w.Add(id).Add(elevation);
-        }
         return w.Sha256Hex();
     }
 

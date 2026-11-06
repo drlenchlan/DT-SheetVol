@@ -187,14 +187,13 @@ internal static class UiSmoke
         try
         {
             vm.SelectedPreset = vm.Presets.First(p => p.Preset == ReportPreset.HcfcdSegment);
-            vm.Ohwm.Text = "35";
             Pump();
             report.Check("HCFCD labels", vm.IsHcfcd && vm.BaseSurfaceLabel == DialogText.BaseSurfaceHcfcd && vm.SelectedAreaUnit?.Unit == AreaUnit.Acres,
                 $"{vm.AnalysisNameLabel} / {vm.BaseSurfaceLabel} / {vm.ComparisonSurfaceLabel}, area unit {vm.SelectedAreaUnit}");
             Execute(vm.RegenerateCommand);
             var hcfcdColumns = window.SegmentsGrid.Columns.Count(c => c.Visibility == Visibility.Visible);
             var cutColumnHidden = window.SegmentsGrid.Columns[5].Visibility != Visibility.Visible;
-            report.Check("HCFCD columns", vm.Grid.IsHcfcd && hcfcdColumns == 10 && cutColumnHidden,
+            report.Check("HCFCD columns", vm.Grid.IsHcfcd && hcfcdColumns == 9 && cutColumnHidden,   // rev 3: OHWM column gone (X6), 10 -> 9
                 $"{hcfcdColumns} visible columns, Standard cut column hidden={cutColumnHidden}");
             report.Check("HCFCD chart and strip", vm.Chart.IsHcfcd && vm.Chart.CutMarks.Count == 2 && vm.Grid.TotalsVisible,
                 $"{vm.Chart.CutMarks.Count} cut marks, totals {vm.Grid.Total.ImpactedLengthText} ft / {vm.Grid.Total.ImpactedAreaText} / {vm.Grid.Total.CutVolumeText}");

@@ -133,8 +133,6 @@ public sealed class SegmentsGridViewModel : ObservableObject
     public string StatusHeader => DialogText.ColumnStatus;
     /// <summary>HCFCD header of the sheet column.</summary>
     public string SheetHeader => DialogText.ColumnSheet;
-    /// <summary>HCFCD header of the OHWM column, with its unit.</summary>
-    public string OhwmHeader => WithUnit(DialogText.ColumnOhwm, _fmt?.LengthUnit);
     /// <summary>HCFCD header of the impacted length column, with its unit.</summary>
     public string ImpactedLengthHeader => WithUnit(DialogText.ColumnImpactedLength, _fmt?.LengthUnit);
     /// <summary>HCFCD header of the impacted area column; the unit is in the dropdown beside it.</summary>
@@ -198,7 +196,7 @@ public sealed class SegmentsGridViewModel : ObservableObject
 
         OnPropertiesChanged(
             nameof(LengthHeader), nameof(CutHeader), nameof(FillHeader), nameof(NetHeader),
-            nameof(OhwmHeader), nameof(ImpactedLengthHeader), nameof(CutVolumeHeader), nameof(AverageHeader),
+            nameof(ImpactedLengthHeader), nameof(CutVolumeHeader), nameof(AverageHeader),
             nameof(AreaUnits), nameof(SelectedAreaUnit));
         RefreshCommands();
     }

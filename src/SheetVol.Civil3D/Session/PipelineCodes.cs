@@ -55,9 +55,6 @@ public static class PipelineCodes
     /// <summary>Error. Integrator band cut or fill disagrees with the bounded volume beyond tolerance (E1012).</summary>
     public const string IntegratorMismatch = "SV-E1012";
 
-    /// <summary>Error. HcfcdSegment preset without an OHWM elevation (E1010).</summary>
-    public const string OhwmMissing = "SV-E1010";
-
     /// <summary>Warning. A segment's target layout no longer exists; its table is left where it is or skipped, never re-created elsewhere (E1017).</summary>
     public const string TargetLayoutMissing = "SV-E1017";
 

@@ -153,6 +153,9 @@ public sealed class RegenEngine
                 KnownSegments = prior?.Run.KnownSegments ?? requested.KnownSegments,
                 SchemaVersion = RunPersistence.PluginSchemaVersion,
             };
+            // Rev 3 adoption: AnalysisDef.VolumeSurface is plumbed pair-only; the rev3-adapters package replaces this refusal.
+            if (run.Analyses.Any(a => a.VolumeSurface is not null))
+                return Fail(1, [Adapters.AdapterCodes.VolumeSurfaceNotYet()]);
 
             var unitsOutcome = sources.Units();
             if (!unitsOutcome.Succeeded) return Fail(1, unitsOutcome.Problems);
@@ -209,8 +212,6 @@ public sealed class RegenEngine
                 problems.Add(new Problem(PipelineCodes.StationingChanged, Severity.Warning,
                     $"Alignment '{run.AlignmentName}' geometry or stationing changed since the last regen; segments follow their station values.",
                     Fix: "Check the break list if the alignment was reversed or re-stationed."));
-            if (run.Preset == ReportPreset.HcfcdSegment && run.Ohwm is null)
-                return Fail(2, [new Problem(PipelineCodes.OhwmMissing, Severity.Error, $"Run '{run.Name}' uses the HCFCD preset but has no OHWM elevation.", Fix: "Set the OHWM elevation with SVDEFINE Ohwm.")]);
             var stationSegs = plan.Segments.OrderBy(x => x.StartStation).ToList();
             var boundaries = plan.Boundaries.ToDictionary(b => b.SegmentId);
             var manualSegs = run.ManualSegments.Where(m => boundaries.ContainsKey(m.Id))
@@ -452,7 +453,7 @@ public sealed class RegenEngine
                 IReadOnlyList<Problem> found;
                 if (hcfcd && double.IsFinite(seg.StartStation))
                 {
-                    var r = OverlayIntegrator.IntegrateSegment(baseTri, compTri, alignment, seg, tess, run.Ohwm!, a.Name, settings);
+                    var r = OverlayIntegrator.IntegrateSegment(baseTri, compTri, alignment, seg, tess, a.Name, settings);
                     band = r.Band;
                     found = r.Problems;
                     if (r.Impact is { } impact) bySeg[seg.Id] = impact;
@@ -472,7 +473,7 @@ public sealed class RegenEngine
                             seg.Id, "Extend the surface over the segment if impacts are expected here."));
                     else if (p.Severity == Severity.Error)
                         problems.Add(p with { Message = $"Sheet {seg.Label}, {a.Name}: {p.Message}" });
-                    else if (p.Code is IntegratorCodes.SearchLimit or IntegratorCodes.NoGroundBelowOhwm)
+                    else if (p.Code is IntegratorCodes.SearchLimit or IntegratorCodes.NoCut)
                         problems.Add(p with { Message = $"Sheet {seg.Label}, {a.Name}: {p.Message}" });
                 }
                 if (band is null) continue;

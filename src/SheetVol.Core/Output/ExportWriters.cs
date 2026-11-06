@@ -21,7 +21,7 @@ public static class CsvExport
         "area2d_raw", "area2d", "area_unit", "coverage", "coverage_flag", "status",
         "impacted_length_raw", "impacted_length", "impacted_area_raw", "impacted_area",
         "impact_cut_volume_raw", "impact_cut_volume", "impact_average", "impact_intervals",
-        "cut_above_ohwm_raw", "fill_below_ohwm_raw", "touches_search_limit",
+        "touches_search_limit",
     ];
 
     /// <summary>Row kind value for a segment row.</summary>
@@ -79,8 +79,6 @@ public static class CsvExport
                     v["impact_cut_volume"] = Num(i.CutVolume);
                     v["impact_average"] = i.Average is double avg ? Num(avg) : null;
                     v["impact_intervals"] = string.Join(";", i.Intervals.Select(iv => Num(iv.From) + ".." + Num(iv.To)));
-                    v["cut_above_ohwm_raw"] = Num(i.CutAboveOhwmRaw);
-                    v["fill_below_ohwm_raw"] = Num(i.FillBelowOhwmRaw);
                     v["touches_search_limit"] = Bool(i.TouchesSearchLimit);
                 }
                 Line(sb, ColumnKeys.Select(k => v.GetValueOrDefault(k)));

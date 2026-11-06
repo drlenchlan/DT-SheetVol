@@ -415,8 +415,10 @@ public class DialogBehaviourTests
 
     // ---- HCFCD preset ---------------------------------------------------------------------
 
+    // Rev 3 (X6): no OHWM field or column anywhere; the preset needs nothing beyond Base and Comparison
+    // (the OHWM surface is the base). Renamed from ..._and_needs_an_OHWM.
     [Fact]
-    public void Hcfcd_preset_switches_labels_columns_chart_and_unit_and_needs_an_OHWM()
+    public void Hcfcd_preset_switches_labels_columns_chart_and_unit_and_needs_no_OHWM()
     {
         var (_, _, vm) = Fixture.Open();
 
@@ -435,14 +437,8 @@ public class DialogBehaviourTests
         Assert.Equal(DialogText.ColumnImpactedArea, vm.Grid.ImpactedAreaHeader);
         Assert.Equal("Cut volume (CY)", vm.Grid.CutVolumeHeader);
         Assert.Equal("Average (CY/ft)", vm.Grid.AverageHeader);
-        Assert.Equal("OHWM elevation (ft)", vm.Grid.OhwmHeader);
-        Assert.Equal(DialogText.BlockedOhwm, vm.RegenerateBlockedReason);
-
-        vm.Ohwm.Text = "100";
-
-        Assert.Equal(100, vm.Run.Ohwm!.DefaultElevation);
+        Assert.Null(vm.RegenerateBlockedReason);
         Assert.True(vm.CanRegenerate);
-        Assert.Equal("100.00", vm.Grid.Rows[0].Ohwm.Text);
     }
 
     [Fact]
@@ -451,13 +447,12 @@ public class DialogBehaviourTests
         var session = new FakeSheetVolSession
         {
             ImpactFactory = (_, s) => new ImpactResult(s.Id, "SEDIMENT", 500, 16_000, 26_000,
-                [(s.StartStation, s.EndStation)], 0, 0, false),
+                [(s.StartStation, s.EndStation)], [], false),
         };
         var run = Fixture.T2Run("0, 500, 1000") with
         {
             Preset = ReportPreset.HcfcdSegment,
             AreaUnit = AreaUnit.Acres,
-            Ohwm = new OhwmSpec(100, new Dictionary<Guid, double>()),
         };
         var (_, _, vm) = Fixture.Open(run, session);
 
@@ -486,9 +481,9 @@ public class DialogBehaviourTests
     {
         var session = new FakeSheetVolSession
         {
-            ImpactFactory = (i, s) => new ImpactResult(s.Id, "SEDIMENT", 0, 0, 0, [], 0, 0, TouchesSearchLimit: i == 1),
+            ImpactFactory = (i, s) => new ImpactResult(s.Id, "SEDIMENT", 0, 0, 0, [], [], TouchesSearchLimit: i == 1),
         };
-        var run = Fixture.T2Run() with { Preset = ReportPreset.HcfcdSegment, AreaUnit = AreaUnit.Acres, Ohwm = new OhwmSpec(95, new Dictionary<Guid, double>()) };
+        var run = Fixture.T2Run() with { Preset = ReportPreset.HcfcdSegment, AreaUnit = AreaUnit.Acres };
         var (_, _, vm) = Fixture.Open(run, session);
 
         await vm.RegenerateCommand.ExecuteAsync();
@@ -507,10 +502,10 @@ public class DialogBehaviourTests
         // result and coverage 0 %. The fake's cut and fill are canned; only the impact cells and the flag matter.
         var session = new FakeSheetVolSession
         {
-            ImpactFactory = (i, s) => i == 1 ? null : new ImpactResult(s.Id, "SEDIMENT", 500, 16_000, 26_000, [], 0, 0, false),
+            ImpactFactory = (i, s) => i == 1 ? null : new ImpactResult(s.Id, "SEDIMENT", 500, 16_000, 26_000, [], [], false),
         };
         session.CoverageBySegment[1] = 0;
-        var run = Fixture.T2Run() with { Preset = ReportPreset.HcfcdSegment, AreaUnit = AreaUnit.Acres, Ohwm = new OhwmSpec(100, new Dictionary<Guid, double>()) };
+        var run = Fixture.T2Run() with { Preset = ReportPreset.HcfcdSegment, AreaUnit = AreaUnit.Acres };
         var (_, _, vm) = Fixture.Open(run, session);
 
         await vm.RegenerateCommand.ExecuteAsync();
@@ -528,29 +523,24 @@ public class DialogBehaviourTests
         Assert.Equal("963", vm.Grid.Rows[0].CutVolumeText);     // the other segments are unchanged
     }
 
+    // Rev 3 (X6): the per-segment OHWM override and its grid column are retired with OhwmSpec. Rewritten
+    // (from Hcfcd_per_segment_OHWM_override_is_set_from_the_row_and_removed_when_blank) to the rev 3 rule:
+    // an HCFCD row has no OHWM field, the grid no OHWM header, and the rows keep their values after a regen.
     [Fact]
-    public async Task Hcfcd_per_segment_OHWM_override_is_set_from_the_row_and_removed_when_blank()
+    public async Task Hcfcd_rows_have_no_per_segment_OHWM_field()
     {
         var session = new FakeSheetVolSession
         {
-            ImpactFactory = (_, s) => new ImpactResult(s.Id, "SEDIMENT", 500, 16_000, 26_000, [], 0, 0, false),
+            ImpactFactory = (_, s) => new ImpactResult(s.Id, "SEDIMENT", 500, 16_000, 26_000, [], [], false),
         };
-        var run = Fixture.T2Run() with { Preset = ReportPreset.HcfcdSegment, AreaUnit = AreaUnit.Acres, Ohwm = new OhwmSpec(100, new Dictionary<Guid, double>()) };
+        var run = Fixture.T2Run() with { Preset = ReportPreset.HcfcdSegment, AreaUnit = AreaUnit.Acres };
         var (_, _, vm) = Fixture.Open(run, session);
         await vm.RegenerateCommand.ExecuteAsync();
-        var row2 = vm.Grid.Rows[1];
 
-        row2.Ohwm.Text = "97";
-
-        Assert.Equal(97, vm.Run.Ohwm!.BySegment[row2.SegmentId]);
-        Assert.True(row2.OhwmIsOverride);
-        Assert.False(row2.HasValues);                           // its OHWM changed: the old value no longer applies
-        Assert.True(vm.Grid.Rows[0].HasValues);
-
-        row2.Ohwm.Text = string.Empty;
-        Assert.False(vm.Run.Ohwm!.BySegment.ContainsKey(row2.SegmentId));
-        Assert.False(row2.OhwmIsOverride);
-        Assert.Equal("100.00", row2.Ohwm.Text);
+        Assert.Null(typeof(SegmentRowViewModel).GetProperty("Ohwm"));
+        Assert.Null(typeof(SegmentsGridViewModel).GetProperty("OhwmHeader"));
+        Assert.Null(typeof(DialogViewModel).GetProperty("Ohwm"));
+        Assert.All(vm.Grid.Rows, r => Assert.True(r.HasValues));
     }
 
     // ---- Per-segment offset fix beside a failing row (6.14, D8) -----------------------------

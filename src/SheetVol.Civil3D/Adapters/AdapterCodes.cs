@@ -1,5 +1,6 @@
 // A1 adapters (HANDOFF.md section 10, Wave 2). Owner: A1.
 
+using SheetVol.Core;
 using SheetVol.Core.Planning;
 using SheetVol.Core.Volumes;
 
@@ -63,4 +64,12 @@ public static class AdapterCodes
 
     /// <summary>A step of the SVADAPTERS headless check failed at its boundary.</summary>
     public const string CheckStepFailed = "SV-E195";
+
+    /// <summary>Error. An analysis names a user TIN volume surface as its source (rev 3, E423). Refused until the rev3-adapters package resolves such sources.</summary>
+    public const string VolumeSurfaceSource = "SV-E423";
+
+    /// <summary>Rev 3 adoption: the single Error raised for any analysis with <see cref="AnalysisDef.VolumeSurface"/> set. The rev3-adapters package replaces it.</summary>
+    public static Problem VolumeSurfaceNotYet()
+        => new(VolumeSurfaceSource, Severity.Error, "Volume-surface sources arrive with rev3-adapters.",
+               Fix: "Use a base and comparison surface pair for this analysis.");
 }

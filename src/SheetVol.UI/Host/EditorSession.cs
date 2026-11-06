@@ -89,6 +89,11 @@ internal sealed class EditorSession : ISheetVolSession, IDisposable
         => Read(() => _lastSurfaces = _inner.TinSurfaceNames, _ => _lastSurfaces);
 
     /// <inheritdoc/>
+    /// <remarks>Rev 3 adoption: forwards the engine's list, which is empty until the rev3-adapters package fills it.</remarks>
+    public IReadOnlyList<VolumeSurfaceInfo> VolumeSurfaces
+        => Read(() => _inner.VolumeSurfaces, _ => []);
+
+    /// <inheritdoc/>
     public DrawingInfo? ActiveDrawing
         => AcApp.DocumentManager.MdiActiveDocument is null ? null : CommandContext.Locked(() => _inner.ActiveDrawing);
 

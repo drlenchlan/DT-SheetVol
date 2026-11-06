@@ -20,7 +20,6 @@ public class RunPersistenceTests
             new Dictionary<Guid, SegmentOverrides> { [seg2] = new SegmentOverrides("C-102", 40, LockView: true) },
             new ViewOptions(ViewOrientation.North, ScaleMode.FitStandard, 50, [20, 30, 40, 50, 60, 100], ClipMode.None, 25),
             ReportPreset.HcfcdSegment, AreaUnit.Acres,
-            new OhwmSpec(100.0, new Dictionary<Guid, double> { [seg1] = 97.0 }),
             AutoMode.All);
     }
 
@@ -39,11 +38,59 @@ public class RunPersistenceTests
         Assert.Equal(run.Analyses[0], back.Analyses[0]);
         Assert.Equal(run.KnownSegments[1], back.KnownSegments[1]);
         Assert.Equal(run.Overrides[run.KnownSegments[1].Id], back.Overrides[run.KnownSegments[1].Id]);
-        Assert.Equal(97.0, back.Ohwm!.BySegment[run.KnownSegments[0].Id]);
+        Assert.All(back.Analyses, a => Assert.Null(a.VolumeSurface));   // rev 3: the OHWM elevation is gone; pairs only here
         Assert.Equal([20.0, 30, 40, 50, 60, 100], back.Views.StandardScales!);
         Assert.Equal(AreaUnit.Acres, back.AreaUnit);
         Assert.Equal(ReportPreset.HcfcdSegment, back.Preset);
+        Assert.Equal(3, loaded.StoredSchemaVersion);
+        Assert.DoesNotContain("ohwm", json);
+    }
+
+    [Fact]
+    public void Rev3_volume_surface_source_round_trips()
+    {
+        var run = SampleRun();
+        run = run with { Analyses = [run.Analyses[0], run.Analyses[1] with { VolumeSurface = "VOL EG-FG (user)" }] };
+
+        string json = RunPersistence.Serialize(run);
+        var loaded = RunPersistence.Deserialize(json);
+
+        Assert.True(loaded.CanModify, string.Join("; ", loaded.Problems.Select(p => p.Message)));
+        var back = loaded.Run!;
+        Assert.Null(back.Analyses[0].VolumeSurface);
+        Assert.Equal("VOL EG-FG (user)", back.Analyses[1].VolumeSurface);
+        Assert.Equal(run.Analyses[1], back.Analyses[1]);
+        Assert.Equal(json, RunPersistence.Serialize(back));
+        Assert.Contains("\"volumeSurface\":\"VOL EG-FG (user)\"", json);
+    }
+
+    [Fact]
+    public void A_schema_2_run_reads_as_schema_3_with_ohwm_ignored_and_no_volume_surface()
+    {
+        // Schema 2 JSON: what this plugin wrote before contract rev 3. It has "ohwm" (default and a
+        // per-segment override) and no "volumeSurface" on any analysis.
+        var node = JsonNode.Parse(RunPersistence.Serialize(SampleRun()))!.AsObject();
+        node["schemaVersion"] = 2;
+        string seg1 = node["knownSegments"]![0]!["id"]!.GetValue<string>();
+        node["ohwm"] = new JsonObject { ["defaultElevation"] = 100.0, ["bySegment"] = new JsonObject { [seg1] = 97.0 } };
+        foreach (var analysis in node["analyses"]!.AsArray())
+            Assert.True(analysis!.AsObject().Remove("volumeSurface"));
+        string schema2 = node.ToJsonString();
+        Assert.Contains("\"ohwm\":{\"defaultElevation\":100", schema2);
+        Assert.DoesNotContain("volumeSurface", schema2);
+
+        var loaded = RunPersistence.Deserialize(schema2);
+
+        Assert.True(loaded.CanModify, string.Join("; ", loaded.Problems.Select(p => p.Message)));
+        Assert.Empty(loaded.Problems);
         Assert.Equal(2, loaded.StoredSchemaVersion);
+        var run = loaded.Run!;
+        Assert.Equal(RunPersistence.PluginSchemaVersion, run.SchemaVersion);   // upgraded in memory
+        Assert.All(run.Analyses, a => Assert.Null(a.VolumeSurface));
+        Assert.Equal(2, run.Analyses.Count);
+        string again = RunPersistence.Serialize(run);
+        Assert.DoesNotContain("ohwm", again);
+        Assert.Contains("\"schemaVersion\":3", again);
     }
 
     [Fact]
@@ -52,7 +99,7 @@ public class RunPersistenceTests
         string json = RunPersistence.Serialize(SampleRun());
         Assert.All(json, c => Assert.True(c < 128, $"non-ASCII character U+{(int)c:X4}"));
         Assert.Contains("\"areaUnit\":\"Acres\"", json);
-        Assert.Contains("\"schemaVersion\":2", json);
+        Assert.Contains("\"schemaVersion\":3", json);
     }
 
     [Fact]
@@ -61,7 +108,7 @@ public class RunPersistenceTests
         var run = new RunDefinition("r", "a", SegmentDriver.Stations, "START..END@500", null, -1, 1, [], [], [],
             new Dictionary<Guid, SegmentOverrides>(), new ViewOptions());
         Assert.Equal(RunPersistence.PluginSchemaVersion, run.SchemaVersion);
-        Assert.Equal(2, RunPersistence.PluginSchemaVersion);
+        Assert.Equal(3, RunPersistence.PluginSchemaVersion);
     }
 
     [Fact]
@@ -120,7 +167,7 @@ public class RunPersistenceTests
         Assert.Equal(new DrawOptions(true, true, true), run.Draw ?? new DrawOptions());
         var only = Assert.Single(run.Overrides);
         Assert.Equal(new SegmentOverrides("C-102", 40, LockView: true), only.Value);   // schema 1 fields kept, no offsets
-        Assert.Contains("\"schemaVersion\":2", RunPersistence.Serialize(run));
+        Assert.Contains("\"schemaVersion\":3", RunPersistence.Serialize(run));   // rev 3: the plugin schema is 3
     }
 
     [Fact]
@@ -160,27 +207,27 @@ public class RunPersistenceTests
     public void E105_a_newer_stored_schema_is_refused_and_both_versions_are_reported()
     {
         var node = JsonNode.Parse(RunPersistence.Serialize(SampleRun()))!;
-        node["schemaVersion"] = 3;
+        node["schemaVersion"] = 4;   // rev 3: the plugin reads 3, so 4 is the newer one
         node["someFutureField"] = "x";
 
         var loaded = RunPersistence.FromChunks(RunPersistence.Chunk(node.ToJsonString()));
 
         Assert.False(loaded.CanModify);
         Assert.Null(loaded.Run);
-        Assert.Equal(3, loaded.StoredSchemaVersion);
+        Assert.Equal(4, loaded.StoredSchemaVersion);
         Assert.Equal(RunPersistence.PluginSchemaVersion, loaded.PluginSchemaVersion);
         var p = loaded.Problems.Single();
         Assert.Equal(OutputCodes.StoredSchemaNewer, p.Code);
         Assert.Equal(Severity.Error, p.Severity);
-        Assert.Contains("schema version 3", p.Message);
-        Assert.Contains("reads version 2", p.Message);
+        Assert.Contains("schema version 4", p.Message);
+        Assert.Contains("reads version 3", p.Message);
     }
 
     [Fact]
     public void Serialize_stamps_the_plugin_schema_version()
     {
         string json = RunPersistence.Serialize(SampleRun() with { SchemaVersion = 0 });
-        Assert.Contains("\"schemaVersion\":2", json);
+        Assert.Contains("\"schemaVersion\":3", json);
     }
 
     [Theory]

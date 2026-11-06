@@ -74,7 +74,6 @@ public sealed class DialogViewModel : ObservableObject, IGridOwner, IDisposable
 
         OffsetLeft = new TextFieldViewModel(DialogText.OffsetLeft, t => CommitOffset(left: true, t), RefreshCommandState);
         OffsetRight = new TextFieldViewModel(DialogText.OffsetRight, t => CommitOffset(left: false, t), RefreshCommandState);
-        Ohwm = new TextFieldViewModel(DialogText.OhwmElevation, CommitOhwm, RefreshCommandState);
         IntervalEvery = new TextFieldViewModel(DialogText.IntervalEvery, CommitIntervalEvery);
         IntervalFrom = new TextFieldViewModel(DialogText.IntervalFrom, CommitIntervalBound);
         IntervalTo = new TextFieldViewModel(DialogText.IntervalTo, CommitIntervalBound);
@@ -289,7 +288,7 @@ public sealed class DialogViewModel : ObservableObject, IGridOwner, IDisposable
     /// <summary>The run's draw options as edited; a run with no draw options (<c>Draw = null</c>) draws everything.</summary>
     public DrawOptions Draw => _run.Draw ?? DrawEverything;
 
-    // ---- Report preset, OHWM, area unit ----------------------------------------------
+    // ---- Report preset, area unit -------------------------------------------------------
 
     /// <summary>Report presets (6.16).</summary>
     public IReadOnlyList<PresetOption> Presets { get; }
@@ -306,14 +305,8 @@ public sealed class DialogViewModel : ObservableObject, IGridOwner, IDisposable
         }
     }
 
-    /// <summary>True for the HCFCD preset: report selector, OHWM field, HCFCD columns and chart.</summary>
+    /// <summary>True for the HCFCD preset: report selector, HCFCD columns and chart. Rev 3: no OHWM field (X6).</summary>
     public bool IsHcfcd => _run.Preset == ReportPreset.HcfcdSegment;
-
-    /// <summary>OHWM field label with the length unit.</summary>
-    public string OhwmLabel => _fmt.Header(DialogText.OhwmElevation, _fmt.LengthUnit);
-
-    /// <summary>Run OHWM elevation (HCFCD). Required before Regenerate with that preset.</summary>
-    public TextFieldViewModel Ohwm { get; }
 
     /// <summary>Area units offered for this drawing: SF and AC, or m² and ha (E917).</summary>
     public IReadOnlyList<AreaUnitOption> AreaUnits => _areaUnits;
@@ -404,7 +397,6 @@ public sealed class DialogViewModel : ObservableObject, IGridOwner, IDisposable
             if (_run.Analyses.Count == 0) return DialogText.BlockedNoAnalysis;
             if (_run.Analyses.Any(a => string.IsNullOrEmpty(a.BaseSurface) || string.IsNullOrEmpty(a.ComparisonSurface)))
                 return DialogText.BlockedSurfaces;
-            if (IsHcfcd && _run.Ohwm is null) return DialogText.BlockedOhwm;
             if (HasFieldError) return DialogText.BlockedFieldErrors;
             if (_validation is null || !_validation.IsValid) return DialogText.BlockedValidation;
             return null;
@@ -589,7 +581,7 @@ public sealed class DialogViewModel : ObservableObject, IGridOwner, IDisposable
             nameof(SelectedAlignment), nameof(StationRangeText), nameof(OffsetsHeader), nameof(SameOnBothSides),
             nameof(AnalysisNameLabel), nameof(BaseSurfaceLabel), nameof(ComparisonSurfaceLabel),
             nameof(DrawBoundaryPolylines), nameof(DrawTableAtEachSegment), nameof(DrawSummaryTable), nameof(Draw),
-            nameof(SelectedPreset), nameof(IsHcfcd), nameof(OhwmLabel), nameof(AreaUnits), nameof(SelectedAreaUnit),
+            nameof(SelectedPreset), nameof(IsHcfcd), nameof(AreaUnits), nameof(SelectedAreaUnit),
             nameof(LengthUnitLabel), nameof(VolumeUnitLabel), nameof(RegenerateOnChange),
             nameof(RegenerateBlockedReason), nameof(CanRegenerate));
         RefreshCommands();
@@ -645,8 +637,6 @@ public sealed class DialogViewModel : ObservableObject, IGridOwner, IDisposable
                 segment, number,
                 StationsEditable: CanEditStations && !isManual,
                 values, status, worst, sheet,
-                RunComparison.EffectiveOhwm(_run, segment.Id),
-                _run.Ohwm?.BySegment.ContainsKey(segment.Id) == true,
                 OffsetFixAvailable: !isManual && (status == SegmentStatus.Error || offsetIsOverride),
                 offsetLeft, offsetRight, offsetIsOverride));
         }
@@ -702,7 +692,6 @@ public sealed class DialogViewModel : ObservableObject, IGridOwner, IDisposable
         OffsetLeft.SetFromModel(_fmt.Offset(-_run.OffsetLeft));
         OffsetRight.SetFromModel(_fmt.Offset(_run.OffsetRight));
         _sameOnBothSides = Math.Abs(_run.OffsetLeft + _run.OffsetRight) <= _config.StationTolerance;
-        Ohwm.SetFromModel(_run.Ohwm is { } ohwm ? _fmt.Elevation(ohwm.DefaultElevation) : string.Empty);
         IntervalError = null;
         Analyses.Clear();
         foreach (var analysis in _run.Analyses) Analyses.Add(CreateEditor(analysis, IsAutoName(analysis)));
@@ -767,7 +756,7 @@ public sealed class DialogViewModel : ObservableObject, IGridOwner, IDisposable
             : _session.FormatStation(_run.AlignmentName, raw);
 
     private bool HasFieldError
-        => OffsetLeft.HasError || OffsetRight.HasError || (IsHcfcd && Ohwm.HasError)
+        => OffsetLeft.HasError || OffsetRight.HasError
            || Analyses.Any(a => a.HasFieldError) || Grid.HasFieldError;
 
     // ---- Edits from the left panel -------------------------------------------------------
@@ -784,13 +773,6 @@ public sealed class DialogViewModel : ObservableObject, IGridOwner, IDisposable
         OffsetLeft.SetFromModel(_fmt.Offset(-l));
         OffsetRight.SetFromModel(_fmt.Offset(r));
         return null;
-    }
-
-    private string? CommitOhwm(string text)
-    {
-        if (!_fmt.TryParse(text, out var elevation)) return DialogText.NotANumber;
-        var bySegment = _run.Ohwm?.BySegment ?? new Dictionary<Guid, double>();
-        return TryApply(_run with { Ohwm = new OhwmSpec(elevation, bySegment) });
     }
 
     private string? CommitIntervalEvery(string text)
@@ -1013,24 +995,6 @@ public sealed class DialogViewModel : ObservableObject, IGridOwner, IDisposable
         if (!list.TryGetRow(segmentId, out var begin, out var end)) return DialogText.StationsNotEditable;
         list.SetText(isEnd ? end : begin, trimmed);
         return TryApply(_run with { BreakSpec = list.ToSpec() }, rejectNewRunLevelErrors: true);
-    }
-
-    string? IGridOwner.EditOhwm(Guid segmentId, string text)
-    {
-        if (IsBusy) return DialogText.BusyRefused;
-        if (_run.Ohwm is null) return DialogText.OhwmDefaultFirst;
-        var bySegment = new Dictionary<Guid, double>(_run.Ohwm.BySegment);
-        if (string.IsNullOrWhiteSpace(text))
-        {
-            bySegment.Remove(segmentId);
-        }
-        else
-        {
-            if (!_fmt.TryParse(text, out var elevation)) return DialogText.NotANumber;
-            if (Math.Abs(elevation - _run.Ohwm.DefaultElevation) <= _config.StationTolerance) bySegment.Remove(segmentId);
-            else bySegment[segmentId] = elevation;
-        }
-        return TryApply(_run with { Ohwm = _run.Ohwm with { BySegment = bySegment } });
     }
 
     /// <summary>

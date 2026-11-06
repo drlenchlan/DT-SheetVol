@@ -243,7 +243,7 @@ public class ReconcilerTests
     {
         var s = new Scenario().WithBreaks(0, 500);
         var id = s.Segments[0].Id;
-        var impact = new ImpactResult(id, "SEDIMENT", 500, 16_000, 26_000, [(0, 500)], 0, 0, false);
+        var impact = new ImpactResult(id, "SEDIMENT", 500, 16_000, 26_000, [(0, 500)], [], false);
         s.AddAnalysis("SEDIMENT", [(963, 0)], impacts: new Dictionary<Guid, ImpactResult> { [id] = impact });
 
         Assert.Same(impact, s.Reconcile().Analyses.Single().Rows.Single().Impact);

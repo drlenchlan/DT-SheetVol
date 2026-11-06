@@ -138,6 +138,10 @@ internal sealed class DesignSession : ISheetVolSession
     public IReadOnlyList<string> TinSurfaceNames => Surfaces;
 
     /// <inheritdoc/>
+    /// <remarks>Rev 3 adoption: none; the rev3-dialog package adds design-time volume surfaces if it needs them.</remarks>
+    public IReadOnlyList<VolumeSurfaceInfo> VolumeSurfaces => [];
+
+    /// <inheritdoc/>
     public event EventHandler SourcesChanged
     {
         add => _sourcesChanged += value;
@@ -215,15 +219,15 @@ internal sealed class DesignSession : ISheetVolSession
         return new RegenResult(true, run.Name, rows, [], [], true, TimeSpan.FromSeconds(1.25), null, null);
     }
 
-    /// <summary>Canned HCFCD quantities: segments with cut have cut below OHWM over their middle 60%, 40 ft wide.</summary>
+    /// <summary>Canned HCFCD quantities: segments with cut have cut below OHWM over their middle 60%, 40 ft wide. Rev 3: no outlines (the design session draws none).</summary>
     private static ImpactResult Impact(SegmentDef s, double cutCy, string material)
     {
-        if (cutCy <= 0) return new ImpactResult(s.Id, material, 0, 0, 0, [], 0, 0, false);
+        if (cutCy <= 0) return new ImpactResult(s.Id, material, 0, 0, 0, [], [], false);
         var length = s.EndStation - s.StartStation;
         var from = s.StartStation + 0.2 * length;
         var to = s.StartStation + 0.8 * length;
         var impacted = to - from;
-        return new ImpactResult(s.Id, material, impacted, impacted * 40, cutCy * 27 * 0.4, [(from, to)], cutCy * 27 * 0.6, 0, false);
+        return new ImpactResult(s.Id, material, impacted, impacted * 40, cutCy * 27 * 0.4, [(from, to)], [], false);
     }
 
     // ---- Planning ------------------------------------------------------------------------

@@ -298,9 +298,9 @@ public static partial class WritersModelCheck
     private static bool Alive(string handle) => !WritersModel.Handles.Resolve(_db, handle).IsNull;
 
     private static RunDefinition Def(string name, IReadOnlyList<SegmentDef> segments, IReadOnlyList<AnalysisDef> analyses,
-        ReportPreset preset = ReportPreset.Standard, AreaUnit areaUnit = AreaUnit.SquareFeet, OhwmSpec? ohwm = null)
+        ReportPreset preset = ReportPreset.Standard, AreaUnit areaUnit = AreaUnit.SquareFeet)
         => new(name, FixtureSpec.Names.AlignmentS, SegmentDriver.Stations, "check", null, -100, 100, analyses, [], segments,
-               new Dictionary<Guid, SegmentOverrides>(), new ViewOptions(), preset, areaUnit, ohwm);
+               new Dictionary<Guid, SegmentOverrides>(), new ViewOptions(), preset, areaUnit);
 
     private static Guid G(int run, int n) => new($"00000000-0000-0000-{run:0000}-{n:000000000000}");
 

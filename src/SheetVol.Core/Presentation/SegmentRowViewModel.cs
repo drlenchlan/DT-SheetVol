@@ -39,7 +39,6 @@ public sealed class SegmentRowViewModel : ObservableObject
     private string? _message;
     private string? _fix;
     private string? _sheetLayout;
-    private bool _ohwmIsOverride;
     private string _impactedLengthText = DialogText.NoValue;
     private string _impactedAreaText = DialogText.NoValue;
     private string _cutVolumeText = DialogText.NoValue;
@@ -51,7 +50,6 @@ public sealed class SegmentRowViewModel : ObservableObject
     {
         BeginStation = new TextFieldViewModel(DialogText.ColumnBegin, t => owner.EditStation(SegmentId, isEnd: false, t), owner.FieldErrorChanged);
         EndStation = new TextFieldViewModel(DialogText.ColumnEnd, t => owner.EditStation(SegmentId, isEnd: true, t), owner.FieldErrorChanged);
-        Ohwm = new TextFieldViewModel(DialogText.ColumnOhwm, t => owner.EditOhwm(SegmentId, t), owner.FieldErrorChanged);
         OffsetFixLeft = new TextFieldViewModel(DialogText.OffsetFixLeft, CheckOffsetText, owner.FieldErrorChanged);
         OffsetFixRight = new TextFieldViewModel(DialogText.OffsetFixRight, CheckOffsetText, owner.FieldErrorChanged);
         ApplyOffsetFixCommand = new RelayCommand(
@@ -167,12 +165,6 @@ public sealed class SegmentRowViewModel : ObservableObject
 
     /// <summary>HCFCD: layout that receives the table, or null (model space).</summary>
     public string? SheetLayout { get => _sheetLayout; private set => SetProperty(ref _sheetLayout, value); }
-
-    /// <summary>HCFCD: OHWM elevation for this segment. Editing sets a per-segment override; blank removes it.</summary>
-    public TextFieldViewModel Ohwm { get; }
-
-    /// <summary>HCFCD: true when the segment overrides the run's OHWM.</summary>
-    public bool OhwmIsOverride { get => _ohwmIsOverride; private set => SetProperty(ref _ohwmIsOverride, value); }
 
     /// <summary>HCFCD: impacted length.</summary>
     public string ImpactedLengthText { get => _impactedLengthText; private set => SetProperty(ref _impactedLengthText, value); }
@@ -296,9 +288,6 @@ public sealed class SegmentRowViewModel : ObservableObject
         Message = model.Problem?.Message;
         Fix = model.Problem?.Fix;
         SheetLayout = model.SheetLayout;
-        Ohwm.SetFromModel(model.OhwmEffective is double ohwm ? fmt.Elevation(ohwm) : string.Empty);
-        Ohwm.IsEditable = !ctx.IsBusy;
-        OhwmIsOverride = model.OhwmIsOverride;
 
         ShowOffsetFix = model.OffsetFixAvailable;
         OffsetIsOverride = model.OffsetIsOverride;
@@ -313,5 +302,5 @@ public sealed class SegmentRowViewModel : ObservableObject
         return shown > 0 ? DialogText.NetTagCut : shown < 0 ? DialogText.NetTagFill : string.Empty;
     }
 
-    internal bool HasFieldError => BeginStation.HasError || EndStation.HasError || Ohwm.HasError || OffsetFixLeft.HasError || OffsetFixRight.HasError;
+    internal bool HasFieldError => BeginStation.HasError || EndStation.HasError || OffsetFixLeft.HasError || OffsetFixRight.HasError;
 }

@@ -7,7 +7,7 @@
 // applied plan); SVREGEN applies them.
 //
 //   SVDEFINE    create or edit a run: alignment, breaks, offsets, views, preset, area unit,
-//               OHWM, auto mode, draw options, per-segment overrides
+//               auto mode, draw options, per-segment overrides (rev 3: no OHWM keyword, X5)
 //   SVANALYSIS  add, remove or re-factor an analysis (base, comparison, factors)
 //   SVBREAK     add, move or remove a break by typed station or pick; convert a segment to manual
 //   SVREGEN     regenerate every run (no prompts); one transaction per run (E801)
@@ -165,7 +165,7 @@ public static class SvCommands
     // ============================================================ SVDEFINE
 
     private static readonly string[] DefineKeywords =
-        ["Alignment", "Breaks", "Offsets", "Scale", "Orientation", "Clip", "Overlap", "Preset", "Area", "Ohwm", "Auto", "Draw", "Segment", "Done"];
+        ["Alignment", "Breaks", "Offsets", "Scale", "Orientation", "Clip", "Overlap", "Preset", "Area", "Auto", "Draw", "Segment", "Done"];
 
     /// <summary>Creates or edits a run (6.12). Every value is typed; Done validates and saves.</summary>
     [CommandMethod("SVDEFINE", CommandFlags.Modal)]
@@ -206,7 +206,6 @@ public static class SvCommands
                 "Overlap" => run with { Views = run.Views with { ViewOverlap = c.Number("View overlap at each end, drawing units", run.Views.ViewOverlap) } },
                 "Preset" => EditPreset(c, run, units.Value.System),
                 "Area" => EditArea(c, run, units.Value.System),
-                "Ohwm" => run with { Ohwm = new OhwmSpec(c.Number("OHWM elevation", run.Ohwm?.DefaultElevation), run.Ohwm?.BySegment ?? new Dictionary<Guid, double>()) },
                 "Auto" => run with { AutoMode = Enum.Parse<AutoMode>(c.Keyword("Auto-update mode", ["Off", "Views", "All"], run.AutoMode.ToString())) },
                 "Draw" => run with
                 {
@@ -231,7 +230,7 @@ public static class SvCommands
             d.OffsetLeftFeet * upf, d.OffsetRightFeet * upf,
             [], [], [], new Dictionary<Guid, SegmentOverrides>(),
             new ViewOptions(d.Orientation, d.ScaleMode, d.ModelUnitsPerPaperUnit, d.StandardScales.ToList(), d.Clip, d.ViewOverlapFeet * upf),
-            ReportPreset.Standard, QuantityUnits.DefaultAreaUnit(units.System, ReportPreset.Standard), null, d.AutoMode);
+            ReportPreset.Standard, QuantityUnits.DefaultAreaUnit(units.System, ReportPreset.Standard), d.AutoMode);
     }
 
     private static RunDefinition EditAlignment(Cmd c, RunDefinition run, IReadOnlyList<string> alignments)
@@ -302,8 +301,7 @@ public static class SvCommands
             c.Say("Note: this segment has not been regenerated yet; its identity is fixed at the next SVREGEN, so set overrides after that if the break list changes first.");
         var overrides = run.Overrides.ToDictionary(kv => kv.Key, kv => kv.Value);
         var o = overrides.TryGetValue(seg.Id, out var cur) ? cur : new SegmentOverrides();
-        string kw = c.Keyword($"Segment {seg.Label}", ["Layout", "Scale", "Lock", "Offsets", "Ohwm", "Clear"], "Layout");
-        var ohwm = run.Ohwm;
+        string kw = c.Keyword($"Segment {seg.Label}", ["Layout", "Scale", "Lock", "Offsets", "Clear"], "Layout");
         switch (kw)
         {
             case "Layout":
@@ -323,21 +321,12 @@ public static class SvCommands
                 if (!(l < r)) { c.Say($"{ProblemCodes.E210} left must be less than right; unchanged."); return run; }
                 o = o with { OffsetLeft = l, OffsetRight = r };
                 break;
-            case "Ohwm":
-                if (ohwm is null) { c.Say($"{PipelineCodes.OhwmMissing} set the run's OHWM first (SVDEFINE Ohwm)."); return run; }
-                string text = c.String("OHWM elevation for this segment (. to clear)", defaultValue: ".");
-                var by = ohwm.BySegment.ToDictionary(kv => kv.Key, kv => kv.Value);
-                if (text == ".") by.Remove(seg.Id);
-                else if (double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out double e) && double.IsFinite(e)) by[seg.Id] = e;
-                else { c.Say($"{PipelineCodes.BadInput} '{text}' is not an elevation; unchanged."); return run; }
-                ohwm = ohwm with { BySegment = by };
-                break;
             case "Clear":
                 overrides.Remove(seg.Id);
                 return run with { Overrides = overrides };
         }
         overrides[seg.Id] = o;
-        return run with { Overrides = overrides, Ohwm = ohwm };
+        return run with { Overrides = overrides };
     }
 
     /// <summary>Plans the run in its own read transaction. The PlanResult is plain data; the alignment is not (A1: valid only inside its transaction).</summary>

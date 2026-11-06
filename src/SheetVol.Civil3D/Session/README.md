@@ -11,3 +11,7 @@ Owner: A4 (HANDOFF.md section 10). Database side of ISheetVolSession, the regen 
 - `RunRecordCodec.cs`: the record as one JSON (fake store, record signature) and C3's fingerprint as text for A2's store.
 - `PipelineSupport.cs`: display polygon (C1's per-segment `BoundaryBuilder.Build` overload), `TransactionLifetime` and the lifetime-guarded alignment and volume wrappers, memoized volume source, cancel probe.
 - `BreakEditor.cs`: SVBREAK's break-list rewrite.
+
+## Rev 3
+
+- `PipelineCodes.OhwmMissing` and the HCFCD no-OHWM refusal removed; step 1 refuses a `VolumeSurface` analysis with SV-E423 until rev3-adapters; `SheetVolSession.VolumeSurfaces` is empty.

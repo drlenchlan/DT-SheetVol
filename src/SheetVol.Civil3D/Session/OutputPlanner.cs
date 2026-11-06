@@ -229,7 +229,7 @@ public static class OutputPlanner
             var row = a.Rows.FirstOrDefault(r => r.SegmentId == seg.Id);
             // D10/D18: a station segment with a row but no impact (SV-E827) reports zero impact, never blank.
             var impact = row?.Impact ?? (row is not null && double.IsFinite(seg.StartStation)
-                ? new ImpactResult(seg.Id, a.Analysis.Name, 0, 0, 0, [], 0, 0, false) : null);
+                ? new ImpactResult(seg.Id, a.Analysis.Name, 0, 0, 0, [], [], false) : null);
             if (impact is not null) values.Add(new HcfcdMaterial(a.Analysis.Id, a.Analysis.Name, impact, a.Analysis.CutFactor));
         }
         var created = template.CreateTable(seg.Id, run.Analyses, run.AreaUnit, formatter.Units, s.Report);

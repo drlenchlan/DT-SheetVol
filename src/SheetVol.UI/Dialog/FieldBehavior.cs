@@ -54,7 +54,7 @@ public static class FieldBehavior
 /// <summary>Names the <see cref="TextFieldViewModel"/> an editable grid column edits, so the grid's code-behind can gate and revert it.</summary>
 public static class GridEdit
 {
-    /// <summary>One of <see cref="Begin"/>, <see cref="End"/>, <see cref="Ohwm"/>; null for read-only columns.</summary>
+    /// <summary>One of <see cref="Begin"/>, <see cref="End"/>; null for read-only columns.</summary>
     public static readonly DependencyProperty FieldProperty =
         DependencyProperty.RegisterAttached("Field", typeof(string), typeof(GridEdit), new PropertyMetadata(null));
 
@@ -63,9 +63,6 @@ public static class GridEdit
 
     /// <summary>End station column.</summary>
     public const string End = "End";
-
-    /// <summary>HCFCD per-segment OHWM column.</summary>
-    public const string Ohwm = "Ohwm";
 
     /// <summary>Gets <see cref="FieldProperty"/>.</summary>
     public static string? GetField(DependencyObject element) => (string?)element.GetValue(FieldProperty);
@@ -80,7 +77,6 @@ public static class GridEdit
             {
                 Begin => row.BeginStation,
                 End => row.EndStation,
-                Ohwm => row.Ohwm,
                 _ => null,
             }
             : null;
