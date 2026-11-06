@@ -18,7 +18,9 @@ using SheetVol.Civil3D.SelfTest;
 using AcadApp = Autodesk.AutoCAD.ApplicationServices.Application;
 using CoreApp = Autodesk.AutoCAD.ApplicationServices.Core.Application;
 
-[assembly: CommandClass(typeof(SheetVol.UI.Probe.ProbeUiCommands))]
+// No [assembly: CommandClass] here: SheetVol.UI must carry none (see Host/DialogCommands.cs).
+// One assembly-level CommandClass makes AutoCAD register only that class, which hid SVDIALOG
+// (MEASURED 2026-11-06, "Unknown command" in Civil 3D 2026 with the UI DLL loaded).
 
 namespace SheetVol.UI.Probe;
 

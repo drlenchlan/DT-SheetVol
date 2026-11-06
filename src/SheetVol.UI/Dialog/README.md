@@ -110,7 +110,7 @@ Goal: open `SVDIALOG` once in Civil 3D, run T2's breaks through it, compare it w
    ```powershell
    $out = (dotnet msbuild .\src\SheetVol.UI\SheetVol.UI.csproj -getProperty:OutDir -p:Configuration=Debug -nologo | Select-Object -Last 1).Trim()
    if (-not [IO.Path]::IsPathRooted($out)) { $out = Join-Path .\src\SheetVol.UI $out }
-   $stage = Join-Path $env:APPDATA 'Autodesk\ApplicationPlugins\SheetVol-dev-ui.bundle\Contents'
+   $stage = Join-Path $env:APPDATA 'Autodesk\ApplicationPlugins\SheetVol-dev-SheetVol.bundle\Contents'
    New-Item -ItemType Directory -Force $stage | Out-Null
    Get-ChildItem $out -File | Where-Object Extension -in '.dll', '.pdb', '.json' | Copy-Item -Destination $stage -Force
    ```
@@ -127,7 +127,7 @@ Goal: open `SVDIALOG` once in Civil 3D, run T2's breaks through it, compare it w
    After A4 merges, skip this step: SVDIALOG uses the engine session and reads the drawing.
 
 4. In Civil 3D 2026, with any drawing open (Fixture A from `SVFIXTURE A` gives a real alignment S
-   along +X from 0 to 2000): `NETLOAD` `%APPDATA%\Autodesk\ApplicationPlugins\SheetVol-dev-ui.bundle\Contents\SheetVol.UI.dll`,
+   along +X from 0 to 2000): `NETLOAD` `%APPDATA%\Autodesk\ApplicationPlugins\SheetVol-dev-SheetVol.bundle\Contents\SheetVol.UI.dll`,
    then run `SVDIALOG`. In fixture mode a blue strip at the top says the values are canned T2 values.
 
 5. In the SVDIALOG window: T2's breaks are preloaded (`0, 500, 1300, 1800, 2000`, offsets ±100,
