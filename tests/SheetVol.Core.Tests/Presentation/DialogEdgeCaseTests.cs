@@ -1,4 +1,4 @@
-// HANDOFF.md 7.9 rows marked U (E902, E903, E904, E907, E912 U part, E914, E916, E917),
+// HANDOFF.md 7.9 rows marked U (E902, E903, E904, E907, E912 U part, E914, E916, E917, E918),
 // plus E418 and E1020 labels as they surface in the dialog.
 
 using System.Globalization;
@@ -493,5 +493,193 @@ public class DialogEdgeCaseTests
         await vm.RegenerateCommand.ExecuteAsync();
         Assert.All(vm.Grid.Rows, r => Assert.Equal(SegmentStatus.Current, r.Status));
         Assert.Null(vm.StaleBannerText);
+    }
+
+    // ---- E918 (rev 3, X6): per-analysis source switch ------------------------------------------
+
+    private static VolumeSurfaceInfo Vol(string name, string baseSurface, string comparison, double cut = 1, double fill = 1, bool intact = true)
+        => new(name, baseSurface, comparison, cut, fill, intact);
+
+    private static FakeSheetVolSession WithVolumes(params VolumeSurfaceInfo[] volumes)
+        => new() { VolumeSurfaceList = [.. volumes] };
+
+    [Fact]
+    public async Task E918_choosing_a_volume_surface_sets_the_analysis_and_shows_its_pair_and_factors_read_only()
+    {
+        var (session, _, vm) = Fixture.Open(session: WithVolumes(Vol("VOL_A", "EXIST", "PROP", 1.15, 0.9)));
+        var card = vm.Analyses[0];
+        Assert.True(card.IsPairSource);                                     // default
+        Assert.Null(card.VolumeSurface);
+
+        card.IsVolumeSurfaceSource = true;
+        Assert.False(card.IsPairSource);
+        Assert.Null(vm.Run.Analyses[0].VolumeSurface);                      // the switch alone writes nothing
+        Assert.Equal(DialogText.BlockedVolumeSurface, vm.RegenerateBlockedReason);   // incomplete until chosen
+        Assert.Equal(string.Empty, card.VolumeSurfaceBaseText);
+
+        card.VolumeSurface = "VOL_A";
+
+        var stored = vm.Run.Analyses[0];
+        Assert.Equal("VOL_A", stored.VolumeSurface);
+        Assert.Equal(("EXIST", "PROP"), (stored.BaseSurface, stored.ComparisonSurface));   // the contract's display copy
+        Assert.Equal((1.0, 1.0), (stored.CutFactor, stored.FillFactor));    // rule 1: stored factors ignored, never rewritten
+        Assert.Equal("VOL_A", stored.Name);                                 // automatic name follows the source
+        Assert.Equal(("EXIST", "PROP"), (card.VolumeSurfaceBaseText, card.VolumeSurfaceComparisonText));
+        Assert.Equal(("1.15", "0.9"), (card.VolumeSurfaceCutFactorText, card.VolumeSurfaceFillFactorText));
+        Assert.Null(card.VolumeSurfaceProblem);
+        Assert.True(vm.IsDirty);
+        Assert.True(vm.CanRegenerate);
+
+        await vm.RegenerateCommand.ExecuteAsync();
+        Assert.Equal("VOL_A", session.LastRegenerated!.Analyses[0].VolumeSurface);
+    }
+
+    [Fact]
+    public void E918_switching_back_clears_the_volume_surface_and_restores_the_pair_fields_with_their_last_values()
+    {
+        var (_, _, vm) = Fixture.Open(session: WithVolumes(Vol("VOL_A", "EXIST", "PROP", 1.15, 0.9)));
+        var card = vm.Analyses[0];
+        card.ComparisonSurface = "FG_B";
+        card.CutFactor.Text = "1.25";
+        card.FillFactor.Text = "abc";                                       // an unfinished edit on a field about to hide
+        Assert.Equal(DialogText.NotANumber, card.FillFactor.Error);
+
+        card.IsVolumeSurfaceSource = true;
+        Assert.Null(card.FillFactor.Error);                                 // reverted to its last valid value when hidden
+        card.VolumeSurface = "VOL_A";
+        Assert.Equal("EXIST", vm.Run.Analyses[0].BaseSurface);
+
+        card.IsPairSource = true;
+
+        var stored = vm.Run.Analyses[0];
+        Assert.Null(stored.VolumeSurface);
+        Assert.Null(card.VolumeSurface);
+        Assert.Equal(("EG", "FG_B"), (stored.BaseSurface, stored.ComparisonSurface));
+        Assert.Equal((1.25, 1.0), (stored.CutFactor, stored.FillFactor));
+        Assert.Equal(("EG", "FG_B"), (card.BaseSurface, card.ComparisonSurface));
+        Assert.Equal(("1.25", "1"), (card.CutFactor.Text, card.FillFactor.Text));
+        Assert.Equal("EG vs FG_B", stored.Name);
+        Assert.Equal(string.Empty, card.VolumeSurfaceBaseText);
+
+        card.IsVolumeSurfaceSource = true;                                  // and back again: the last choice returns
+        Assert.Equal("VOL_A", vm.Run.Analyses[0].VolumeSurface);
+    }
+
+    [Fact]
+    public void E918_a_volume_surface_with_erased_sources_is_listed_disabled_with_the_reason_and_cannot_be_chosen()
+    {
+        var (_, _, vm) = Fixture.Open(session: WithVolumes(Vol("VOL_A", "EG", "FG_A"), Vol("VOL_OLD", "EG_2019", "FG_OLD", intact: false)));
+        var card = vm.Analyses[0];
+
+        Assert.Equal(["VOL_A", "VOL_OLD"], vm.VolumeSurfaces.Select(o => o.Name));
+        Assert.True(vm.VolumeSurfaces[0].IsSelectable);
+        Assert.Null(vm.VolumeSurfaces[0].DisabledReason);
+        Assert.False(vm.VolumeSurfaces[1].IsSelectable);
+        Assert.Equal(DialogText.VolumeSurfaceSourcesErased, vm.VolumeSurfaces[1].DisabledReason);
+
+        card.IsVolumeSurfaceSource = true;
+        card.VolumeSurface = "VOL_OLD";
+        Assert.Null(card.VolumeSurface);
+        Assert.Null(vm.Run.Analyses[0].VolumeSurface);
+
+        card.VolumeSurface = "VOL_A";
+        card.VolumeSurface = null;                                          // list churn from the view is not a choice
+        Assert.Equal("VOL_A", vm.Run.Analyses[0].VolumeSurface);
+    }
+
+    [Fact]
+    public void E918_the_list_is_the_hosts_list_only_and_a_chosen_surface_that_breaks_blocks_regenerate_with_the_reason()
+    {
+        var owned = Fixture.T2Run("0, 500, 1300, 1800, 2000", new AnalysisDef(Fixture.AnalysisA, "SV", "EG", "FG_A", VolumeSurface: "SV-EG-FG_A"));
+        var session = WithVolumes(Vol("VOL_A", "EG", "FG_A"));
+        var (_, _, vm) = Fixture.Open(owned, session);
+        var card = vm.Analyses[0];
+
+        Assert.Equal(["VOL_A"], vm.VolumeSurfaces.Select(o => o.Name));     // a stored name the host does not list is not re-added
+        Assert.True(card.IsVolumeSurfaceSource);
+        Assert.Equal(string.Format(CultureInfo.InvariantCulture, DialogText.VolumeSurfaceNotFoundFormat, "SV-EG-FG_A"), card.VolumeSurfaceProblem);
+        Assert.Equal(("EG", "FG_A"), (card.VolumeSurfaceBaseText, card.VolumeSurfaceComparisonText));   // as last resolved
+        Assert.Equal(DialogText.BlockedVolumeSurfaceUnusable, vm.RegenerateBlockedReason);
+
+        card.VolumeSurface = "VOL_A";
+        Assert.Null(vm.RegenerateBlockedReason);
+
+        session.VolumeSurfaceList = [Vol("VOL_A", "EG", "FG_A", intact: false), Vol("VOL_B", "EG", "FG_B")];
+        session.RaiseSourcesChanged();                                      // the host re-read the drawing (E422)
+
+        Assert.Equal(["VOL_A", "VOL_B"], vm.VolumeSurfaces.Select(o => o.Name));
+        Assert.Equal(string.Format(CultureInfo.InvariantCulture, DialogText.VolumeSurfaceUnusableFormat, "VOL_A", DialogText.VolumeSurfaceSourcesErased),
+            card.VolumeSurfaceProblem);
+        Assert.Equal(DialogText.BlockedVolumeSurfaceUnusable, vm.RegenerateBlockedReason);
+        Assert.Equal("VOL_A", vm.Run.Analyses[0].VolumeSurface);           // nothing is chosen for the user
+    }
+
+    [Fact]
+    public void E918_a_switch_with_no_surface_chosen_survives_SourcesChanged_and_nothing_is_guessed()
+    {
+        var session = new FakeSheetVolSession();
+        var (_, _, vm) = Fixture.Open(session: session);
+        var card = vm.Analyses[0];
+        card.IsVolumeSurfaceSource = true;
+        Assert.False(vm.IsDirty);
+
+        session.VolumeSurfaceList = [Vol("VOL_A", "EG", "FG_A")];          // the user creates one in the drawing
+        session.RaiseSourcesChanged();
+
+        card = vm.Analyses[0];
+        Assert.True(card.IsVolumeSurfaceSource);
+        Assert.Null(card.VolumeSurface);
+        Assert.Equal(DialogText.BlockedVolumeSurface, vm.RegenerateBlockedReason);
+        card.VolumeSurface = "VOL_A";
+        Assert.True(vm.CanRegenerate);
+    }
+
+    [Fact]
+    public void E902_no_volume_surfaces_is_named_only_while_a_comparison_is_switched_to_volume_surface()
+    {
+        var (_, _, vm) = Fixture.Open();
+        Assert.False(vm.IsEmptyState);
+        Assert.Null(vm.EmptyStateText);
+
+        vm.Analyses[0].IsVolumeSurfaceSource = true;
+        Assert.True(vm.IsEmptyState);
+        Assert.Equal(DialogText.EmptyNoVolumeSurfaces, vm.EmptyStateText);
+        Assert.Equal(vm.EmptyStateText, vm.RegenerateBlockedReason);
+
+        vm.Analyses[0].IsPairSource = true;
+        Assert.False(vm.IsEmptyState);
+        Assert.True(vm.CanRegenerate);
+    }
+
+    [Fact]
+    public async Task E918_values_follow_the_source_name_and_survive_a_round_trip_through_the_pair()
+    {
+        var (_, _, vm) = Fixture.Open(session: WithVolumes(Vol("VOL_A", "EXIST", "PROP", 1.15, 0.9)));
+        var card = vm.Analyses[0];
+        card.VolumeSurface = "VOL_A";
+        await vm.RegenerateCommand.ExecuteAsync();
+        Assert.All(vm.Grid.Rows, r => Assert.Equal(SegmentStatus.Current, r.Status));
+
+        card.IsPairSource = true;
+        Assert.All(vm.Grid.Rows, r => Assert.False(r.HasValues));          // another source: the values do not apply
+
+        card.IsVolumeSurfaceSource = true;
+        Assert.False(vm.IsDirty);
+        Assert.All(vm.Grid.Rows, r => Assert.Equal(SegmentStatus.Current, r.Status));
+    }
+
+    [Fact]
+    public void E918_a_chosen_volume_surface_is_kept_with_the_pending_edits_on_reopen()
+    {
+        var session = WithVolumes(Vol("VOL_A", "EG", "FG_A"));
+        var (_, pending, vm) = Fixture.Open(session: session);
+        vm.Analyses[0].VolumeSurface = "VOL_A";
+        vm.Close();
+
+        var reopened = new DialogViewModel(session, pending, Fixture.Config);
+
+        Assert.True(reopened.Analyses[0].IsVolumeSurfaceSource);
+        Assert.Equal("VOL_A", reopened.Analyses[0].VolumeSurface);
+        Assert.Equal("VOL_A", reopened.Analyses[0].Name.Text);
     }
 }

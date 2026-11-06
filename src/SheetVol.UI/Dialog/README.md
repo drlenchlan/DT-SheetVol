@@ -28,7 +28,7 @@ renders in a plain WPF process (see "Smoke check" below). Labels come from `Dial
 | Left panel, 328 wide | `Grid.ColumnDefinitions` of the body, first column `Width="328"` |
 | Alignment dropdown, pick button, station range | "Alignment" card |
 | Offsets, "same on both sides" (rev 3: no OHWM field, X6) | "Boundary offsets" card |
-| Surfaces card (base, comparison, cut factor, fill factor, add another); HCFCD labels table row / existing / design | "Surfaces to compare" card; labels from `AnalysisNameLabel`, `BaseSurfaceLabel`, `ComparisonSurfaceLabel` |
+| Surfaces card (base, comparison, cut factor, fill factor, add another); HCFCD labels table row / OHWM / proposed (rev 3); source switch per comparison (rev 3, E918) | "Surfaces to compare" card; labels from `AnalysisNameLabel`, `BaseSurfaceLabel`, `ComparisonSurfaceLabel`; under the name, "Source" with two `SV.SegmentStyle` radio buttons, then the pair fields or the volume surface dropdown with its pair and factors in read-only text boxes |
 | Fill by interval: every / from / to, Fill table | "Fill stations by interval" card |
 | Draw options | "Draw in the drawing" card, bound to `RunDefinition.Draw` through the view model |
 | Report selector | "Report" card at the top. Shown for both presets: it is the only way to reach the HCFCD preset from the dialog. **Compare with the artboards**: 6.14 says the HCFCD panel "gains" it |
@@ -58,7 +58,7 @@ when `COLORTHEME` changes) restyles the open window (E908). Both dictionaries de
 Keyed styles and templates in `SheetVolStyles.xaml`: `SV.FocusVisual`, `SV.CardHeaderStyle`,
 `SV.FieldLabelStyle`, `SV.MutedTextStyle`, `SV.ErrorTextStyle`, `SV.CellTextStyle`, `SV.CardStyle`,
 `SV.SubCardStyle`, `SV.WarningBannerStyle`, `SV.InfoStripStyle`, `SV.ErrorStripStyle`,
-`SV.FieldHostStyle`, `SV.PrimaryButtonStyle`, `SV.ScrollPageButtonStyle`, `SV.ScrollThumbStyle`,
+`SV.FieldHostStyle`, `SV.PrimaryButtonStyle`, `SV.SegmentStyle`, `SV.VolumeSurfaceItemStyle`, `SV.ScrollPageButtonStyle`, `SV.ScrollThumbStyle`,
 `SV.LabelledFieldTemplate`, `SV.FieldTemplate`, `SV.CellFieldTemplate`, `SV.StatusChipTemplate`,
 `SV.HeaderTemplateSelector`. Implicit styles: Button, TextBox, CheckBox, ComboBox, ComboBoxItem,
 ScrollBar, ToolTip, ProgressBar, GridSplitter, DataGrid, DataGridColumnHeader, DataGridCell, DataGridRow.
@@ -154,3 +154,4 @@ Goal: open `SVDIALOG` once in Civil 3D, run T2's breaks through it, compare it w
 ## Rev 3
 
 - The OHWM field (Boundary offsets card), the per-segment OHWM grid column and `GridEdit.Ohwm` are removed (X6); the smoke check's HCFCD visible-column count is 9.
+- Source switch per comparison (X6, E918): `SV.SegmentStyle` (radio buttons as two segments, accent when checked, existing brush keys only), the volume surface dropdown with `SV.VolumeSurfaceItemStyle` (an entry with erased sources is disabled, its reason as tooltip, shown on the disabled item, accessible help text and a second line in the item), read-only text boxes for its pair and factors, every control named (E910), all brushes dynamic (E908). The implicit ComboBoxItem style gains a disabled foreground. UiSmoke checks the HCFCD labels and the nine HCFCD column headers in order, and a new state with a volume surface chosen, its disabled entry, regen, accessible names and the switch back (render `7-volume-surface-chosen-dark.png`); it supplies design-time volume surfaces through a wrapper over `DesignSession`, whose own list stays empty, so SVDIALOG in fixture mode lists none.

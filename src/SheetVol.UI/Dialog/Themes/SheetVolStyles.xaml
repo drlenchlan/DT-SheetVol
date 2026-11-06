@@ -299,6 +299,43 @@
         </Setter>
     </Style>
 
+    <!-- ===== Segmented switch (rev 3: the per-comparison source switch, E918) ================== -->
+    <!-- Radio buttons drawn as two side-by-side segments; the checked one takes the accent. -->
+    <Style x:Key="SV.SegmentStyle" TargetType="RadioButton">
+        <Setter Property="Foreground" Value="{DynamicResource SV.Brush.Text}"/>
+        <Setter Property="Background" Value="{DynamicResource SV.Brush.ControlBackground}"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource SV.Brush.ControlBorder}"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="Padding" Value="8,4"/>
+        <Setter Property="MinHeight" Value="26"/>
+        <Setter Property="FocusVisualStyle" Value="{StaticResource SV.FocusVisual}"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="RadioButton">
+                    <Border x:Name="Bd" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="3" Padding="{TemplateBinding Padding}"
+                            SnapsToDevicePixels="True">
+                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" RecognizesAccessKey="True"/>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Bd" Property="BorderBrush" Value="{DynamicResource SV.Brush.ControlHoverBorder}"/>
+                        </Trigger>
+                        <Trigger Property="IsChecked" Value="True">
+                            <Setter TargetName="Bd" Property="Background" Value="{DynamicResource SV.Brush.Accent}"/>
+                            <Setter TargetName="Bd" Property="BorderBrush" Value="{DynamicResource SV.Brush.Accent}"/>
+                            <Setter Property="Foreground" Value="{DynamicResource SV.Brush.AccentText}"/>
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Foreground" Value="{DynamicResource SV.Brush.TextDisabled}"/>
+                            <Setter TargetName="Bd" Property="Opacity" Value="0.6"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
     <!-- ===== Combo boxes ===================================================================== -->
     <Style TargetType="ComboBoxItem">
         <Setter Property="Foreground" Value="{DynamicResource SV.Brush.Text}"/>
@@ -316,10 +353,24 @@
                         <Trigger Property="IsSelected" Value="True">
                             <Setter TargetName="Bd" Property="Background" Value="{DynamicResource SV.Brush.Selection}"/>
                         </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Foreground" Value="{DynamicResource SV.Brush.TextDisabled}"/>
+                        </Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
             </Setter.Value>
         </Setter>
+    </Style>
+
+    <!-- Volume surface dropdown entries (rev 3, X6, E918), DataContext = VolumeSurfaceOption: an entry whose
+         sources were erased is listed disabled, with the reason as its tooltip (also shown on the disabled item)
+         and as its accessible help text; the item template shows the reason inline. -->
+    <Style x:Key="SV.VolumeSurfaceItemStyle" TargetType="ComboBoxItem" BasedOn="{StaticResource {x:Type ComboBoxItem}}">
+        <Setter Property="IsEnabled" Value="{Binding IsSelectable}"/>
+        <Setter Property="ToolTip" Value="{Binding DisabledReason}"/>
+        <Setter Property="ToolTipService.ShowOnDisabled" Value="True"/>
+        <Setter Property="AutomationProperties.Name" Value="{Binding Name}"/>
+        <Setter Property="AutomationProperties.HelpText" Value="{Binding DisabledReason, TargetNullValue=''}"/>
     </Style>
 
     <Style TargetType="ComboBox">

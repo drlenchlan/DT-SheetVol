@@ -25,6 +25,8 @@ internal sealed class FakeSheetVolSession : ISheetVolSession
 
     public List<string> Alignments { get; set; } = ["S", "C"];
     public List<string> Surfaces { get; set; } = ["EG", "FG_A", "FG_B"];
+    /// <summary>Rev 3 (X6): what VolumeSurfaces returns, as the host lists them (SheetVol-owned ones already left out). Empty by default.</summary>
+    public List<VolumeSurfaceInfo> VolumeSurfaceList { get; set; } = [];
     public Dictionary<string, RunDefinition> Runs { get; } = [];
 
     public double AlignmentStart { get; set; }
@@ -90,7 +92,7 @@ internal sealed class FakeSheetVolSession : ISheetVolSession
 
     public IReadOnlyList<string> AlignmentNames => Alignments;
     public IReadOnlyList<string> TinSurfaceNames => Surfaces;
-    public IReadOnlyList<VolumeSurfaceInfo> VolumeSurfaces => [];   // rev 3 adoption: none until the rev3-dialog package needs them
+    public IReadOnlyList<VolumeSurfaceInfo> VolumeSurfaces => VolumeSurfaceList;
 
     public event EventHandler SourcesChanged
     {

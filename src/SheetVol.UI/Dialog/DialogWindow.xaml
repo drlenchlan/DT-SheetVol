@@ -98,7 +98,9 @@
                             </StackPanel>
                         </Border>
 
-                        <!-- Surfaces to compare (HCFCD: table row, existing, design) -->
+                        <!-- Surfaces to compare (HCFCD: table row, OHWM, proposed). Rev 3 (X6, E918): a source
+                             switch per comparison, "Base and comparison" (pair fields, editable) or "Volume surface"
+                             (dropdown; its pair and factors read-only). -->
                         <Border Style="{DynamicResource SV.CardStyle}">
                             <StackPanel>
                                 <TextBlock Text="{Binding SurfacesHeader}" Style="{DynamicResource SV.CardHeaderStyle}"/>
@@ -135,23 +137,104 @@
                                                                 AutomationProperties.Name="{x:Static pres:DialogText.RemoveComparison}"/>
                                                     </Grid>
 
-                                                    <StackPanel Grid.Row="2" Grid.Column="0" Margin="0,8,0,0">
-                                                        <TextBlock Style="{DynamicResource SV.FieldLabelStyle}"
-                                                                   Text="{Binding DataContext.BaseSurfaceLabel, RelativeSource={RelativeSource AncestorType=Window}}"/>
-                                                        <ComboBox ItemsSource="{Binding Surfaces}" SelectedItem="{Binding BaseSurface}"
-                                                                  AutomationProperties.Name="{Binding DataContext.BaseSurfaceLabel, RelativeSource={RelativeSource AncestorType=Window}}"/>
-                                                    </StackPanel>
-                                                    <StackPanel Grid.Row="2" Grid.Column="2" Margin="0,8,0,0">
-                                                        <TextBlock Style="{DynamicResource SV.FieldLabelStyle}"
-                                                                   Text="{Binding DataContext.ComparisonSurfaceLabel, RelativeSource={RelativeSource AncestorType=Window}}"/>
-                                                        <ComboBox ItemsSource="{Binding Surfaces}" SelectedItem="{Binding ComparisonSurface}"
-                                                                  AutomationProperties.Name="{Binding DataContext.ComparisonSurfaceLabel, RelativeSource={RelativeSource AncestorType=Window}}"/>
+                                                    <!-- Source switch (E918): two segments, one per source -->
+                                                    <StackPanel Grid.Row="2" Grid.ColumnSpan="3" Margin="0,8,0,0">
+                                                        <TextBlock Style="{DynamicResource SV.FieldLabelStyle}" Text="{x:Static pres:DialogText.SourceLabel}"/>
+                                                        <UniformGrid Columns="2">
+                                                            <RadioButton Style="{DynamicResource SV.SegmentStyle}" Margin="0,0,3,0" IsChecked="{Binding IsPairSource}"
+                                                                         AutomationProperties.Name="{x:Static pres:DialogText.SourcePair}">
+                                                                <TextBlock Text="{x:Static pres:DialogText.SourcePair}" TextWrapping="Wrap" TextAlignment="Center"/>
+                                                            </RadioButton>
+                                                            <RadioButton Style="{DynamicResource SV.SegmentStyle}" Margin="3,0,0,0" IsChecked="{Binding IsVolumeSurfaceSource}"
+                                                                         AutomationProperties.Name="{x:Static pres:DialogText.SourceVolumeSurface}">
+                                                                <TextBlock Text="{x:Static pres:DialogText.SourceVolumeSurface}" TextWrapping="Wrap" TextAlignment="Center"/>
+                                                            </RadioButton>
+                                                        </UniformGrid>
                                                     </StackPanel>
 
-                                                    <ContentControl Grid.Row="3" Grid.Column="0" Margin="0,8,0,0" Content="{Binding CutFactor}"
-                                                                    Style="{DynamicResource SV.FieldHostStyle}" ContentTemplate="{DynamicResource SV.LabelledFieldTemplate}"/>
-                                                    <ContentControl Grid.Row="3" Grid.Column="2" Margin="0,8,0,0" Content="{Binding FillFactor}"
-                                                                    Style="{DynamicResource SV.FieldHostStyle}" ContentTemplate="{DynamicResource SV.LabelledFieldTemplate}"/>
+                                                    <!-- Source "Base and comparison": the editable pair and its factors -->
+                                                    <Grid Grid.Row="3" Grid.ColumnSpan="3"
+                                                          Visibility="{Binding IsPairSource, Converter={x:Static dlg:Converters.TrueToVisible}}">
+                                                        <Grid.ColumnDefinitions>
+                                                            <ColumnDefinition Width="*"/>
+                                                            <ColumnDefinition Width="10"/>
+                                                            <ColumnDefinition Width="*"/>
+                                                        </Grid.ColumnDefinitions>
+                                                        <Grid.RowDefinitions>
+                                                            <RowDefinition Height="Auto"/>
+                                                            <RowDefinition Height="Auto"/>
+                                                        </Grid.RowDefinitions>
+                                                        <StackPanel Grid.Row="0" Grid.Column="0" Margin="0,8,0,0">
+                                                            <TextBlock Style="{DynamicResource SV.FieldLabelStyle}"
+                                                                       Text="{Binding DataContext.BaseSurfaceLabel, RelativeSource={RelativeSource AncestorType=Window}}"/>
+                                                            <ComboBox ItemsSource="{Binding Surfaces}" SelectedItem="{Binding BaseSurface}"
+                                                                      AutomationProperties.Name="{Binding DataContext.BaseSurfaceLabel, RelativeSource={RelativeSource AncestorType=Window}}"/>
+                                                        </StackPanel>
+                                                        <StackPanel Grid.Row="0" Grid.Column="2" Margin="0,8,0,0">
+                                                            <TextBlock Style="{DynamicResource SV.FieldLabelStyle}"
+                                                                       Text="{Binding DataContext.ComparisonSurfaceLabel, RelativeSource={RelativeSource AncestorType=Window}}"/>
+                                                            <ComboBox ItemsSource="{Binding Surfaces}" SelectedItem="{Binding ComparisonSurface}"
+                                                                      AutomationProperties.Name="{Binding DataContext.ComparisonSurfaceLabel, RelativeSource={RelativeSource AncestorType=Window}}"/>
+                                                        </StackPanel>
+                                                        <ContentControl Grid.Row="1" Grid.Column="0" Margin="0,8,0,0" Content="{Binding CutFactor}"
+                                                                        Style="{DynamicResource SV.FieldHostStyle}" ContentTemplate="{DynamicResource SV.LabelledFieldTemplate}"/>
+                                                        <ContentControl Grid.Row="1" Grid.Column="2" Margin="0,8,0,0" Content="{Binding FillFactor}"
+                                                                        Style="{DynamicResource SV.FieldHostStyle}" ContentTemplate="{DynamicResource SV.LabelledFieldTemplate}"/>
+                                                    </Grid>
+
+                                                    <!-- Source "Volume surface": the dropdown, then its pair and factors read-only (rule 1) -->
+                                                    <StackPanel Grid.Row="4" Grid.ColumnSpan="3" Margin="0,8,0,0"
+                                                                Visibility="{Binding IsVolumeSurfaceSource, Converter={x:Static dlg:Converters.TrueToVisible}}">
+                                                        <ComboBox ItemsSource="{Binding VolumeSurfaces}" SelectedValuePath="Name" SelectedValue="{Binding VolumeSurface}"
+                                                                  ItemContainerStyle="{DynamicResource SV.VolumeSurfaceItemStyle}"
+                                                                  AutomationProperties.Name="{x:Static pres:DialogText.VolumeSurfaceChoice}">
+                                                            <ComboBox.ItemTemplate>
+                                                                <DataTemplate>
+                                                                    <StackPanel>
+                                                                        <TextBlock Text="{Binding Name}"/>
+                                                                        <TextBlock Text="{Binding DisabledReason}" Style="{DynamicResource SV.MutedTextStyle}" MaxWidth="280"
+                                                                                   Visibility="{Binding DisabledReason, Converter={x:Static dlg:Converters.NotEmptyToVisible}}"/>
+                                                                    </StackPanel>
+                                                                </DataTemplate>
+                                                            </ComboBox.ItemTemplate>
+                                                        </ComboBox>
+                                                        <TextBlock Text="{Binding VolumeSurfaceProblem}" Style="{DynamicResource SV.ErrorTextStyle}"
+                                                                   Visibility="{Binding VolumeSurfaceProblem, Converter={x:Static dlg:Converters.NotEmptyToVisible}}"/>
+                                                        <Grid>
+                                                            <Grid.ColumnDefinitions>
+                                                                <ColumnDefinition Width="*"/>
+                                                                <ColumnDefinition Width="10"/>
+                                                                <ColumnDefinition Width="*"/>
+                                                            </Grid.ColumnDefinitions>
+                                                            <Grid.RowDefinitions>
+                                                                <RowDefinition Height="Auto"/>
+                                                                <RowDefinition Height="Auto"/>
+                                                            </Grid.RowDefinitions>
+                                                            <StackPanel Grid.Row="0" Grid.Column="0" Margin="0,8,0,0">
+                                                                <TextBlock Style="{DynamicResource SV.FieldLabelStyle}"
+                                                                           Text="{Binding DataContext.BaseSurfaceLabel, RelativeSource={RelativeSource AncestorType=Window}}"/>
+                                                                <TextBox IsReadOnly="True" Text="{Binding VolumeSurfaceBaseText, Mode=OneWay}"
+                                                                         AutomationProperties.Name="{Binding DataContext.BaseSurfaceLabel, RelativeSource={RelativeSource AncestorType=Window}}"/>
+                                                            </StackPanel>
+                                                            <StackPanel Grid.Row="0" Grid.Column="2" Margin="0,8,0,0">
+                                                                <TextBlock Style="{DynamicResource SV.FieldLabelStyle}"
+                                                                           Text="{Binding DataContext.ComparisonSurfaceLabel, RelativeSource={RelativeSource AncestorType=Window}}"/>
+                                                                <TextBox IsReadOnly="True" Text="{Binding VolumeSurfaceComparisonText, Mode=OneWay}"
+                                                                         AutomationProperties.Name="{Binding DataContext.ComparisonSurfaceLabel, RelativeSource={RelativeSource AncestorType=Window}}"/>
+                                                            </StackPanel>
+                                                            <StackPanel Grid.Row="1" Grid.Column="0" Margin="0,8,0,0">
+                                                                <TextBlock Style="{DynamicResource SV.FieldLabelStyle}" Text="{x:Static pres:DialogText.CutFactor}"/>
+                                                                <TextBox IsReadOnly="True" Text="{Binding VolumeSurfaceCutFactorText, Mode=OneWay}"
+                                                                         AutomationProperties.Name="{x:Static pres:DialogText.CutFactor}"/>
+                                                            </StackPanel>
+                                                            <StackPanel Grid.Row="1" Grid.Column="2" Margin="0,8,0,0">
+                                                                <TextBlock Style="{DynamicResource SV.FieldLabelStyle}" Text="{x:Static pres:DialogText.FillFactor}"/>
+                                                                <TextBox IsReadOnly="True" Text="{Binding VolumeSurfaceFillFactorText, Mode=OneWay}"
+                                                                         AutomationProperties.Name="{x:Static pres:DialogText.FillFactor}"/>
+                                                            </StackPanel>
+                                                        </Grid>
+                                                        <TextBlock Text="{x:Static pres:DialogText.VolumeSurfaceReadOnlyNote}" Style="{DynamicResource SV.MutedTextStyle}" Margin="0,6,0,0"/>
+                                                    </StackPanel>
                                                 </Grid>
                                             </Border>
                                         </DataTemplate>

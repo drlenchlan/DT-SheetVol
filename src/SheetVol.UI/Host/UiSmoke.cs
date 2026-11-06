@@ -6,6 +6,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Windows;
+using System.Windows.Automation;
 using System.Windows.Automation.Peers;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
@@ -26,13 +27,18 @@ namespace SheetVol.UI.Host;
 /// totals appear only with every result, the theme swap restyles live (E908), the window
 /// lays out at its minimum size with the footer inside (E909), every focusable control has
 /// an accessible name (E910), 250 segments realize only the visible rows and the chart
-/// scrolls to a grid selection (E913), and closing clears the highlight (E911).
+/// scrolls to a grid selection (E913), closing clears the highlight (E911), and (rev 3) the
+/// HCFCD card labels and columns, and the per-comparison source switch with a volume surface
+/// chosen and switched back (E918).
 /// Must run on an STA thread with a dispatcher.
 /// </summary>
 internal static class UiSmoke
 {
     private const string DrawingName = "T2-design.dwg";
     private const string RunName = "Run1";
+    private const string VolumeSurfaceName = "VOL_EG_FG_A";
+    private const string ErasedVolumeSurfaceName = "VOL_2019";
+    private const string UnitDropdown = "unit dropdown";
 
     /// <summary>Runs every check; returns true when all pass. PNGs go to <paramref name="outputFolder"/> when given.</summary>
     /// <param name="outputFolder">Folder for the PNG renders, or null for none.</param>
@@ -57,6 +63,7 @@ internal static class UiSmoke
         {
             StandardStates(report, outputFolder);
             HcfcdState(report, outputFolder);
+            VolumeSurfaceState(report, outputFolder);
             ManySegments(report, outputFolder);
         }
         catch (Exception ex)
@@ -188,13 +195,21 @@ internal static class UiSmoke
         {
             vm.SelectedPreset = vm.Presets.First(p => p.Preset == ReportPreset.HcfcdSegment);
             Pump();
-            report.Check("HCFCD labels", vm.IsHcfcd && vm.BaseSurfaceLabel == DialogText.BaseSurfaceHcfcd && vm.SelectedAreaUnit?.Unit == AreaUnit.Acres,
-                $"{vm.AnalysisNameLabel} / {vm.BaseSurfaceLabel} / {vm.ComparisonSurfaceLabel}, area unit {vm.SelectedAreaUnit}");
+            // Rev 3 (X6, NOW.md rule 8): the card reads table row, OHWM, proposed, and the labels shown are those.
+            var shownLabels = DialogWindow.Descendants<TextBlock>(window.LeftPanel).Where(t => t.IsVisible).Select(t => t.Text).ToHashSet();
+            var labelsRead = vm.AnalysisNameLabel == "Table row" && vm.BaseSurfaceLabel == "OHWM" && vm.ComparisonSurfaceLabel == "Proposed"
+                             && shownLabels.IsSupersetOf(["Table row", "OHWM", "Proposed"]);
+            report.Check("HCFCD labels", vm.IsHcfcd && labelsRead && vm.SelectedAreaUnit?.Unit == AreaUnit.Acres,
+                $"{vm.AnalysisNameLabel} / {vm.BaseSurfaceLabel} / {vm.ComparisonSurfaceLabel} (shown: {labelsRead}), area unit {vm.SelectedAreaUnit}");
             Execute(vm.RegenerateCommand);
-            var hcfcdColumns = window.SegmentsGrid.Columns.Count(c => c.Visibility == Visibility.Visible);
-            var cutColumnHidden = window.SegmentsGrid.Columns[5].Visibility != Visibility.Visible;
-            report.Check("HCFCD columns", vm.Grid.IsHcfcd && hcfcdColumns == 9 && cutColumnHidden,   // rev 3: OHWM column gone (X6), 10 -> 9
-                $"{hcfcdColumns} visible columns, Standard cut column hidden={cutColumnHidden}");
+            var hcfcdColumns = window.SegmentsGrid.Columns.Where(c => c.Visibility == Visibility.Visible).Select(HeaderText).ToList();
+            string[] expectedColumns =
+            [
+                DialogText.ColumnNumber, DialogText.ColumnBegin, DialogText.ColumnEnd, vm.Grid.SheetHeader, vm.Grid.ImpactedLengthHeader,
+                vm.Grid.ImpactedAreaHeader + " + " + UnitDropdown, vm.Grid.CutVolumeHeader, vm.Grid.AverageHeader, vm.Grid.StatusHeader,
+            ];
+            report.Check("HCFCD columns", vm.Grid.IsHcfcd && hcfcdColumns.SequenceEqual(expectedColumns),   // rev 3: OHWM column gone (X6), 10 -> 9
+                $"{hcfcdColumns.Count} visible: {string.Join(" | ", hcfcdColumns)}");
             report.Check("HCFCD chart and strip", vm.Chart.IsHcfcd && vm.Chart.CutMarks.Count == 2 && vm.Grid.TotalsVisible,
                 $"{vm.Chart.CutMarks.Count} cut marks, totals {vm.Grid.Total.ImpactedLengthText} ft / {vm.Grid.Total.ImpactedAreaText} / {vm.Grid.Total.CutVolumeText}");
             CheckTotalsAligned(report, window);
@@ -207,6 +222,74 @@ internal static class UiSmoke
             if (window.IsVisible) window.Close();
         }
     }
+
+    // ---- Rev 3 (X6, E918): source switch, volume surface chosen, and back ----------------------------------
+
+    private static void VolumeSurfaceState(Report report, string? folder)
+    {
+        var session = new VolumeSurfaceSession(NewSession(),
+        [
+            new VolumeSurfaceInfo(VolumeSurfaceName, "EG", "FG_A", 1.15, 0.9, SourcesIntact: true),
+            new VolumeSurfaceInfo(ErasedVolumeSurfaceName, "EG_2019", "FG_OLD", 1, 1, SourcesIntact: false),
+        ]);
+        var window = Open(session, DialogTheme.Dark);
+        var vm = window.ViewModel;
+        try
+        {
+            var card = vm.Analyses[0];
+            Segment(window, DialogText.SourceVolumeSurface).IsChecked = true;
+            Pump();
+            var combo = DialogWindow.Descendants<ComboBox>(window.LeftPanel).First(c => AutomationProperties.GetName(c) == DialogText.VolumeSurfaceChoice);
+            report.Check("source switch to Volume surface (E918)",
+                card.IsVolumeSurfaceSource && combo.IsVisible && !PairCombosVisible(window, vm) && vm.RegenerateBlockedReason == DialogText.BlockedVolumeSurface,
+                $"switch={card.IsVolumeSurfaceSource}, dropdown visible={combo.IsVisible}, pair fields visible={PairCombosVisible(window, vm)}, blocked: {vm.RegenerateBlockedReason}");
+
+            // The disabled entry, built from the dropdown's own item style and template: opening the dropdown
+            // would show a popup on the desktop of the person at the keyboard. It sits in an ItemsControl
+            // because the system theme binds two of its properties to an ItemsControl ancestor.
+            var erased = vm.VolumeSurfaces.First(o => !o.IsSelectable);
+            var item = new ComboBoxItem { DataContext = erased, Content = erased, ContentTemplate = combo.ItemTemplate, Style = combo.ItemContainerStyle };
+            var host = new ItemsControl();
+            host.Items.Add(item);
+            host.Measure(new Size(300, double.PositiveInfinity));
+            host.Arrange(new Rect(host.DesiredSize));
+            host.UpdateLayout();
+            Pump();
+            var inlineReason = DialogWindow.Descendants<TextBlock>(item).Any(t => t.Visibility == Visibility.Visible && t.Text == DialogText.VolumeSurfaceSourcesErased);
+            report.Check("erased volume surface listed disabled with its reason (E918)",
+                combo.Items.Count == 2 && !item.IsEnabled && Equals(item.ToolTip, DialogText.VolumeSurfaceSourcesErased) && inlineReason,
+                $"{combo.Items.Count} listed, '{erased.Name}' enabled={item.IsEnabled}, tooltip={item.ToolTip ?? "(none)"}, inline reason={inlineReason}");
+
+            combo.SelectedValue = VolumeSurfaceName;
+            Pump();
+            var readOnly = DialogWindow.Descendants<TextBox>(window.LeftPanel).Where(t => t.IsVisible && t.IsReadOnly).Select(t => t.Text).ToList();
+            report.Check("volume surface chosen: pair and factors read-only (E918)",
+                vm.Run.Analyses[0].VolumeSurface == VolumeSurfaceName && readOnly.SequenceEqual(["EG", "FG_A", "1.15", "0.9"]) && vm.CanRegenerate,
+                $"analysis source {vm.Run.Analyses[0].VolumeSurface ?? "(pair)"}, read-only fields [{string.Join(", ", readOnly)}]");
+            Execute(vm.RegenerateCommand);
+            report.Check("regen with a volume surface source", vm.LastResult is { Succeeded: true } && vm.Grid.Rows.All(r => r.Status == SegmentStatus.Current),
+                vm.StatusMessage ?? "(no status)");
+            CheckAccessibleNames(report, window);
+            Render(window, folder, "7-volume-surface-chosen-dark.png", report);
+
+            Segment(window, DialogText.SourcePair).IsChecked = true;
+            Pump();
+            report.Check("switch back restores the pair (E918)",
+                vm.Run.Analyses[0].VolumeSurface is null && card.BaseSurface == "EG" && card.ComparisonSurface == "FG_A" && PairCombosVisible(window, vm) && !combo.IsVisible,
+                $"analysis source {vm.Run.Analyses[0].VolumeSurface ?? "(pair)"}, pair {card.BaseSurface} / {card.ComparisonSurface}, pair fields visible={PairCombosVisible(window, vm)}");
+            Execute(vm.CloseCommand);
+        }
+        finally
+        {
+            if (window.IsVisible) window.Close();
+        }
+    }
+
+    private static RadioButton Segment(DialogWindow window, string name)
+        => DialogWindow.Descendants<RadioButton>(window.LeftPanel).First(r => AutomationProperties.GetName(r) == name);
+
+    private static bool PairCombosVisible(DialogWindow window, DialogViewModel vm)
+        => DialogWindow.Descendants<ComboBox>(window.LeftPanel).Any(c => c.IsVisible && AutomationProperties.GetName(c) == vm.BaseSurfaceLabel);
 
     // ---- E913: 250 segments ----------------------------------------------------------------------------
 
@@ -268,6 +351,20 @@ internal static class UiSmoke
             $"squeezed columns: {(squeezed.Count == 0 ? "none" : string.Join(", ", squeezed))}; horizontal overflow {scroller.ScrollableWidth:0} px");
     }
 
+    /// <summary>A column header as text: a bound string, or a header panel's text with its dropdown named.</summary>
+    private static string HeaderText(DataGridColumn column) => column.Header switch
+    {
+        string text => text,
+        Panel panel => string.Join(" + ", panel.Children.OfType<FrameworkElement>().Select(e => e switch
+        {
+            TextBlock t => t.Text,
+            ComboBox => UnitDropdown,
+            _ => e.GetType().Name,
+        })),
+        null => string.Empty,
+        var other => other.ToString() ?? string.Empty,
+    };
+
     private static ScrollViewer GridScroller(DialogWindow window)
         => DialogWindow.Descendants<ScrollViewer>(window.SegmentsGrid).First(s => s.Name == "DG_ScrollViewer");
 
@@ -292,7 +389,7 @@ internal static class UiSmoke
     private static DesignSession NewSession()
         => new(RunName, () => new DrawingInfo(DrawingName, UnitSystem.Imperial));
 
-    private static DialogWindow Open(DesignSession session, DialogTheme theme)
+    private static DialogWindow Open(ISheetVolSession session, DialogTheme theme)
     {
         var window = new DialogWindow(session, new PendingEdits(), PresentationConfig.Default, theme, HostText.DesignModeNote)
         {
@@ -346,6 +443,34 @@ internal static class UiSmoke
     }
 
     private static Color Color(Brush? brush) => brush is SolidColorBrush solid ? solid.Color : Colors.Transparent;
+
+    /// <summary>The design session with design-time volume surfaces (rev 3, X6); every other member is the design session's.</summary>
+    private sealed class VolumeSurfaceSession(DesignSession inner, IReadOnlyList<VolumeSurfaceInfo> volumeSurfaces) : ISheetVolSession
+    {
+        public IReadOnlyList<string> AlignmentNames => inner.AlignmentNames;
+        public IReadOnlyList<string> TinSurfaceNames => inner.TinSurfaceNames;
+        public IReadOnlyList<VolumeSurfaceInfo> VolumeSurfaces => volumeSurfaces;
+        public DrawingInfo? ActiveDrawing => inner.ActiveDrawing;
+        public bool IsCommandActive => inner.IsCommandActive;
+
+        public event EventHandler SourcesChanged
+        {
+            add => inner.SourcesChanged += value;
+            remove => inner.SourcesChanged -= value;
+        }
+
+        public RunDefinition? LoadRun(string runName) => inner.LoadRun(runName);
+        public SheetVol.Core.ValidationResult Validate(RunDefinition run) => inner.Validate(run);
+        public Task<RegenResult> RegenerateAsync(RunDefinition run, IProgress<double> progress, CancellationToken ct) => inner.RegenerateAsync(run, progress, ct);
+        public void Highlight(Guid? segmentId) => inner.Highlight(segmentId);
+        public void ZoomTo(Guid segmentId) => inner.ZoomTo(segmentId);
+        public Task<string?> PickAlignmentAsync() => inner.PickAlignmentAsync();
+        public Task<double?> PickStationAsync(string alignmentName) => inner.PickStationAsync(alignmentName);
+        public string FormatStation(string alignmentName, double rawStation) => inner.FormatStation(alignmentName, rawStation);
+        public (double Start, double End)? StationRange(string alignmentName) => inner.StationRange(alignmentName);
+        public RunStatus GetRunStatus(string runName) => inner.GetRunStatus(runName);
+        public Task<RegenResult?> ExportAsync(RunDefinition run, CancellationToken ct) => inner.ExportAsync(run, ct);
+    }
 
     private sealed class Report(Action<string> log)
     {

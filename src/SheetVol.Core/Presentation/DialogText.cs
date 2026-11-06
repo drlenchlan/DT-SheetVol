@@ -33,16 +33,32 @@ public static class DialogText
     public const string AnalysisNameHcfcd = "Table row";
     /// <summary>Base surface label, Standard preset.</summary>
     public const string BaseSurface = "Base";
-    /// <summary>Base surface label, HCFCD preset.</summary>
-    public const string BaseSurfaceHcfcd = "Existing";
+    /// <summary>Base surface label, HCFCD preset. Rev 3 (X5): the base is the OHWM surface.</summary>
+    public const string BaseSurfaceHcfcd = "OHWM";
     /// <summary>Comparison surface label, Standard preset.</summary>
     public const string ComparisonSurface = "Comparison";
-    /// <summary>Comparison surface label, HCFCD preset.</summary>
-    public const string ComparisonSurfaceHcfcd = "Design";
+    /// <summary>Comparison surface label, HCFCD preset. Rev 3: the proposed surface.</summary>
+    public const string ComparisonSurfaceHcfcd = "Proposed";
     /// <summary>Cut factor field.</summary>
     public const string CutFactor = "Cut factor";
     /// <summary>Fill factor field.</summary>
     public const string FillFactor = "Fill factor";
+    /// <summary>Source switch label in each comparison card (rev 3, X6, E918).</summary>
+    public const string SourceLabel = "Source";
+    /// <summary>Source switch: the comparison computes from a base and a comparison surface.</summary>
+    public const string SourcePair = "Base and comparison";
+    /// <summary>Source switch: the comparison takes an existing TIN volume surface, whose pair and factors govern.</summary>
+    public const string SourceVolumeSurface = "Volume surface";
+    /// <summary>Accessible name of the volume surface dropdown.</summary>
+    public const string VolumeSurfaceChoice = "Choose a volume surface";
+    /// <summary>Note under the read-only fields of a volume surface source (NOW.md rev 3 rule 1).</summary>
+    public const string VolumeSurfaceReadOnlyNote = "Read from the volume surface. Its own factors are used.";
+    /// <summary>Why a listed volume surface cannot be picked (E422): tooltip and inline text of the disabled entry.</summary>
+    public const string VolumeSurfaceSourcesErased = "Its base or comparison surface was erased, so it cannot be used.";
+    /// <summary>Card message when the chosen volume surface is not listed any more: {0} its name.</summary>
+    public const string VolumeSurfaceNotFoundFormat = "Volume surface '{0}' is not in this drawing.";
+    /// <summary>Card message when the chosen volume surface is listed disabled: {0} its name, {1} the reason.</summary>
+    public const string VolumeSurfaceUnusableFormat = "Volume surface '{0}' cannot be used. {1}";
     /// <summary>Add-another-comparison button.</summary>
     public const string AddComparison = "Add another comparison";
     /// <summary>Remove-comparison button.</summary>
@@ -196,6 +212,8 @@ public static class DialogText
     public const string EmptyNoAlignment = "This drawing has no alignment.";
     /// <summary>E902: too few TIN surfaces: {0} count found.</summary>
     public const string EmptyTooFewSurfacesFormat = "This drawing has fewer than two TIN surfaces (found {0}). Volumes need a base and a comparison surface.";
+    /// <summary>E902 while a comparison is switched to Volume surface (rev 3, X6): the drawing has none.</summary>
+    public const string EmptyNoVolumeSurfaces = "This drawing has no volume surfaces. Create a TIN volume surface, or switch the comparison back to Base and comparison.";
     /// <summary>Banner: tracker says the drawing changed (E912).</summary>
     public const string StaleExternal = "The drawing changed since the last regenerate. Values may be out of date.";
     /// <summary>Banner: edits not yet regenerated (E907, E418).</summary>
@@ -274,6 +292,10 @@ public static class DialogText
     public const string BlockedNoAnalysis = "Add a comparison.";
     /// <summary>Regenerate disabled reason.</summary>
     public const string BlockedSurfaces = "Pick a base and a comparison surface for every comparison.";
+    /// <summary>Regenerate disabled reason: a comparison is switched to Volume surface and none is chosen (E918).</summary>
+    public const string BlockedVolumeSurface = "Pick a volume surface for every comparison switched to Volume surface.";
+    /// <summary>Regenerate disabled reason: a chosen volume surface is not listed any more or its sources were erased (E422).</summary>
+    public const string BlockedVolumeSurfaceUnusable = "A chosen volume surface cannot be used. See the message in its comparison.";
     /// <summary>Regenerate disabled reason.</summary>
     public const string BlockedFieldErrors = "Fix the fields that show an error.";
     /// <summary>Regenerate disabled reason.</summary>
