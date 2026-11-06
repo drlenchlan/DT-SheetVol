@@ -46,6 +46,14 @@ public sealed record VolumeFixture(
     double UnadjustedCut, double UnadjustedFill, double UnadjustedNet,
     int Triangles);
 
+/// <summary>One drawing name the settings expect (SVFIXTURE T). <c>Status</c> is "created",
+/// "present" (left untouched) or "not set" (the setting is null, which switches its lookup
+/// off; <c>Name</c> is then empty). <c>Keys</c> are every settings key naming it.</summary>
+public sealed record SettingsNameResult(string Kind, string Name, string Status, IReadOnlyList<string> Keys);
+
+/// <summary>The result of SVFIXTURE T: where the settings came from and one result per name.</summary>
+public sealed record SettingsNamesFixture(string SettingsSource, IReadOnlyList<SettingsNameResult> Names);
+
 public static class Fixtures
 {
     /// <summary>Names SVFIXTURE accepts, in the order ALL builds them.</summary>
@@ -112,6 +120,12 @@ public static class Fixtures
             }
             return made;
         });
+
+    /// <summary>Creates every layer, surface style, table style, text style and block that
+    /// <paramref name="settings"/> names and the drawing lacks, so a regen can complete on a
+    /// fixture drawing; existing ones are reported present and left alone. Rerunnable.</summary>
+    public static SettingsNamesFixture CreateSettingsNames(Database db, Session.SheetVolSettings settings, string settingsSource) =>
+        InCivil(db, (d, tr, civ) => FixtureSettingsNames.Build(d, tr, civ, settings, settingsSource));
 
     /// <summary>The analytic whole-surface totals for a fixture pair in words, or null for other pairs.</summary>
     public static string? ExpectedWholeSurface(string baseName, string comparisonName) =>
