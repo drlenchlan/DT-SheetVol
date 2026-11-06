@@ -28,7 +28,7 @@ internal static class FixtureTemplate
                 throw new FixtureException(FixtureCodes.NameInUse, $"a layout named '{Names.TemplateLayout}' already exists");
 
             var layerId = EnsureLayer(db, tr, Names.ViewportLayer);
-            var anchorDefId = EnsureAnchorBlock(db, tr);
+            var anchorDefId = EnsureAnchorBlock(db, tr, Names.TableAnchorBlock);
 
             ObjectId layoutId;
             try { layoutId = lm.CreateLayout(Names.TemplateLayout); }
@@ -281,14 +281,15 @@ internal static class FixtureTemplate
         return id;
     }
 
-    /// <summary>SV_TABLE_ANCHOR: a small cross at the block origin, so the anchor is visible
-    /// and its insertion point is the table's top-left. An existing definition is reused.</summary>
-    private static ObjectId EnsureAnchorBlock(Database db, Transaction tr)
+    /// <summary>The table anchor block (SV_TABLE_ANCHOR here; SVFIXTURE T passes the settings'
+    /// name): a small cross at the block origin, so the anchor is visible and its insertion
+    /// point is the table's top-left. An existing definition is reused.</summary>
+    internal static ObjectId EnsureAnchorBlock(Database db, Transaction tr, string name)
     {
         var bt = (BlockTable)tr.GetObject(db.BlockTableId, OpenMode.ForRead);
-        if (bt.Has(Names.TableAnchorBlock)) return bt[Names.TableAnchorBlock];
+        if (bt.Has(name)) return bt[name];
         bt.UpgradeOpen();
-        var def = new BlockTableRecord { Name = Names.TableAnchorBlock, Origin = Point3d.Origin };
+        var def = new BlockTableRecord { Name = name, Origin = Point3d.Origin };
         var defId = bt.Add(def);
         tr.AddNewlyCreatedDBObject(def, true);
         double a = Template.AnchorMarkSize;

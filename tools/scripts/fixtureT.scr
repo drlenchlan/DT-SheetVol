@@ -1,0 +1,26 @@
+(command "_.NETLOAD" (getenv "SHEETVOL_DLL"))
+(progn (vl-load-com) (setq svdir (strcat (getenv "TEMP") "/sheetvol")) (vl-mkdir svdir) (setq svdwg (strcat svdir "/fixtureT.dwg")) (if (findfile svdwg) (vl-file-delete svdwg)) (command "_.SAVEAS" "2018" svdwg))
+SVFIXTURE
+A
+SVFIXTURE
+S
+SVFIXTURE
+T
+SVFIXTURE
+T
+SVDEFINE
+R1
+S
+Done
+SVANALYSIS
+R1
+Add
+EGFGA
+EG
+FG_A
+1
+1
+SVREGEN
+SVSTATUS
+_.QUIT
+_Y

@@ -4,7 +4,9 @@
 //                    drive it: A, B, D, H, S, C, K, SP, TEMPLATE, ALL (all of those),
 //                    VOLUMES (an FX-VOL volume surface per fixture pair present, with
 //                    raw totals and the analytic expectation), TEMPLATEDWG <path>
-//                    (writes a one-layout template drawing and rereads it).
+//                    (writes a one-layout template drawing and rereads it), T (every
+//                    layer, style and block the effective settings name, so a regen
+//                    completes; not part of ALL).
 // SVFIXTUREREPORT    read-only listing of every surface (TIN counts, volume totals),
 //                    alignment (stations, entities, geometry points, a PointLocation
 //                    offset sample for P7) and paper layout (viewports, table anchors).
@@ -35,7 +37,7 @@ public static class FixtureCommands
         var ed = doc.Editor;
         void Say(string s) => ed.WriteMessage("\n" + s);
 
-        var pr = ed.GetString(new PromptStringOptions("\nFixture [A/B/D/H/S/C/K/SP/TEMPLATE/ALL/VOLUMES/TEMPLATEDWG]: ") { AllowSpaces = false });
+        var pr = ed.GetString(new PromptStringOptions("\nFixture [A/B/D/H/S/C/K/SP/TEMPLATE/ALL/VOLUMES/TEMPLATEDWG/T]: ") { AllowSpaces = false });
         if (pr.Status != PromptStatus.OK || string.IsNullOrWhiteSpace(pr.StringResult))
         {
             Say($"{FixtureCodes.BadInput} SVFIXTURE: no fixture name given.");
@@ -219,8 +221,23 @@ public static class FixtureCommands
                 }
                 return lines;
             }
+            case "T":
+            {
+                var load = SheetVol.Civil3D.Session.SettingsProvider.Current;
+                if (load.Settings is not { } settings)
+                    throw new FixtureException(FixtureCodes.BadInput,
+                        $"the settings at {load.Source} are not usable, so the names they hold are unknown: {string.Join(" | ", load.Problems.Select(p => $"{p.Code} {p.Message}"))}");
+                var t = Fixtures.CreateSettingsNames(db, settings, load.Source);
+                var lines = new List<string> { $"T: names from settings: {t.SettingsSource}" };
+                foreach (var n in t.Names)
+                    lines.Add(n.Status == FixtureSettingsNames.NotSet
+                        ? $"T: {n.Status,-7} {n.Kind} [{string.Join(", ", n.Keys)}] is null; nothing to create"
+                        : $"T: {n.Status,-7} {n.Kind} '{n.Name}' [{string.Join(", ", n.Keys)}]");
+                lines.Add($"T: {t.Names.Count(n => n.Status == FixtureSettingsNames.Created)} created, {t.Names.Count(n => n.Status == FixtureSettingsNames.Present)} present, {t.Names.Count(n => n.Status == FixtureSettingsNames.NotSet)} not set");
+                return lines;
+            }
             default:
-                throw new FixtureException(FixtureCodes.BadInput, $"unknown fixture '{name}'. Use A, B, D, H, S, C, K, SP, TEMPLATE, ALL, VOLUMES or TEMPLATEDWG.");
+                throw new FixtureException(FixtureCodes.BadInput, $"unknown fixture '{name}'. Use A, B, D, H, S, C, K, SP, TEMPLATE, ALL, VOLUMES, TEMPLATEDWG or T.");
         }
     }
 
