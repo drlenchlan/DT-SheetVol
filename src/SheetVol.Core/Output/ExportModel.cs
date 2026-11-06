@@ -55,8 +55,10 @@ public sealed record ExportInterval(double From, double To);
 
 /// <summary>
 /// Impact quantities below OHWM for one segment and material (6.15). Raw fields are drawing
-/// units; the others are in the run's units. Cut volume and average take the cut factor when
-/// <see cref="HcfcdConfig.ImpactVolumesUseCutFactor"/> is on; the QA fields are unit-converted only.
+/// units; the others are in the run's units. Cut volume and average (CSV and JSON
+/// <c>impact_cut_volume</c>, <c>impact_average</c>) are the in-place (bank), UNFACTORED cut
+/// when <see cref="HcfcdConfig.ImpactVolumesUseCutFactor"/> is off, the default (D7); they take
+/// the cut factor only when it is on. The QA fields are unit-converted only.
 /// </summary>
 /// <param name="Material">Material (analysis) name.</param>
 /// <param name="ImpactedLengthRaw">Drawing length units.</param>
@@ -64,7 +66,7 @@ public sealed record ExportInterval(double From, double To);
 /// <param name="ImpactedAreaRaw">Square drawing units.</param>
 /// <param name="ImpactedArea">In the run's area unit, unrounded.</param>
 /// <param name="CutVolumeRaw">Cubic drawing units, unadjusted.</param>
-/// <param name="CutVolume">Run volume unit.</param>
+/// <param name="CutVolume">Run volume unit; unfactored unless <see cref="HcfcdConfig.ImpactVolumesUseCutFactor"/> is on.</param>
 /// <param name="Average">Cut volume ÷ impacted length from unrounded values (E1019); null when the length is 0.</param>
 /// <param name="Intervals">Raw station intervals with cut below OHWM (E1005, E1006).</param>
 /// <param name="CutAboveOhwmRaw">QA: cut where existing ground is above OHWM, cubic drawing units (E1003).</param>

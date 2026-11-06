@@ -162,6 +162,23 @@ public class LayoutNameTests
     }
 
     [Fact]
+    public void D20_E603_names_the_layout_holding_the_clean_name_and_points_at_SVPURGE()
+    {
+        // An orphan "r - 2" keeps its name; the new sheet requesting "R - 2" gets the suffix.
+        var plan = Namer.PlanRenames([new OwnedLayout(A, null, "R - 2")], ["Layout1", "r - 2"]);
+
+        Assert.Equal("R - 2 (2)", plan.Assignments[0].Final);
+        Problem p = Assert.Single(plan.Problems);
+        Assert.Equal("SV-E603", p.Code);
+        Assert.Equal("Layout 'R - 2' is named 'R - 2 (2)': the name is taken by layout 'r - 2', which keeps it, so a number was added. If 'r - 2' is an orphan, SVPURGE removes orphans.", p.Message);
+        Assert.EndsWith("SVPURGE removes orphans.", p.Message);
+
+        // Two sheets of the same run colliding: no layout outside the run holds the name, no SVPURGE pointer.
+        var inRun = Namer.PlanRenames([new OwnedLayout(A, null, "S"), new OwnedLayout(B, null, "S")], []);
+        Assert.DoesNotContain("SVPURGE", Assert.Single(inRun.Problems).Message);
+    }
+
+    [Fact]
     public void Owned_names_must_be_unique_and_not_foreign()
     {
         Assert.Throws<ArgumentException>(() => Namer.PlanRenames([new OwnedLayout(A, "X", "X"), new OwnedLayout(B, "x", "Y")], []));

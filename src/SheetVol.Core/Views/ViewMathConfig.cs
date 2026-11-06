@@ -37,12 +37,14 @@ public sealed record ViewMathConfig
     public int MaxLengthSearchIterations { get; init; } = 200;
 
     /// <summary>
-    /// True: the <see cref="ClipMode.Boundary"/> clip is the display polygon (the boundary
-    /// extended by <see cref="ViewOptions.ViewOverlap"/>), so the overlap stays visible.
-    /// False: the clip is the segment boundary alone. The fit test always uses the display
-    /// polygon, which contains the boundary, so either clip fits the viewport (E607).
+    /// False (the default, D1): the <see cref="ClipMode.Boundary"/> clip is the segment
+    /// boundary only, so what the viewport shows is what was counted.
+    /// <see cref="ViewOptions.ViewOverlap"/> still enlarges the fitted view; the overlap is
+    /// visible with <see cref="ClipMode.None"/>. True: the clip is the display polygon (the
+    /// boundary extended by the overlap). The fit test always uses the display polygon,
+    /// which contains the boundary, so either clip fits the viewport (E607).
     /// </summary>
-    public bool ClipIncludesOverlap { get; init; } = true;
+    public bool ClipIncludesOverlap { get; init; } = false;
 
     /// <summary>Invariant-culture .NET format string for numbers printed in problem messages.</summary>
     public string MessageNumberFormat { get; init; } = "0.00";

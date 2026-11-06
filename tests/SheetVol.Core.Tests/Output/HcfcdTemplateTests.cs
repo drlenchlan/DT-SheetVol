@@ -182,16 +182,18 @@ public class HcfcdTemplateTests
     }
 
     [Fact]
-    public void Cut_factor_applies_to_the_impact_volume_when_configured()
+    public void D7_impact_volume_is_unfactored_by_default_and_takes_the_cut_factor_only_when_configured()
     {
-        var on = Created(Sediment);
-        Apply(on, Shipped().Bind(Ro(on), Seg, [T25(factor: 1.25)], AreaUnit.Acres, F, Cfg).Changes);
-        Assert.Equal("1,204", on[8][1]);       // 962.963 × 1.25
-
-        var cfgOff = Cfg with { Hcfcd = new HcfcdConfig { ImpactVolumesUseCutFactor = false } };
+        // D7: rows 6-9 and the average report the in-place (bank) cut; the factor is opt-in.
+        Assert.False(Cfg.Hcfcd.ImpactVolumesUseCutFactor);
         var off = Created(Sediment);
-        Apply(off, Shipped().Bind(Ro(off), Seg, [T25(factor: 1.25)], AreaUnit.Acres, OutputTestKit.Formatter(cfgOff), cfgOff).Changes);
-        Assert.Equal("963", off[8][1]);
+        Apply(off, Shipped().Bind(Ro(off), Seg, [T25(factor: 1.25)], AreaUnit.Acres, F, Cfg).Changes);
+        Assert.Equal(["SEDIMENT", "963", "1.93"], off[8]);       // 962.963 CY, 962.963 / 500
+
+        var cfgOn = Cfg with { Hcfcd = new HcfcdConfig { ImpactVolumesUseCutFactor = true } };
+        var on = Created(Sediment);
+        Apply(on, Shipped().Bind(Ro(on), Seg, [T25(factor: 1.25)], AreaUnit.Acres, OutputTestKit.Formatter(cfgOn), cfgOn).Changes);
+        Assert.Equal(["SEDIMENT", "1,204", "2.41"], on[8]);      // 962.963 × 1.25, ÷ 500
     }
 
     [Fact]

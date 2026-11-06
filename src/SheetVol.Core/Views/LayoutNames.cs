@@ -205,7 +205,7 @@ public sealed class LayoutNamer
         {
             OwnedLayout o = owned[i];
             LayoutNameAssignment a = assignments[i];
-            if (a.Changed) problems.Add(NameProblem(o.SegmentId, a));
+            if (a.Changed) problems.Add(NameProblem(o.SegmentId, a, foreign));
 
             if (o.CurrentName is null) { creates.Add(new LayoutCreate(o.SegmentId, a.Final)); continue; }
             if (string.Equals(o.CurrentName, a.Final, StringComparison.Ordinal)) continue;
@@ -265,14 +265,24 @@ public sealed class LayoutNamer
         return sb.ToString();
     }
 
-    private Problem NameProblem(Guid segmentId, LayoutNameAssignment a)
+    // D20: orphan layouts keep their names, so when the clean name is held by a layout outside
+    // the run (an orphan among them) the message names that layout and points at SVPURGE.
+    private Problem NameProblem(Guid segmentId, LayoutNameAssignment a, HashSet<string> foreign)
     {
         var reasons = new List<string>();
         if (a.Sanitized) reasons.Add("characters AutoCAD rejects or surrounding spaces were replaced or removed");
         if (a.Truncated) reasons.Add($"cut to {_config.MaxLayoutNameLength} characters");
-        if (a.Deduplicated) reasons.Add("the name was taken, so a number was added");
+        string? holder = null;
+        if (a.Deduplicated)
+        {
+            if (foreign.TryGetValue(Sanitize(a.Requested).Name, out string? held)) holder = held;
+            reasons.Add(holder is null
+                ? "the name was taken, so a number was added"
+                : $"the name is taken by layout '{holder}', which keeps it, so a number was added");
+        }
+        string tail = holder is null ? "" : $" If '{holder}' is an orphan, SVPURGE removes orphans.";
         return new Problem(ViewProblemCodes.LayoutNameChanged, Severity.Info,
-            $"Layout '{a.Requested}' is named '{a.Final}': {string.Join("; ", reasons)}.", segmentId);
+            $"Layout '{a.Requested}' is named '{a.Final}': {string.Join("; ", reasons)}.{tail}", segmentId);
     }
 
     private string Deduplicate(string baseName, HashSet<string> taken)
