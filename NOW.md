@@ -5,7 +5,7 @@ what is true; HANDOFF.md wins on method. Every figure is MEASURED unless marked 
 
 ## Position
 
-**G0 and G1 passed 2026-11-05 (evidence under Gates). Contract revision 2 is merged on main (stop condition 12.6 applies from here). Wave 2 in progress since 2026-11-05: A1, A2, A3, S3 dispatched from main in worktrees `C:/LAN-DT-build/sheetvol-wt/<wp>`; A4, U2 and a revision-2 follow-up (Planner reads per-segment offsets; fingerprints cover Draw and offset overrides) dispatched from main after the merge.**
+**G0 and G1 passed 2026-11-05 (evidence under Gates). Contract revision 2 is merged on main (stop condition 12.6 applies from here). Wave 2 (A1, A2, A3, A4, S3, U2, rev2b) and the integration pass are merged; G2 headless half passed 2026-11-05, Dan's SVDIALOG half open. 2026-11-06: Dan's first SVDIALOG attempt returned "Unknown command" because S3's `Probe/ProbeUiCommands.cs` carried an assembly-level `CommandClass` in SheetVol.UI (AutoCAD then registers only that class); the U2 merge gate checked only U2's own diff for the attribute. Fixed on main (merge e9aa8d3), verified headless. Next: Wave 3 (L2, U1 can start; L1 waits on Dan's view-frame fixtures).**
 
 ## Corrections to HANDOFF.md (Dan or measurement overrides the plan)
 
@@ -156,6 +156,7 @@ Filled as workers return. Status: TODO / IN PROGRESS / GREEN / MANUAL-OK / BLOCK
 | 2026-11-05 | wp/u2 (U2 dialog) | 43215c9 | build 0 errors (gated); off-screen smoke outside AutoCAD 28/28 per U2, renders kept in docs/ui/smoke/ and read by the orchestrator against 6.14; diff confined to UI/Dialog and UI/Host; no assembly-level CommandClass in SheetVol.UI |
 | 2026-11-05 | wp/a4 (A4 commands + pipeline) | 453ae3a | build 0 errors (gated); selftest.scr re-run by orchestrator in the a4 worktree and on main after the merge: 37 passed, 0 failed on fake bindings; diff confined to Commands/, Session/, SelfTest/SelfTest*.cs, selftest*.scr |
 | 2026-11-05 | wp/int (integration) | dab7245 | build 0 errors (gated); selftest-installed 74/0/3, selftest 45/0, selftest-commands clean, probeA and probeB clean, all re-run by the orchestrator on the final commit; Core 586/586 |
+| 2026-11-06 | wp/fix-ui-cmdclass (orchestrator, 2 files) | 4fc2bb3 | build 0 errors (gated); Core 586/586 on main; headless script NETLOADed engine + UI DLL then typed SVDIALOG and SVPROBEUI: both accepted (no "Unknown command"; SVPROBEUI then crashed Core Console opening WPF, expected and out of scope); `grep -r "assembly: CommandClass" src/SheetVol.UI` now matches comments only |
 
 ## Decisions pending Dan (raised by workers, not yet ruled)
 
