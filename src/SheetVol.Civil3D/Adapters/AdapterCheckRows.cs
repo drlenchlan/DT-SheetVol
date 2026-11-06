@@ -89,6 +89,18 @@ public static partial class AdapterCheckCommands
             Check("E411 two spellings of one pair share a surface and report its factors", o.Succeeded && o.Value[0].Owned.Id == o.Value[1].Owned.Id
                 && o.Value[0].Owned.CutFactor == o.Value[1].Owned.CutFactor && Has(o.Problems, VolumeCodes.SharedPairFactorMismatch, Severity.Warning),
                 o.Succeeded ? $"both on '{o.Value[0].Owned.Name}', both report cut factor {R(o.Value[0].Owned.CutFactor)}" : Codes(o.Problems));
+            // Rev 3 (X6): a volume-surface analysis carries its surface's pair in BaseSurface /
+            // ComparisonSurface for display only; it plans no owned surface and never joins a pair group.
+            var fromVolume = new AnalysisDef(Guid.NewGuid(), "D from a volume surface", N.EG, N.FgD, 1.3, 0.8,
+                VolumeSurface: SelfTest.FixtureSurfaces.VolumeName(N.EG, N.FgD));
+            var vp = OwnedVolumeSurfaces.Plan([d, fromVolume], VolCfg);
+            var vAlone = OwnedVolumeSurfaces.Plan([fromVolume], VolCfg);
+            Check("E411 a volume-surface analysis plans no owned surface beside a pair analysis on the same pair",
+                vp.Succeeded && vp.Value.Count == 1 && vp.Value[0].AnalysisIds.SequenceEqual([d.Id]) && vAlone.Succeeded && vAlone.Value.Count == 0
+                && !Has(vp.Problems, VolumeCodes.SharedPairFactorMismatch, Severity.Warning),
+                vp.Succeeded && vAlone.Succeeded
+                    ? $"with pair '{d.Name}': {vp.Value.Count} owned surface(s) ({string.Join(", ", vp.Value.Select(p => $"{p.Name} for {p.AnalysisIds.Count} analysis"))}); alone: {vAlone.Value.Count}"
+                    : Codes(vp.Problems.Concat(vAlone.Problems)));
             var reset = Ensure(tr, [d])[0];
             Say($"  factors reset to {R(reset.Owned.CutFactor)}/{R(reset.Owned.FillFactor)}");
             tr.Commit();
