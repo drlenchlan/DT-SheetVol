@@ -456,14 +456,6 @@ public static class FixtureSpec
         // = 21.5 ft2; volume 10,750 ft3 = 398.148 CY, average 0.80 CY/ft. [0: 95 was below the EG_H bed]
         public const double T27OhwmAreaFt2 = 23.0 * 500.0, T27OhwmVolumeFt3 = 21.5 * 500.0;
 
-        // Not the rev 3 T25/T26 expectations above: hand-built impacts SVWRITERSMODEL's HCFCD phase feeds
-        // its writers (WritersModel/Check/WritersModelCheckHcfcd.cs, owner A2), whose table strings
-        // ("0.37", "963 | 1.93", "907 | 1.81", "907 | 1.89") are bound to these pre-rev-3 numbers. The
-        // writers never compute them, so they are inputs, not results. Retire them when that check
-        // carries its own literals (follow-up for A2; this package does not own that file).
-        public const double T25AreaFt2 = HCutWidth * 500.0, T25VolumeFt3 = HCutSectionFt2 * 500.0;
-        public const double T26AreaFt2 = 26.0 * 500.0, T26VolumeFt3 = 49.0 * 500.0;
-
         // T27.E1001, the zeros case in rev 3 form: OHWM_95 on [1500, 2000], past the transition, where
         // FG_H = EG_H >= 96 > 95, so d <= -1 everywhere: length 0, area 0, volume 0, average N/A, SV-E1001.
 
