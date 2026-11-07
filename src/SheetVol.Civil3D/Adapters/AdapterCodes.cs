@@ -56,7 +56,7 @@ public static class AdapterCodes
     /// <summary>Warning. A source was matched by name while its stored handle is gone or points elsewhere: it was re-referenced (E803).</summary>
     public const string SourceHandleChanged = "SV-E803";
 
-    /// <summary>Warning. Triangles were read from a data-shortcut reference or corridor surface, which probe P23 could not verify headless (E1021, stop condition 12.9 open).</summary>
+    /// <summary>Warning. Triangles were read from a data-shortcut reference or corridor surface, which probe P23 could not verify headless (E1021, stop condition 12.9 open). Rev 3: Error when a user volume surface's own TIN cannot be read on this host (api-findings §E).</summary>
     public const string TriangleAccessUnverified = "SV-E1021";
 
     /// <summary>Error. The Civil 3D drawing unit is neither Feet nor Meters, or the Civil document is missing. Same code as C2's <see cref="VolumeCodes.InvalidDrawingUnits"/>.</summary>
@@ -65,11 +65,23 @@ public static class AdapterCodes
     /// <summary>A step of the SVADAPTERS headless check failed at its boundary.</summary>
     public const string CheckStepFailed = "SV-E195";
 
-    /// <summary>Error. An analysis names a user TIN volume surface as its source (rev 3, E423). Refused until the rev3-adapters package resolves such sources.</summary>
-    public const string VolumeSurfaceSource = "SV-E423";
+    /// <summary>
+    /// Error (rev 3, E422). Analysis source is a user volume surface that is no longer a
+    /// <c>TinVolumeSurface</c>, or whose base or comparison was erased: fail the run naming the
+    /// surface and the missing source before any read; never compute on it (S4: the erased source
+    /// is silent, the object opens as a plain <c>TinSurface</c> next command). Guarded on every regen
+    /// and on every dialog listing (<see cref="VolumeSurfaceInfo.SourcesIntact"/>). Also raised when
+    /// the named surface is SheetVol's own (tagged) volume surface, which is never a user source.
+    /// </summary>
+    public const string VolumeSurfaceLost = "SV-E422";
 
-    /// <summary>Rev 3 adoption: the single Error raised for any analysis with <see cref="AnalysisDef.VolumeSurface"/> set. The rev3-adapters package replaces it.</summary>
-    public static Problem VolumeSurfaceNotYet()
-        => new(VolumeSurfaceSource, Severity.Error, "Volume-surface sources arrive with rev3-adapters.",
-               Fix: "Use a base and comparison surface pair for this analysis.");
+    /// <summary>
+    /// Info (rev 3, E423). User volume surface source with its own outer boundary, or with factors
+    /// other than 1.0: bounded volumes and the integrator honour the boundary alike (both read the
+    /// surface's TIN); the surface's factors govern and the analysis's stored factors are ignored;
+    /// the export names the source kind and surface. E404 applies to it: rebuilt when
+    /// <c>RebuildSources</c> is on, else fail naming it (D21); its factors, pair and boundary are
+    /// never written.
+    /// </summary>
+    public const string VolumeSurfaceSource = "SV-E423";
 }

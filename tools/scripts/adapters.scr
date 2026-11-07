@@ -1,5 +1,24 @@
 (command "_.NETLOAD" (getenv "SHEETVOL_DLL"))
+(progn (vl-load-com) (setq svdir (strcat (getenv "TEMP") "/sheetvol")) (vl-mkdir svdir) (setq svdwg (strcat svdir "/adapters-" (vl-filename-base (getenv "SHEETVOL_REPO")) ".dwg")) (if (findfile svdwg) (vl-file-delete svdwg)) (command "_.SAVEAS" "2018" svdwg))
 SVADAPTERS
+SVDEFINE
+R3CMD
+S
+Done
+SVANALYSIS
+R3CMD
+Volume
+VS1
+SV-A1-USERVOL
+SVANALYSIS
+R3CMD
+Factors
+VS1
+SVANALYSIS
+R3CMD
+List
 SVADAPTERS_E404
+SVADAPTERS_VS
+SVADAPTERS_VS_ERASED
 _.QUIT
 _Y

@@ -44,6 +44,21 @@ internal static class AdapterCheckSettings
     public const double HideMidOrdinate = 0.1;
     public const int ScaleGridSide = 708;                            // P23's 1 M-triangle grid
     public const double ScaleGridSpacing = 2.0;
+
+    // Rev 3 (rev3-adapters): user volume surface sources, rows E404, E422, E423, E1012; api-findings §E.
+    public const string SignBase = "SV-A1-SIGN-BASE";                 // E1: flat 100 over one square
+    public const string SignComparison = "SV-A1-SIGN-CMP";           // E1: flat 98 over the same square
+    public const string SignVolume = "SV-A1-SIGN-VOL";
+    public const double SignX0 = 30000, SignY0 = 30000, SignSide = 10;
+    public const double SignBaseZ = 100, SignComparisonZ = 98;
+    public const string UserVolume = "SV-A1-USERVOL";                 // EG vs FG_A, made by the user (untagged)
+    public const string UserVolumeOuter = "SV-A1-USERVOL-OUTER";      // the same with a user outer boundary (S4 D6)
+    public const double UserCutFactor = 1.25, UserFillFactor = 0.9;
+    public static readonly (double X0, double Y0, double X1, double Y1) UserOuter = (-150, -250, 800, 250);   // S4 D6: holds P1, P2; excludes P3, P4, P5
+    public const double UserOuterMidOrdinate = 0.1;
+    public const string T2Breaks = "0, 5+00, 13+00, 18+00, 20+00";
+    public static readonly (double X, double Y) P3Apex = (1125, 0);  // S4 D4: FG_A apex lowered for the E404 rows
+    public const double P3ApexEditedZ = 98;
 }
 
 /// <summary>SVADAPTERS: builds FX's fixtures in the open drawing and checks every adapter against them.</summary>
@@ -88,6 +103,11 @@ public static partial class AdapterCheckCommands
         Step("E404", StepOutOfDate);
         Step("polygon rule", StepPolygonRule);
         Step("triangle scale", StepTriangleScale);
+        Step("E1 volume TIN sign", StepVolumeTinSign);
+        Step("E423 E1012 volume-surface source through the pipeline", StepVolumeSurfacePipeline);
+        Step("E423 user outer boundary", StepVolumeSurfaceOuter);
+        Step("E422 SheetVol-owned surface", StepVolumeSurfaceOwnedRejected);
+        Step("E404 volume surface setup", StepVolumeSurfaceStaleSetup);   // last: edits FG_A; SVADAPTERS_VS reads the flag
 
         Say($"SVADAPTERS summary: {_pass} PASS, {_fail} FAIL, {_stepFailures} step(s) failed ({sw.Elapsed.TotalSeconds:0.0} s)");
         Say("===== SVADAPTERS end =====");

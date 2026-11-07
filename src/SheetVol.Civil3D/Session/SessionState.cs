@@ -88,7 +88,7 @@ public static class DrawingRead
         using var docLock = doc.LockDocument();
         var db = doc.Database;
         using var tr = db.TransactionManager.StartTransaction();
-        var sources = engine.Bindings.Adapters.Open(db, tr, engine.Settings);
+        var sources = AdapterPorts.Open(engine.Bindings.Adapters, db, tr, engine.Settings);
         var store = engine.Bindings.Writers.Store(db, tr, engine.Settings);
         var result = read(sources, store);
         tr.Commit();
@@ -101,7 +101,7 @@ public static class DrawingRead
         using var docLock = doc.LockDocument();
         var db = doc.Database;
         using var tr = db.TransactionManager.StartTransaction();
-        var sources = engine.Bindings.Adapters.Open(db, tr, engine.Settings);
+        var sources = AdapterPorts.Open(engine.Bindings.Adapters, db, tr, engine.Settings);
         var store = engine.Bindings.Writers.Store(db, tr, engine.Settings);
         var result = write(sources, store, tr);
         tr.Commit();
@@ -133,12 +133,17 @@ public static class RunStatusReader
         if (!alignment.Succeeded) return new RunStatusReport(runName, true, record, true, [Fingerprints.AlignmentComponent], [.. problems, .. alignment.Problems]);
 
         var states = new List<AnalysisSurfaceState>();
-        var owned = OwnedVolumeSurfaces.Plan(record.Run.Analyses, settings.Report.Volumes);
+        var owned = OwnedVolumeSurfaces.Plan(record.Run.Analyses.Where(a => a.VolumeSurface is null).ToList(), settings.Report.Volumes);
         if (owned.Succeeded)
             foreach (var plan in owned.Value)
                 foreach (var id in plan.AnalysisIds)
                     if (sources.ReadVolumeSurfaceState(id, plan, record.SourceHandleOf(SourceKinds.VolumeSurface, plan.Name)) is { } st)
                         states.Add(st);
+        // Rev 3 (D4): a volume-surface source as it stands, read only (no rebuild); missing or failing
+        // the E422 guard means no state, which compares stale.
+        foreach (var a in record.Run.Analyses.Where(a => a.VolumeSurface is not null))
+            if (sources.VolumeSurfaces?.ReadState(a.Id, a.VolumeSurface!, record.SourceHandleOf(SourceKinds.UserVolumeSurface, a.VolumeSurface!)) is { } st)
+                states.Add(st);
 
         var manual = new Dictionary<Guid, IReadOnlyList<PolyVertex>>();
         foreach (var m in record.Run.ManualSegments)

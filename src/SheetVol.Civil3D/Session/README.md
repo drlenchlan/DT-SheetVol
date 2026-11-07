@@ -14,4 +14,4 @@ Owner: A4 (HANDOFF.md section 10). Database side of ISheetVolSession, the regen 
 
 ## Rev 3
 
-- `PipelineCodes.OhwmMissing` and the HCFCD no-OHWM refusal removed; step 1 refuses a `VolumeSurface` analysis with SV-E423 until rev3-adapters; `SheetVolSession.VolumeSurfaces` is empty.
+- `PipelineCodes.OhwmMissing` and the HCFCD no-OHWM refusal removed. rev3-adapters: the volume-surface port (`IVolumeSurfaceSources`, `VolumeSurfaceSource`, default `IAdapterFactory.OpenVolumeSurfaces` = `VolumeSurfaceSources.cs`, reached as `IDrawingSources.VolumeSurfaces` on sources opened by `AdapterPorts.Open`); the pipeline resolves each volume-surface analysis at step 1, creates no owned surface for it, reads bounded volumes from it, integrates its depth TIN against the zero plane, and reconciles the effective `AnalysisDef` (surface's pair, factors and name in `VolumeSurface`, the member Output reads for the source kind); the D4 state per such analysis in the fingerprint and in `RunStatusReader`; `SheetVolSession.VolumeSurfaces` lists the drawing's user volume surfaces; source kind `SourceKinds.UserVolumeSurface`.

@@ -143,8 +143,13 @@ public sealed class SheetVolSession : ISheetVolSession, IDisposable
     public IReadOnlyList<string> TinSurfaceNames => Read(src => src.TinSurfaceNames(), []);
 
     /// <inheritdoc />
-    /// <remarks>Rev 3 adoption: always empty; the rev3-adapters package lists the drawing's user TIN volume surfaces.</remarks>
-    public IReadOnlyList<VolumeSurfaceInfo> VolumeSurfaces => [];
+    /// <remarks>
+    /// Rev 3: read on every call (nothing cached), so the dialog's re-read on SourcesChanged sees the
+    /// drawing as it is; a surface edit or erase raises SourcesChanged at the command boundary like
+    /// any surface. SheetVol-owned surfaces are never listed; a surface whose base or comparison is
+    /// erased is listed with SourcesIntact false (E422).
+    /// </remarks>
+    public IReadOnlyList<VolumeSurfaceInfo> VolumeSurfaces => Read<IReadOnlyList<VolumeSurfaceInfo>>(src => src.VolumeSurfaces?.List() ?? [], []);
 
     /// <inheritdoc />
     public DrawingInfo? ActiveDrawing
