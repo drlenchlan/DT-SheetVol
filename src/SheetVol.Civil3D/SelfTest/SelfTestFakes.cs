@@ -225,6 +225,10 @@ public sealed class FakeAdapterFactory(FakeWorld world) : IAdapterFactory
     /// <inheritdoc />
     public IDrawingSources Open(Database db, Transaction tr, SheetVolSettings settings) => new Sources(world, new TransactionLifetime(tr));
 
+    /// <inheritdoc />
+    /// <remarks>A1's reader on the real drawing; the fake world has no volume-surface analyses, so a fake run never resolves one.</remarks>
+    public IVolumeSurfaceSources OpenVolumeSurfaces(Database db, Transaction tr, SheetVolSettings settings) => new VolumeSurfaceSources(db, tr, settings);
+
     private sealed class Sources(FakeWorld w, TransactionLifetime anchor) : IDrawingSources
     {
         public Outcome<DrawingUnits> Units() => Outcome<DrawingUnits>.Ok(w.Units);
@@ -661,6 +665,9 @@ public sealed class BiasedVolumesFactory(IAdapterFactory inner, double cutBias) 
     /// <inheritdoc />
     public IDrawingSources Open(Database db, Transaction tr, SheetVolSettings settings) => new Biased(inner.Open(db, tr, settings), cutBias);
 
+    /// <inheritdoc />
+    public IVolumeSurfaceSources OpenVolumeSurfaces(Database db, Transaction tr, SheetVolSettings settings) => inner.OpenVolumeSurfaces(db, tr, settings);
+
     private sealed class Biased(IDrawingSources s, double bias) : IDrawingSources
     {
         public Outcome<DrawingUnits> Units() => s.Units();
@@ -691,6 +698,9 @@ public sealed class OutOfDateSurfaceFactory(IAdapterFactory inner, string surfac
 {
     /// <inheritdoc />
     public IDrawingSources Open(Database db, Transaction tr, SheetVolSettings settings) => new Stale(inner.Open(db, tr, settings), surfaceName);
+
+    /// <inheritdoc />
+    public IVolumeSurfaceSources OpenVolumeSurfaces(Database db, Transaction tr, SheetVolSettings settings) => inner.OpenVolumeSurfaces(db, tr, settings);
 
     private sealed class Stale(IDrawingSources s, string name) : IDrawingSources
     {

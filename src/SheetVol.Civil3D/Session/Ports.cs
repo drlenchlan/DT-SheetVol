@@ -51,13 +51,12 @@ public interface IAdapterFactory
 
     /// <summary>
     /// Rev 3 (X6): the drawing's user TIN volume surfaces as analysis sources, inside
-    /// <paramref name="tr"/>. The default is A1's reader (<see cref="VolumeSurfaceSources"/>) on the
-    /// real drawing, so factories written before rev 3 (Integration, the self-test fakes) get it
-    /// without a change; a fake world has no volume-surface analyses, so the fakes never resolve one.
-    /// Callers reach it through <see cref="IDrawingSources.VolumeSurfaces"/> on the sources
-    /// <see cref="AdapterPorts.Open"/> returns.
+    /// <paramref name="tr"/>. The installed factory (Integration) and the self-test fakes return A1's
+    /// reader (<see cref="VolumeSurfaceSources"/>) on the real drawing; a fake world has no
+    /// volume-surface analyses, so the fakes never resolve one. Callers reach it through
+    /// <see cref="IDrawingSources.VolumeSurfaces"/> on the sources <see cref="AdapterPorts.Open"/> returns.
     /// </summary>
-    IVolumeSurfaceSources OpenVolumeSurfaces(Database db, Transaction tr, SheetVolSettings settings) => new VolumeSurfaceSources(db, tr, settings);
+    IVolumeSurfaceSources OpenVolumeSurfaces(Database db, Transaction tr, SheetVolSettings settings);
 }
 
 /// <summary>Opens a factory's sources with the rev 3 volume-surface port attached (<see cref="IDrawingSources.VolumeSurfaces"/>).</summary>

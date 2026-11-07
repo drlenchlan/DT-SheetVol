@@ -25,6 +25,9 @@ public sealed class CivilAdapterFactory : IAdapterFactory
 {
     /// <inheritdoc />
     public IDrawingSources Open(Database db, Transaction tr, SheetVolSettings settings) => new CivilSources(db, tr, settings);
+
+    /// <inheritdoc />
+    public IVolumeSurfaceSources OpenVolumeSurfaces(Database db, Transaction tr, SheetVolSettings settings) => new VolumeSurfaceSources(db, tr, settings);
 }
 
 /// <summary>One transaction's view of the drawing through A1.</summary>

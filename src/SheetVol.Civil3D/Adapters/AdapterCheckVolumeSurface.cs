@@ -139,7 +139,7 @@ public static partial class AdapterCheckCommands
         DirectIntegrator(VolumeRun("R3-VS", UserId, S.UserVolume), "E1012 direct");
     }
 
-    /// <summary>Per-segment E1012 evidence outside the pipeline, through the same port (depth TIN + zero plane vs GetBoundedVolumes), and the D4 state the status reader would compute.</summary>
+    /// <summary>Per-segment E1012 evidence outside the pipeline, through the same port (depth TIN through the integrator's depth overload vs GetBoundedVolumes), and the D4 state the status reader would compute.</summary>
     private static void DirectIntegrator(RunDefinition run, string tag)
     {
         var settings = Engine(true).Settings;
@@ -157,7 +157,7 @@ public static partial class AdapterCheckCommands
         foreach (var seg in plan.Segments.OrderBy(x => x.StartStation))
         {
             var tess = plan.Boundaries.Single(b => b.SegmentId == seg.Id).Tessellated;
-            var band = OverlayIntegrator.IntegrateBand(src.Depth, ZeroPlaneTriangles.Instance, tess, seg.Id);
+            var band = OverlayIntegrator.IntegrateBand(src.Depth, tess, seg.Id);
             var bounded = src.Volumes.Bounded(tess);
             if (band.Totals is not { } t)
             {
