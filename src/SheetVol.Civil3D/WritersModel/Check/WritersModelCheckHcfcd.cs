@@ -1,5 +1,6 @@
 // A2 headless check, phase B: bulges preserved, and the HcfcdSegment preset with hand-built
-// impact results (T25 then T26 values): T31, E1015, E1016, E1017, E1018, no band outline (D13).
+// impact results (rev 3 T25 then T26 values, OHWM_100 then OHWM_97): T31, E1015, E1016, E1017, E1018,
+// no band outline (D13).
 
 using Autodesk.AutoCAD.DatabaseServices;
 using SheetVol.Civil3D.SelfTest;
@@ -54,7 +55,8 @@ public static partial class WritersModelCheck
 
     // Rev 3: these impacts carry intervals but no rings, so no outline is drawn here (D13: the band outline is
     // gone, not kept as a fallback); the ring cases are the outline phase (WritersModelCheckOutline.cs). The
-    // hand-built values below are the pre-rev-3 T25/T26 numbers. rev 3: expected values re-derived by rev3-integrator.
+    // hand-built values below are the rev 3 T25 (OHWM_100) and T26 (OHWM_97) numbers from FixtureSpec.Expected;
+    // the writers format them, never compute them.
     private static ImpactResult Impact(Guid seg, string material, double length, double area, double volumeFt3, params (double, double)[] intervals)
         => new(seg, material, length, area, volumeFt3, intervals, [], false);
 
@@ -86,17 +88,16 @@ public static partial class WritersModelCheck
 
     private static void HcfcdPhase()
     {
-        Say("----- phase B: HcfcdSegment preset, segments 0-500 and 500-1000, two materials, hand-built impacts (T25 values, then T26) -----");
+        Say("----- phase B: HcfcdSegment preset, segments 0-500 and 500-1000, two materials, hand-built impacts (rev 3 T25 values, then T26) -----");
         Guid h1 = G(2, 1), h2 = G(2, 2);
         Hc.Segments = [new SegmentDef(h1, "1", 0, 500, -100, 100), new SegmentDef(h2, "2", 500, 1000, -100, 100)];
         AnalysisDef sediment = new(G(2, 101), "SEDIMENT", FixtureSpec.Names.EgH, FixtureSpec.Names.FgH), rock = new(G(2, 102), "ROCK", FixtureSpec.Names.EgH, FixtureSpec.Names.FgH);
         Hc.Analyses = [sediment, rock];
         foreach (var s in Hc.Segments)
         {
-            // T25 (OHWM 100): length 500, area 16,000 ft2 = 0.37 ac, volume 26,000 ft3 = 962.963 CY, average 1.93.
-            // rev 3: expected values re-derived by rev3-integrator (hand-built values; the writers do not compute them).
-            Hc.Impacts[(s.Id, sediment.Id)] = Impact(s.Id, sediment.Name, 500, FixtureSpec.Expected.T25AreaFt2, FixtureSpec.Expected.T25VolumeFt3, (s.StartStation, s.EndStation));
-            Hc.Impacts[(s.Id, rock.Id)] = Impact(s.Id, rock.Name, 500, FixtureSpec.Expected.T25AreaFt2, 13500, (s.StartStation, s.EndStation));
+            // T25 (OHWM_100): length 500, area 22,000 ft2 = 0.51 ac, volume 90,000 ft3 = 3,333.333 CY, average 6.67.
+            Hc.Impacts[(s.Id, sediment.Id)] = Impact(s.Id, sediment.Name, 500, FixtureSpec.Expected.T25OhwmAreaFt2, FixtureSpec.Expected.T25OhwmVolumeFt3, (s.StartStation, s.EndStation));
+            Hc.Impacts[(s.Id, rock.Id)] = Impact(s.Id, rock.Name, 500, FixtureSpec.Expected.T25OhwmAreaFt2, 13500, (s.StartStation, s.EndStation));
         }
 
         // ---- Create: E1018 one material row per analysis.
@@ -109,7 +110,7 @@ public static partial class WritersModelCheck
             string len = RowText(t1, FindRow(t1, "TOTAL IMPACTED LENGTH")), area = RowText(t1, FindRow(t1, "TOTAL IMPACTED AREA")), sed = RowText(t1, FindRow(t1, "SEDIMENT"));
             Check("E1018", c1.Result.Succeeded && t1.Rows.Count == templateRows + 2 && FindRow(t1, "SEDIMENT") == FindRow(t1, "TOTAL CUT MATERIAL") + 1 && FindRow(t1, "ROCK") == FindRow(t1, "TOTAL CUT MATERIAL") + 2,
                 $"created {c1.Kinds}; table 1 has {t1.Rows.Count} rows = {templateRows} template rows + 1 row each for SEDIMENT and ROCK under TOTAL CUT MATERIAL");
-            Check("T25", len.EndsWith("| 500 | LF", StringComparison.Ordinal) && area.EndsWith("| 0.37 | AC", StringComparison.Ordinal) && sed == "SEDIMENT | 963 | 1.93",
+            Check("T25", len.EndsWith("| 500 | LF", StringComparison.Ordinal) && area.EndsWith("| 0.51 | AC", StringComparison.Ordinal) && sed == "SEDIMENT | 3,333 | 6.67",
                 $"bound rows: '{len}' ; '{area}' ; '{sed}'");
             int drawn = c1.Result.Changes.Count(c => c.Key.Role == OwnedRole.ImpactOutline);
             Check("D13-noband", drawn == 0 && Hc.Impacts.Values.All(i => i.Intervals.Count > 0 && i.Outlines.Count == 0),
@@ -131,11 +132,11 @@ public static partial class WritersModelCheck
         });
         foreach (var s in Hc.Segments)
         {
-            // T26 (OHWM 97): area 13,000 ft2 = 0.30 ac, volume 24,500 ft3 = 907.407 CY, average 1.81. Segment 1 now cuts in two stretches.
-            // rev 3: expected values re-derived by rev3-integrator (hand-built values; the writers do not compute them).
+            // T26 (OHWM_97): length 500, area 14,500 ft2 = 0.33 ac, volume 36,750 ft3 = 1,361.111 CY, average 2.72.
+            // Segment 1 is given two stretches (480 LF, average 1,361.111 / 480 = 2.84) so its rebind differs from segment 2's.
             var iv = s.Id == h1 ? new[] { (0.0, 300.0), (320.0, 500.0) } : new[] { (s.StartStation, s.EndStation) };
-            Hc.Impacts[(s.Id, sediment.Id)] = Impact(s.Id, sediment.Name, s.Id == h1 ? 480 : 500, FixtureSpec.Expected.T26AreaFt2, FixtureSpec.Expected.T26VolumeFt3, iv);
-            Hc.Impacts[(s.Id, rock.Id)] = Impact(s.Id, rock.Name, s.Id == h1 ? 480 : 500, FixtureSpec.Expected.T26AreaFt2, 12000, iv);
+            Hc.Impacts[(s.Id, sediment.Id)] = Impact(s.Id, sediment.Name, s.Id == h1 ? 480 : 500, FixtureSpec.Expected.T26OhwmAreaFt2, FixtureSpec.Expected.T26OhwmVolumeFt3, iv);
+            Hc.Impacts[(s.Id, rock.Id)] = Impact(s.Id, rock.Name, s.Id == h1 ? 480 : 500, FixtureSpec.Expected.T26OhwmAreaFt2, 12000, iv);
         }
         var c3 = RegenHc();
         using (var tr = _db.TransactionManager.StartTransaction())
@@ -147,9 +148,11 @@ public static partial class WritersModelCheck
             bool typedKept = TableRenderer.Plain(t1, FindRow(t1, "CENTER COORDINATES"), 1) == typed;
             bool deletionKept = FindRow(t1, "WETLANDS") < 0 && t1.Rows.Count == templateRows + 2 - 1;
             bool handles = c3.Handles[HKey(h1)] == c1.Handles[HKey(h1)] && c3.Handles[HKey(h2)] == c1.Handles[HKey(h2)];
-            Check("T31", typedKept && deletionKept && handles && sed2 == "SEDIMENT | 907 | 1.81" && area2.EndsWith("| 0.30 | AC", StringComparison.Ordinal) && len2.EndsWith("| 500 | LF", StringComparison.Ordinal),
+            var w = (Length: FixtureSpec.Expected.T31Length, Area: FixtureSpec.Expected.T31AreaAc, Volume: FixtureSpec.Expected.T31Volume, Average: FixtureSpec.Expected.T31Average);
+            Check("T31", typedKept && deletionKept && handles && sed2 == $"SEDIMENT | {w.Volume} | {w.Average}"
+                         && area2.EndsWith($"| {w.Area} | AC", StringComparison.Ordinal) && len2.EndsWith($"| {w.Length} | LF", StringComparison.Ordinal),
                 $"typed text kept={typedKept}; WETLANDS deletion kept={deletionKept} ({t1.Rows.Count} rows); table handles unchanged={handles}; table 2 rows 6, 7, 9 (T26): '{len2}' ; '{area2}' ; '{sed2}'");
-            Check("E1016", typedKept && deletionKept && RowText(t1, FindRow(t1, "SEDIMENT")) == "SEDIMENT | 907 | 1.89"
+            Check("E1016", typedKept && deletionKept && RowText(t1, FindRow(t1, "SEDIMENT")) == "SEDIMENT | 1,361 | 2.84"
                            && RowText(t1, FindRow(t1, "TOTAL IMPACTED LENGTH")).EndsWith("| 480 | LF", StringComparison.Ordinal),
                 $"table 1 after rebind: typed cell and removed row preserved; its SEDIMENT row (shifted up one) reads '{RowText(t1, FindRow(t1, "SEDIMENT"))}'");
             int drawn3 = c3.Result.Changes.Count(c => c.Key.Role == OwnedRole.ImpactOutline);
@@ -172,7 +175,7 @@ public static partial class WritersModelCheck
             var t2 = Open<Table>(tr, c4.Handles[HKey(h2)]);
             string len = RowText(t2, FindRow(t2, "TOTAL IMPACTED LENGTH")), area = RowText(t2, FindRow(t2, "AREA (USER EDIT)")), sed = RowText(t2, FindRow(t2, "SEDIMENT"));
             var p = c4.Result.Problems.Where(x => x.Code == OutputCodes.BoundLabelMissing && x.SegmentId == h2).ToList();
-            Check("E1015", p.Count == 1 && len.EndsWith("| 450 | LF", StringComparison.Ordinal) && sed == "SEDIMENT | 1,000 | 2.22" && area.EndsWith("| 0.30 | AC", StringComparison.Ordinal),
+            Check("E1015", p.Count == 1 && len.EndsWith("| 450 | LF", StringComparison.Ordinal) && sed == "SEDIMENT | 1,000 | 2.22" && area.EndsWith("| 0.33 | AC", StringComparison.Ordinal),
                 $"'{len}' and '{sed}' updated; renamed row left as '{area}'; reported: {string.Join(" | ", p.Select(x => $"{x.Code} {x.Severity}: {x.Message}"))}");
             tr.Commit();
         }
