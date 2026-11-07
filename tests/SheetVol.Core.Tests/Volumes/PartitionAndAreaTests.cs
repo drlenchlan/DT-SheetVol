@@ -147,6 +147,26 @@ public class OwnedVolumeSurfacesTests
     }
 
     [Fact]
+    public void Volume_surface_analysis_plans_no_owned_surface_and_never_shares_one()
+    {
+        // Rev 3 (X6): the dialog writes the volume surface's pair into BaseSurface / ComparisonSurface
+        // (display only). A pair analysis on the same surfaces keeps its own owned surface alone.
+        var pair = new AnalysisDef(Guid.NewGuid(), "EG vs FG", "EG", "FG");
+        var fromVolume = new AnalysisDef(Guid.NewGuid(), "VOL", "EG", "FG", 1.3, 0.8, VolumeSurface: "USER-VOL");
+
+        var both = OwnedVolumeSurfaces.Plan([pair, fromVolume], new VolumeConfig());
+        Assert.True(both.Succeeded);
+        var only = Assert.Single(both.Value);
+        Assert.Equal([pair.Id], only.AnalysisIds);
+        Assert.Equal((1.0, 1.0), (only.CutFactor, only.FillFactor));
+        Assert.Empty(both.Problems);   // no E411 factor warning: the volume-surface analysis is not in the group
+
+        var alone = OwnedVolumeSurfaces.Plan([fromVolume], new VolumeConfig());
+        Assert.True(alone.Succeeded);
+        Assert.Empty(alone.Value);
+    }
+
+    [Fact]
     public void E411_shared_pair_with_different_factors_warns()
     {
         var a = new AnalysisDef(Guid.NewGuid(), "A", "EG", "FG", 1.25, 0.9);

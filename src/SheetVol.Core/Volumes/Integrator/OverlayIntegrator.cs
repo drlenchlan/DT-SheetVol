@@ -20,14 +20,21 @@
 //  6. Impacted length = union of those intervals clamped to the segment, gaps shorter than
 //     GapTolerance bridged, measured along the alignment (E1005, E1007, E1008).
 // Plus: plan area where the base surface exists inside the boundary (BaseArea), E1001 when no cut
-// is counted, and the lateral search-limit test (E1002): a cut piece from step 5 has an edge on a
-// lateral edge of the boundary.
+// is counted, the lateral search-limit test (E1002): a cut piece from step 5 has an edge on a
+// lateral edge of the boundary, and (rev 3, D13) the impact outline: every step 5 piece's plan
+// polygon goes to OutlineBuilder, whose union by edge cancellation is ImpactResult.Outlines.
+//
+// Depth source (rev 3, contracts ITriangleSource note): for a volume-surface analysis the adapter
+// hands ONE triangle source whose Z is already d = base - comparison. Steps 2 and 3 reduce to
+// clipping those triangles to the boundary; steps 4 to 6 and the outline are shared. The band
+// plan area and BaseArea are then the plan area of the depth triangles inside the boundary.
 //
 // Numerical tolerances (never user-visible thresholds):
 //  - snap = 1e-12 * S (S = boundary extent): a point this close to a clip line is on it, so
 //    coincident TIN edges never produce slivers;
 //  - a piece thinner than snap (2 * area / perimeter) adds its area and volume but no station
-//    interval and no search-limit hit (it can only be a clipping artifact);
+//    interval, no search-limit hit and no outline edges (it can only be a clipping artifact);
+//  - outline edges match within 2 * snap (the search-limit tolerance), see OutlineBuilder;
 //  - plane noise: on the impact path only (step 5 and the search limit), a vertex depth within the
 //    two triangles' evaluation error bound (SurfaceTriangle.Noise, about 1e-12 ft near the origin,
 //    1e-6 ft at state-plane coordinates) is set to exactly 0. Without this, two surfaces that
@@ -60,11 +67,31 @@ public static class OverlayIntegrator
     {
         ArgumentNullException.ThrowIfNull(baseSurface);
         ArgumentNullException.ThrowIfNull(comparisonSurface);
+        return Band(run => run.Load(baseSurface, comparisonSurface), closedBoundary, segmentId);
+    }
+
+    /// <summary>
+    /// Band totals inside a closed boundary from ONE depth triangle source (rev 3, a volume-surface
+    /// analysis): each triangle's Z is already the depth d = base - comparison (d &gt; 0 cut). Plan
+    /// area is the plan area of the depth triangles inside the boundary; cut and fill as for the pair.
+    /// </summary>
+    /// <param name="depth">Depth triangles (the volume surface's TIN, Z normalised to d by the adapter).</param>
+    /// <param name="closedBoundary">Simple polygon, world coordinates, first == last, either orientation, may be concave.</param>
+    /// <param name="segmentId">Carried into every <see cref="Problem"/>.</param>
+    /// <returns>Totals, or null totals with an Error when the boundary is invalid or the source has no triangles in the window.</returns>
+    public static BandResult IntegrateBand(ITriangleSource depth, IReadOnlyList<Pt> closedBoundary, Guid? segmentId = null)
+    {
+        ArgumentNullException.ThrowIfNull(depth);
+        return Band(run => run.LoadDepth(depth), closedBoundary, segmentId);
+    }
+
+    private static BandResult Band(Func<OverlayRun, bool> load, IReadOnlyList<Pt> closedBoundary, Guid? segmentId)
+    {
         var problems = new List<Problem>();
         var poly = BoundaryPolygon.TryCreate(closedBoundary, segmentId, problems);
         if (poly is null) return new BandResult(segmentId, null, problems);
         var run = new OverlayRun(poly, segmentId, problems);
-        if (!run.Load(baseSurface, comparisonSurface)) return new BandResult(segmentId, null, problems);
+        if (!load(run)) return new BandResult(segmentId, null, problems);
         run.Overlay(null);
         var totals = run.Totals();
         run.ReportCoverage(totals);
@@ -90,6 +117,35 @@ public static class OverlayIntegrator
     {
         ArgumentNullException.ThrowIfNull(baseSurface);
         ArgumentNullException.ThrowIfNull(comparisonSurface);
+        return Segment(run => run.Load(baseSurface, comparisonSurface), alignment, segment, closedBoundary, material, settings);
+    }
+
+    /// <summary>
+    /// Band totals plus the HCFCD impact quantities for one station segment from ONE depth triangle
+    /// source (rev 3, a volume-surface analysis): each triangle's Z is already d = base - comparison
+    /// (d &gt; 0 cut). Steps 2 and 3 reduce to clipping those triangles to the boundary; everything
+    /// from step 4 on, the outline included, is the pair path's. <see cref="SegmentImpactResult.BaseArea"/>
+    /// is the plan area of the depth triangles inside the boundary (a volume surface exists only where
+    /// both of its surfaces do, so the base's own extent is not visible through it).
+    /// </summary>
+    /// <param name="depth">Depth triangles (the volume surface's TIN, Z normalised to d by the adapter).</param>
+    /// <param name="alignment">The run's alignment; stations of impacted pieces are measured along it (E1008).</param>
+    /// <param name="segment">Station range (raw, End &gt; Start) and signed offsets (Left &lt; Right) of the segment.</param>
+    /// <param name="closedBoundary">The segment's tessellated boundary, world coordinates, first == last.</param>
+    /// <param name="material">Material label for the result row (the analysis name, 6.16).</param>
+    /// <param name="settings">MinCutDepth and GapTolerance from config (E1007); null = defaults (count everything).</param>
+    public static SegmentImpactResult IntegrateSegment(
+        ITriangleSource depth, IAlignmentGeometry alignment, SegmentDef segment, IReadOnlyList<Pt> closedBoundary,
+        string material, IntegratorSettings? settings = null)
+    {
+        ArgumentNullException.ThrowIfNull(depth);
+        return Segment(run => run.LoadDepth(depth), alignment, segment, closedBoundary, material, settings);
+    }
+
+    private static SegmentImpactResult Segment(Func<OverlayRun, bool> load,
+        IAlignmentGeometry alignment, SegmentDef segment, IReadOnlyList<Pt> closedBoundary,
+        string material, IntegratorSettings? settings)
+    {
         ArgumentNullException.ThrowIfNull(alignment);
         ArgumentNullException.ThrowIfNull(segment);
         ArgumentNullException.ThrowIfNull(material);
@@ -126,13 +182,14 @@ public static class OverlayIntegrator
             Local(alignment.PointAt(segment.StartStation, segment.OffsetRight)));
 
         var run = new OverlayRun(poly, segment.Id, problems);
-        if (!run.Load(baseSurface, comparisonSurface)) return Failed();
+        if (!load(run)) return Failed();
 
         // Station search window: points inside the band project into [Start, End] except near a
         // mitred angle point, where they can sit up to about 4 offsets beyond it.
         double margin = 4.0 * Math.Max(Math.Abs(segment.OffsetLeft), Math.Abs(segment.OffsetRight)) + 1e-6 * poly.Extent;
         var ctx = new ImpactContext(settings.MinCutDepth, locator,
-                                    segment.StartStation - margin, segment.EndStation + margin, lateral);
+                                    segment.StartStation - margin, segment.EndStation + margin, lateral,
+                                    new OutlineBuilder(2.0 * poly.Snap));
         run.Overlay(ctx);
         double baseArea = run.BaseArea();
         bool touches = ctx.TouchesLateral;
@@ -140,7 +197,7 @@ public static class OverlayIntegrator
         var totals = run.Totals();
         var impact = new ImpactResult(segment.Id, material,
             union.TotalLength, ctx.ImpactedArea.Value, ctx.CutVolume.Value, union.Intervals,
-            Array.Empty<IReadOnlyList<Pt>>(),   // rev 3 (D13): outlines are filled by the rev3-integrator package
+            ctx.Outline.Build(poly.OriginX, poly.OriginY),   // rev 3 (D13): union of the step 5 pieces
             touches);
 
         run.ReportCoverage(totals);
@@ -168,20 +225,27 @@ internal sealed class ImpactContext
     public NeumaierSum ImpactedArea, CutVolume;
     public bool TouchesLateral;
     public readonly List<(double From, double To)> Intervals = [];
+    public readonly OutlineBuilder Outline;
 
     public ImpactContext(double minCutDepth, StationLocator locator, double windowFrom, double windowTo,
-                         List<(double Ax, double Ay, double Bx, double By)>? lateral)
+                         List<(double Ax, double Ay, double Bx, double By)>? lateral, OutlineBuilder outline)
     {
         MinCutDepth = minCutDepth; Locator = locator; WindowFrom = windowFrom; WindowTo = windowTo; Lateral = lateral;
+        Outline = outline;
     }
 }
 
-/// <summary>One integration over one boundary: loaded triangles, indexes, scratch buffers, accumulators.</summary>
+/// <summary>
+/// One integration over one boundary: loaded triangles, indexes, scratch buffers, accumulators.
+/// Pair mode (<see cref="Load"/>) overlays base and comparison; depth mode (<see cref="LoadDepth"/>)
+/// holds the depth triangles in the base slot and clips them to the boundary directly.
+/// </summary>
 internal sealed class OverlayRun
 {
     private readonly BoundaryPolygon _poly;
     private readonly Guid? _segmentId;
     private readonly List<Problem> _problems;
+    private bool _depth;
     private SurfaceTriangle[] _base = [], _comp = [];
     private GridIndex _baseGrid = null!, _bndGrid = null!;
     private readonly List<int> _cand = [], _cand2 = [];
@@ -199,9 +263,7 @@ internal sealed class OverlayRun
     /// <summary>Requests both surfaces' triangles for the boundary window only, translates them, builds the indexes.</summary>
     public bool Load(ITriangleSource baseSrc, ITriangleSource compSrc)
     {
-        double pad = 1e-9 * _poly.Extent;
-        var wmin = new Pt(_poly.OriginX - pad, _poly.OriginY - pad);
-        var wmax = new Pt(_poly.OriginX + _poly.MaxX + pad, _poly.OriginY + _poly.MaxY + pad);
+        var (wmin, wmax) = Window();
         bool okB = LoadOne(baseSrc, "base", wmin, wmax, out _base, out int degB);
         bool okC = LoadOne(compSrc, "comparison", wmin, wmax, out _comp, out int degC);
         if (!okB || !okC) return false;
@@ -212,11 +274,35 @@ internal sealed class OverlayRun
         var boxes = new (double, double, double, double)[_base.Length];
         for (int i = 0; i < _base.Length; i++) boxes[i] = (_base[i].Plan.MinX, _base[i].Plan.MinY, _base[i].Plan.MaxX, _base[i].Plan.MaxY);
         _baseGrid = new GridIndex(boxes, 0, 0, _poly.MaxX, _poly.MaxY);
+        BuildBoundaryGrid();
+        return true;
+    }
+
+    /// <summary>Depth mode: requests the depth triangles (Z = d) for the boundary window only, translates them, indexes the boundary.</summary>
+    public bool LoadDepth(ITriangleSource depthSrc)
+    {
+        var (wmin, wmax) = Window();
+        if (!LoadOne(depthSrc, "volume", wmin, wmax, out _base, out int deg)) return false;
+        if (deg > 0)
+            _problems.Add(new Problem(IntegratorCodes.DegenerateTriangles, Severity.Info,
+                $"Ignored {deg} volume surface triangles with no plan area (vertical or sliver).", _segmentId));
+        _depth = true;
+        BuildBoundaryGrid();
+        return true;
+    }
+
+    private (Pt Min, Pt Max) Window()
+    {
+        double pad = 1e-9 * _poly.Extent;
+        return (new Pt(_poly.OriginX - pad, _poly.OriginY - pad), new Pt(_poly.OriginX + _poly.MaxX + pad, _poly.OriginY + _poly.MaxY + pad));
+    }
+
+    private void BuildBoundaryGrid()
+    {
         var tris = _poly.Triangles;
         var tboxes = new (double, double, double, double)[tris.Length];
         for (int i = 0; i < tris.Length; i++) tboxes[i] = (tris[i].MinX, tris[i].MinY, tris[i].MaxX, tris[i].MaxY);
         _bndGrid = new GridIndex(tboxes, 0, 0, _poly.MaxX, _poly.MaxY);
-        return true;
     }
 
     private bool LoadOne(ITriangleSource src, string role, Pt wmin, Pt wmax, out SurfaceTriangle[] tris, out int degenerate)
@@ -262,11 +348,32 @@ internal sealed class OverlayRun
     private static bool Disjoint(in ClipTriangle a, double minX, double minY, double maxX, double maxY, double s)
         => a.MaxX < minX - s || a.MinX > maxX + s || a.MaxY < minY - s || a.MinY > maxY + s;
 
-    /// <summary>Steps 2 to 5: every comparison/base piece inside the boundary.</summary>
+    /// <summary>Steps 2 to 5: every comparison/base piece inside the boundary (depth mode: every depth triangle's part inside it).</summary>
     public void Overlay(ImpactContext? ctx)
     {
         double snap = _poly.Snap;
         var bt = _poly.Triangles;
+        if (_depth)
+        {
+            foreach (ref readonly var d in _base.AsSpan())
+            {
+                var dp = d.Plan;
+                _bndGrid.Query(dp.MinX, dp.MinY, dp.MaxX, dp.MaxY, _cand2);
+                foreach (int ti in _cand2)
+                {
+                    ref readonly var t = ref bt[ti];
+                    if (Disjoint(t, dp.MinX, dp.MinY, dp.MaxX, dp.MaxY, snap)) continue;
+                    _t0[0] = new PieceVertex(dp.X0, dp.Y0);
+                    _t0[1] = new PieceVertex(dp.X1, dp.Y1);
+                    _t0[2] = new PieceVertex(dp.X2, dp.Y2);
+                    var q = t.Clip(_t0.AsSpan(0, 3), _t3, _t4, snap);
+                    if (q.Length < 3) continue;
+                    for (int k = 0; k < q.Length; k++) q[k].D = d.Eval(q[k].X, q[k].Y);
+                    ProcessPiece(q, ctx, d.Noise);
+                }
+            }
+            return;
+        }
         foreach (ref readonly var c in _comp.AsSpan())
         {
             var cp = c.Plan;
@@ -341,7 +448,8 @@ internal sealed class OverlayRun
         if (!(ia > 0)) return;
         ctx.ImpactedArea.Add(ia);
         ctx.CutVolume.Add(iv);
-        if (!(2.0 * ia / PieceMath.Perimeter(imp) > _poly.Snap)) return;   // clipping artifact: no interval
+        if (!(2.0 * ia / PieceMath.Perimeter(imp) > _poly.Snap)) return;   // clipping artifact: no interval, no outline edges
+        ctx.Outline.AddPiece(imp);
 
         double sMin = double.PositiveInfinity, sMax = double.NegativeInfinity;
         foreach (var v in imp)
@@ -384,7 +492,7 @@ internal sealed class OverlayRun
         return Math.Sqrt(ex * ex + ey * ey);
     }
 
-    /// <summary>Plan area inside the boundary where the base surface exists, square drawing units.</summary>
+    /// <summary>Plan area inside the boundary where the base surface exists (depth mode: where the depth triangles exist), square drawing units.</summary>
     public double BaseArea()
     {
         double snap = _poly.Snap;
@@ -416,7 +524,8 @@ internal sealed class OverlayRun
     {
         if (!(totals.PlanArea > 0))
             _problems.Add(new Problem(IntegratorCodes.NoOverlap, Severity.Warning,
-                "The base and comparison surfaces do not overlap inside this boundary: volumes are 0 and coverage is 0%.",
+                _depth ? "The volume surface has no data inside this boundary: volumes are 0 and coverage is 0%."
+                       : "The base and comparison surfaces do not overlap inside this boundary: volumes are 0 and coverage is 0%.",
                 _segmentId, "Check the surfaces and the segment location."));
         else if (totals.Coverage < 1 - 1e-9)
             _problems.Add(new Problem(IntegratorCodes.PartialCoverage, Severity.Warning,

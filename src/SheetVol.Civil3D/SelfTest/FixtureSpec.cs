@@ -26,6 +26,12 @@ public static class FixtureSpec
         public const string EgH = "EG_H";       // Fixture H has its own existing ground
         public const string FgH = "FG_H";
 
+        // Rev 3 (NOW.md X5, rule 6): OHWM is a surface. Fixture H carries flat OHWM surfaces at the
+        // section 8 elevations; the HCFCD analyses (T25 to T31) name one as their base.
+        public const string Ohwm100 = "OHWM_100";
+        public const string Ohwm97 = "OHWM_97";
+        public const string Ohwm95 = "OHWM_95";
+
         public const string AlignmentS = "S";
         public const string AlignmentC = "C";
         public const string AlignmentK = "K";
@@ -220,6 +226,39 @@ public static class FixtureSpec
     public const double HCutMinFt3 = HCutSectionFt2 * (TransitionFromX - ChannelFromX);
     public const double HCutMaxFt3 = HCutSectionFt2 * (TransitionToX - ChannelFromX);
 
+    /// <summary>Rev 3 (NOW.md X5, rule 6): Fixture H's flat OHWM surfaces, each over H's extent plus
+    /// <see cref="OhwmMargin"/> on every side (<see cref="OhwmCorners"/>) at the elevation in its name.
+    /// Built as four 2-point perimeter breaklines: 4 points, hull 4, T = 2(4) - 4 - 2 = 2. Domain note (rule 6): a flat OHWM counts
+    /// the water column above an existing channel bed as cut; an OHWM surface built from existing
+    /// ground limited to the OHWM line would not. The engine is agnostic; this is the fixture's choice.
+    /// MEASURED 2026-11-06 (2026.2.3 Core Console, SVSELFTEST Installed), OHWM_100 vs FG_H on S,
+    /// offsets (-100, +100), owned volume surface SV-OHWM_100-FG_H, GetBoundedVolumes raw cut / fill:
+    /// segment 0-500 90,000 / 414,000; 500-1000 90,000 / 414,000; a one-segment run 0-1000 180,000 /
+    /// 828,000 (the integrator agrees with each to 1.2e-16). The two-segment run's partition band
+    /// [0, 1000] gives fill 680,356.275 (OHWM 4-point over H's extent), 606,461.538 (OHWM on FG_H's
+    /// lines) and 708,942.201 (this 4-point OHWM 20 ft past every band edge), so SV-E430 fails T25,
+    /// T26, T27 and T31 Installed. The OHWM surface is not the cause: the band polygon the partition
+    /// check passes to GetBoundedVolumes is. Open for the planner and adapters owners (C1, A1).</summary>
+    public static readonly (string Name, double Z)[] OhwmSurfaces =
+    {
+        (Names.Ohwm100, 100.0), (Names.Ohwm97, 97.0), (Names.Ohwm95, 95.0),
+    };
+
+    /// <summary>How far the OHWM surfaces reach past every band the T25 to T31 runs use (stations 0 to
+    /// 2000 on S, offsets at most +-100): 20 ft on every side, so no band edge lies on an OHWM border
+    /// (E407 class: Civil 3D's bounded volume on a polygon lying on a surface border).</summary>
+    public const double OhwmMargin = 20.0;
+
+    /// <summary>The OHWM surfaces' perimeter, counter-clockwise from the south-west: x -20 to 2020,
+    /// y -120 to 120.</summary>
+    public static readonly (double X, double Y)[] OhwmCorners =
+    {
+        (ChannelFromX - OhwmMargin, -ChannelHalfWidth - OhwmMargin), (ChannelToX + OhwmMargin, -ChannelHalfWidth - OhwmMargin),
+        (ChannelToX + OhwmMargin, ChannelHalfWidth + OhwmMargin), (ChannelFromX - OhwmMargin, ChannelHalfWidth + OhwmMargin),
+    };
+
+    public const int OhwmPoints = 4, OhwmTriangles = 2;
+
     // ------------------------------------------------------------ Alignments
 
     /// <summary>S: straight (0,0) to (2000,0), station 0 at x = 0, so left is +y.</summary>
@@ -394,25 +433,63 @@ public static class FixtureSpec
         // T24: D on C, [300, 614.159], offsets (-100, +100): same annular sector as T7 = 62,831.85 SF.
         public static readonly double T24AreaFt2 = (C.Delta / 2.0) * (400.0 * 400.0 - 200.0 * 200.0);
 
-        // T25: H, OHWM 100, breaks 0, 500, 1000, offsets (-100, +100). Cut below OHWM over the full
-        // 32 ft width: area 32 x 500 = 16,000 ft2 (0.37 ac), volume 52 x 500 = 26,000 ft3 =
-        // 962.963 CY, average 962.963 / 500 = 1.93 CY/ft.
-        public const double T25AreaFt2 = HCutWidth * 500.0, T25VolumeFt3 = HCutSectionFt2 * 500.0;
+        // Rev 3 (NOW.md X5, rule 6): T25 to T31 run on Fixture H with base = the OHWM surface at the
+        // stated elevation z and comparison = FG_H, so every value below is OHWM minus design,
+        // d = z - FG_H, cut where d > 0. FG_H for x <= 1300: 94 on the bed (|y| <= 10),
+        // 94 + 2(|y| - 10)/3 on 10..16 (98 at 16), then EG_H's 3:1 slope 96 + (|y| - 10)/3 (100 at 22,
+        // 106 at 40), 106 beyond; FG_H = EG_H for x >= 1310. Pre-rev-3 values (EG_H clipped at an OHWM
+        // elevation) are kept in brackets.
 
-        // T26: OHWM 97. EG_H reaches 97 at |y| = 10 + 3 = 13, so the impacted width is 26:
-        // area 13,000 ft2 (0.30 ac). Section: bed 2 x 20 = 40, plus each side y 10..13 with depth
-        // 2 - (|y| - 10)/3: 3 x 2 - 9/6 = 4.5, so 49 ft2; 49 x 500 = 24,500 ft3 = 907.407 CY,
-        // average 1.81 CY/ft.
+        // T25: OHWM_100, breaks 0, 500, 1000, offsets (-100, +100). d = 100 - FG_H > 0 for |y| < 22,
+        // width 44: area 44 x 500 = 22,000 ft2 (0.51 ac). Section: bed 20 x 6 = 120; each side 10..16
+        // (6 + 2)/2 x 6 = 24 and 16..22 2 x 6/2 = 6; 120 + 2 x 30 = 180 ft2. Volume 180 x 500 =
+        // 90,000 ft3 = 3,333.333 CY, average 6.67 CY/ft. [16,000 ft2, 962.963 CY, 1.93]
+        public const double T25OhwmAreaFt2 = 44.0 * 500.0, T25OhwmVolumeFt3 = 180.0 * 500.0;
+
+        // T26: OHWM_97, same segments. d = 97 - FG_H > 0 for |y| < 14.5 (94 + 2(|y| - 10)/3 = 97), width
+        // 29: area 14,500 ft2 (0.33 ac). Section: bed 20 x 3 = 60; each side 10..14.5 3 x 4.5/2 = 6.75;
+        // 73.5 ft2. Volume 36,750 ft3 = 1,361.111 CY, average 2.72 CY/ft. [13,000 ft2, 907.407 CY, 1.81]
+        public const double T26OhwmAreaFt2 = 29.0 * 500.0, T26OhwmVolumeFt3 = 73.5 * 500.0;
+
+        // T27: OHWM_95, same segments. 95 is 1 above the FG_H sediment bed (94): d > 0 for |y| < 11.5
+        // (94 + 2(|y| - 10)/3 = 95), width 23: area 11,500 ft2 (0.26 ac). Section 20 x 1 + 2 x (1 x 1.5/2)
+        // = 21.5 ft2; volume 10,750 ft3 = 398.148 CY, average 0.80 CY/ft. [0: 95 was below the EG_H bed]
+        public const double T27OhwmAreaFt2 = 23.0 * 500.0, T27OhwmVolumeFt3 = 21.5 * 500.0;
+
+        // Not the rev 3 T25/T26 expectations above: hand-built impacts SVWRITERSMODEL's HCFCD phase feeds
+        // its writers (WritersModel/Check/WritersModelCheckHcfcd.cs, owner A2), whose table strings
+        // ("0.37", "963 | 1.93", "907 | 1.81", "907 | 1.89") are bound to these pre-rev-3 numbers. The
+        // writers never compute them, so they are inputs, not results. Retire them when that check
+        // carries its own literals (follow-up for A2; this package does not own that file).
+        public const double T25AreaFt2 = HCutWidth * 500.0, T25VolumeFt3 = HCutSectionFt2 * 500.0;
         public const double T26AreaFt2 = 26.0 * 500.0, T26VolumeFt3 = 49.0 * 500.0;
 
-        // T27: OHWM 95, below the EG_H bed (96): length 0, area 0, volume 0, average N/A.
+        // T27.E1001, the zeros case in rev 3 form: OHWM_95 on [1500, 2000], past the transition, where
+        // FG_H = EG_H >= 96 > 95, so d <= -1 everywhere: length 0, area 0, volume 0, average N/A, SV-E1001.
 
-        // T28: H, OHWM 100, segment [1000, 1500]: impacted from 1000 through the end of the
-        // transition at 1310, so length 310. Volume: 52 x 300 = 15,600 ft3 (577.78 CY) up to
-        // 1300, plus the transition between 0 and 52 x 10 = 520 ft3: at most 16,120 ft3
-        // (597.04 CY).
-        public const double T28Length = TransitionToX - 1000.0;
-        public const double T28VolumeMinFt3 = HCutSectionFt2 * (TransitionFromX - 1000.0);
-        public const double T28VolumeMaxFt3 = HCutSectionFt2 * (TransitionToX - 1000.0);
+        // T28: OHWM_100, segment [1000, 1500]. Past the transition FG_H = EG_H, still below 100 for
+        // |y| < 22, so the cut runs the whole segment: length 500 [310: the cut ended in the transition].
+        // Area: width 44 throughout (the 10..16 transition cells have corner depths 6, 4, 2, 2, all
+        // positive, whatever the diagonal): 22,000 ft2. Volume: x 1000..1300 180 x 300 = 54,000;
+        // x 1310..1500 190 x 128 = 24,320 (bed 20 x 4 = 80, each side 10..22 4 x 12/2 = 24); transition
+        // x 1300..1310: bed cells planar, mean depth 5 x 200 ft2 = 1,000; 16..40 cells planar,
+        // 2 sides x (2 x 6/2) x 10 = 120; 10..16 cells per side 220 with the diagonal through (1300, 10)
+        // ((6 + 4 + 2) and (6 + 2 + 2) over 3, x 30 ft2) or 200 with the other, so 400 to 440. Transition
+        // 1,520 to 1,560; total 79,840 to 79,880 ft3 = 2,957.037 to 2,958.519 CY (C5's triangulation,
+        // the fake world: 79,880). [15,600 to 16,120 ft3]
+        public const double T28Length = 500.0, T28AreaFt2 = 44.0 * 500.0;
+        public const double T28VolumeMinFt3 = 180.0 * 300.0 + 1_520.0 + 128.0 * 190.0;
+        public const double T28VolumeMaxFt3 = 180.0 * 300.0 + 1_560.0 + 128.0 * 190.0;
+
+        // T30: OHWM_100, breaks 0, 500, 1000, offsets (-12, +12). The cut (|y| < 22) reaches both lateral
+        // edges, d = 100 - (94 + 4/3) = 4.667 at |y| = 12: SV-E1002 raised, values still shown. Each
+        // segment: length 500, area 24 x 500 = 12,000 ft2; section bed 120 + 2 x integral_10^12
+        // (6 - 2(|y| - 10)/3) d|y| = 120 + 2 x (12 - 4/3) = 141.333 ft2; volume 70,666.667 ft3 = 2,617.284 CY.
+        public const double T30AreaFt2 = 24.0 * 500.0, T30VolumeFt3 = (120.0 + 2.0 * (12.0 - 4.0 / 3.0)) * 500.0;
+
+        // T31: T25's run (OHWM_100), then its base changed to OHWM_97 and regenerated: rows 6, 7 and 9
+        // show T26's values as the HCFCD table formats them (#,##0 / 0.00 ac / #,##0 then 0.00):
+        // 500, 14,500 / 43,560 = 0.33, 1,361 (36,750 / 27 = 1,361.111), 1,361.111 / 500 = 2.72.
+        public const string T31Length = "500", T31AreaAc = "0.33", T31Volume = "1,361", T31Average = "2.72";
     }
 }

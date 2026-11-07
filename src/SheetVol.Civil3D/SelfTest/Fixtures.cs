@@ -68,8 +68,23 @@ public static class Fixtures
     /// <summary>EG and FG_D: EG raised 1.00.</summary>
     public static SurfaceFixture CreateD(Database db) => InCivil(db, FixtureSurfaces.BuildD);
 
-    /// <summary>EG_H (channel) and FG_H (sediment to x = 1300, transition to 1310).</summary>
+    /// <summary>EG_H (channel) and FG_H (sediment to x = 1300, transition to 1310), plus (rev 3) the flat
+    /// OHWM surfaces OHWM_100, OHWM_97 and OHWM_95 over H's extent plus 20 ft on every side. The returned pair is EG_H/FG_H; the
+    /// OHWM surfaces' count and elevation checks are in <see cref="SurfaceFixture.Checks"/>.</summary>
     public static SurfaceFixture CreateH(Database db) => InCivil(db, FixtureSurfaces.BuildH);
+
+    /// <summary>
+    /// Rev 3: Fixture H's flat OHWM surfaces as C5 triangle lists (two triangles each, the same flat
+    /// rectangle the TIN holds), for the in-memory fake world. Adds or replaces them in
+    /// <paramref name="surfaces"/> by name.
+    /// </summary>
+    public static void AddOhwmSurfaces(IDictionary<string, SheetVol.Core.Volumes.Integrator.Fixtures.TriangleListSource> surfaces)
+    {
+        var (x0, y0) = FixtureSpec.OhwmCorners[0];
+        var (x1, y1) = FixtureSpec.OhwmCorners[2];
+        foreach (var (name, z) in FixtureSpec.OhwmSurfaces)
+            surfaces[name] = SheetVol.Core.Volumes.Integrator.Fixtures.FixtureSurfaces.Flat(name, z, x0, y0, x1, y1);
+    }
 
     /// <summary>Alignment S: straight (0,0)-(2000,0).</summary>
     public static AlignmentFixture CreateAlignmentS(Database db) => InCivil(db, FixtureAlignments.BuildS);

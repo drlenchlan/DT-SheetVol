@@ -103,11 +103,14 @@ internal static class FixtureSurfaces
         return new SurfaceFixture("D", egId, Names.EG, fg.ObjectId, Names.FgD, reused, checks.Passed);
     }
 
+    /// <summary>EG_H and FG_H, plus (rev 3, NOW.md X5 and rule 6) the flat OHWM surfaces of
+    /// <see cref="OhwmSurfaces"/> over H's extent, which the HCFCD analyses name as their base.</summary>
     internal static SurfaceFixture BuildH(Database db, Transaction tr, CivilDocument civ)
     {
         var checks = new FixtureChecks();
         RequireFree(tr, civ, Names.EgH);
         RequireFree(tr, civ, Names.FgH);
+        foreach (var (name, _) in OhwmSurfaces) RequireFree(tr, civ, name);
 
         var eg = NewTin(db, tr, civ, Names.EgH, checks);
         foreach (var y in EgHLines)
@@ -141,6 +144,19 @@ internal static class FixtureSurfaces
         // Past the transition FG_H equals EG_H.
         foreach (var y in new[] { -70.0, -35.0, -13.0, -5.0, 5.0, 13.0, 25.0, 35.0, 70.0 })
             CheckZ(fg, Names.FgH, 1700.0, y, EgHZ(y), checks);
+
+        // Rev 3: the OHWM surfaces, each flat at its elevation over H's extent plus 20 ft on every side
+        // (4 points, 2 triangles), probed in the sediment reach, in the transition and past it, on and
+        // off the channel, and in the margin beyond H.
+        foreach (var (name, z) in OhwmSurfaces)
+        {
+            var ohwm = NewTin(db, tr, civ, name, checks);
+            AddRectangle(ohwm, OhwmCorners, z);
+            ohwm.Rebuild();
+            CheckCounts(ohwm, name, OhwmPoints, OhwmTriangles, checks);
+            foreach (var (x, y) in new[] { (250.0, 0.0), (1000.0, -13.0), (1305.0, 13.0), (1700.0, 70.0), (1999.0, -99.0), (-10.0, 110.0), (2010.0, -115.0) })
+                CheckZ(ohwm, name, x, y, z, checks);
+        }
 
         checks.ThrowIfFailed("Fixture H");
         return new SurfaceFixture("H", eg.ObjectId, Names.EgH, fg.ObjectId, Names.FgH, false, checks.Passed);
@@ -261,12 +277,15 @@ internal static class FixtureSurfaces
     /// (42 triangles instead of 52, FindElevationAtXY "Point Outside Surface" near the long
     /// edges); with this perimeter it is 52 and every probe matches. Consistent with edits being
     /// applied after the breakline definition (ASSUMED mechanism; not probed further).</summary>
-    private static void AddPerimeter(TinSurface s, double z)
+    private static void AddPerimeter(TinSurface s, double z) => AddRectangle(s, EgCorners, z);
+
+    /// <summary>A closed perimeter as 2-point breaklines at elevation <paramref name="z"/> (see <see cref="AddPerimeter"/>).</summary>
+    private static void AddRectangle(TinSurface s, (double X, double Y)[] corners, double z)
     {
-        for (int i = 0; i < EgCorners.Length; i++)
+        for (int i = 0; i < corners.Length; i++)
         {
-            var a = EgCorners[i];
-            var b = EgCorners[(i + 1) % EgCorners.Length];
+            var a = corners[i];
+            var b = corners[(i + 1) % corners.Length];
             AddSegment(s, new Point3d(a.X, a.Y, z), new Point3d(b.X, b.Y, z));
         }
     }

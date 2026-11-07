@@ -22,6 +22,10 @@ public static class OwnedVolumeSurfaces
     /// duplicate ids, a surface compared with itself (E401) and invalid factors (E410).
     /// Analyses sharing a pair with different factors get a warning: the Volumes Dashboard on
     /// the shared surface can agree with only one of them.
+    /// Rev 3 (X6): an analysis whose <see cref="AnalysisDef.VolumeSurface"/> is set reads that user
+    /// surface and owns nothing. Its BaseSurface / ComparisonSurface are the surface's pair, shown for
+    /// display only, so it never joins a group: no owned surface is planned for it, and it never
+    /// shares one with a pair analysis on the same surfaces (E411).
     /// </summary>
     public static Outcome<IReadOnlyList<OwnedSurfacePlan>> Plan(IReadOnlyList<AnalysisDef> analyses, VolumeConfig config)
     {
@@ -31,7 +35,7 @@ public static class OwnedVolumeSurfaces
             return Outcome<IReadOnlyList<OwnedSurfacePlan>>.Fail(problems);
 
         var plans = new List<OwnedSurfacePlan>();
-        foreach (var group in analyses.GroupBy(a => (a.BaseSurface, a.ComparisonSurface)))
+        foreach (var group in analyses.Where(a => a.VolumeSurface is null).GroupBy(a => (a.BaseSurface, a.ComparisonSurface)))
         {
             var first = group.First();
             foreach (var other in group.Skip(1))
