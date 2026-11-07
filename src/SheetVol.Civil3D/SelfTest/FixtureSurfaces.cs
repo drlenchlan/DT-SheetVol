@@ -145,15 +145,16 @@ internal static class FixtureSurfaces
         foreach (var y in new[] { -70.0, -35.0, -13.0, -5.0, 5.0, 13.0, 25.0, 35.0, 70.0 })
             CheckZ(fg, Names.FgH, 1700.0, y, EgHZ(y), checks);
 
-        // Rev 3: the OHWM surfaces, each flat at its elevation over H's extent (4 points, 2 triangles),
-        // probed in the sediment reach, in the transition and past it, on and off the channel.
+        // Rev 3: the OHWM surfaces, each flat at its elevation over H's extent plus 20 ft on every side
+        // (4 points, 2 triangles), probed in the sediment reach, in the transition and past it, on and
+        // off the channel, and in the margin beyond H.
         foreach (var (name, z) in OhwmSurfaces)
         {
             var ohwm = NewTin(db, tr, civ, name, checks);
-            AddRectangle(ohwm, HCorners, z);
+            AddRectangle(ohwm, OhwmCorners, z);
             ohwm.Rebuild();
             CheckCounts(ohwm, name, OhwmPoints, OhwmTriangles, checks);
-            foreach (var (x, y) in new[] { (250.0, 0.0), (1000.0, -13.0), (1305.0, 13.0), (1700.0, 70.0), (1999.0, -99.0) })
+            foreach (var (x, y) in new[] { (250.0, 0.0), (1000.0, -13.0), (1305.0, 13.0), (1700.0, 70.0), (1999.0, -99.0), (-10.0, 110.0), (2010.0, -115.0) })
                 CheckZ(ohwm, name, x, y, z, checks);
         }
 

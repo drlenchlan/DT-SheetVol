@@ -226,27 +226,35 @@ public static class FixtureSpec
     public const double HCutMinFt3 = HCutSectionFt2 * (TransitionFromX - ChannelFromX);
     public const double HCutMaxFt3 = HCutSectionFt2 * (TransitionToX - ChannelFromX);
 
-    /// <summary>Rev 3 (NOW.md X5, rule 6): Fixture H's flat OHWM surfaces, each over H's extent
-    /// (x 0..2000, y -100..100) at the elevation in its name. Built as four 2-point perimeter
-    /// breaklines: 4 points, hull 4, T = 2(4) - 4 - 2 = 2. Domain note (rule 6): a flat OHWM counts
+    /// <summary>Rev 3 (NOW.md X5, rule 6): Fixture H's flat OHWM surfaces, each over H's extent plus
+    /// <see cref="OhwmMargin"/> on every side (<see cref="OhwmCorners"/>) at the elevation in its name.
+    /// Built as four 2-point perimeter breaklines: 4 points, hull 4, T = 2(4) - 4 - 2 = 2. Domain note (rule 6): a flat OHWM counts
     /// the water column above an existing channel bed as cut; an OHWM surface built from existing
     /// ground limited to the OHWM line would not. The engine is agnostic; this is the fixture's choice.
-    /// MEASURED 2026-11-06 (2026.2.3 Core Console, SVSELFTEST Installed): the owned volume surface
-    /// SV-OHWM_100-FG_H gives the analytic fill (414,000 ft3) by GetBoundedVolumes on each 500 ft
-    /// segment of S [0, 1000], offsets (-100, +100), but 680,356.275 instead of 828,000 on the whole
-    /// band, so the partition check fails the run (SV-E430). With the OHWM surfaces triangulated on
-    /// FG_H's lines instead (36 points, 48 triangles) the band gave 606,461.538: the triangulation is
-    /// not the cause. The fill there reaches the band's lateral edges, which lie on the surfaces' outer
-    /// edge (y = +-100); no pre-rev-3 fixture had volume there. Open for the adapters owner (A1).</summary>
+    /// MEASURED 2026-11-06 (2026.2.3 Core Console, SVSELFTEST Installed), OHWM_100 vs FG_H on S,
+    /// offsets (-100, +100), owned volume surface SV-OHWM_100-FG_H, GetBoundedVolumes raw cut / fill:
+    /// segment 0-500 90,000 / 414,000; 500-1000 90,000 / 414,000; a one-segment run 0-1000 180,000 /
+    /// 828,000 (the integrator agrees with each to 1.2e-16). The two-segment run's partition band
+    /// [0, 1000] gives fill 680,356.275 (OHWM 4-point over H's extent), 606,461.538 (OHWM on FG_H's
+    /// lines) and 708,942.201 (this 4-point OHWM 20 ft past every band edge), so SV-E430 fails T25,
+    /// T26, T27 and T31 Installed. The OHWM surface is not the cause: the band polygon the partition
+    /// check passes to GetBoundedVolumes is. Open for the planner and adapters owners (C1, A1).</summary>
     public static readonly (string Name, double Z)[] OhwmSurfaces =
     {
         (Names.Ohwm100, 100.0), (Names.Ohwm97, 97.0), (Names.Ohwm95, 95.0),
     };
 
-    /// <summary>H's extent, counter-clockwise from the south-west: the OHWM surfaces' perimeter.</summary>
-    public static readonly (double X, double Y)[] HCorners =
+    /// <summary>How far the OHWM surfaces reach past every band the T25 to T31 runs use (stations 0 to
+    /// 2000 on S, offsets at most +-100): 20 ft on every side, so no band edge lies on an OHWM border
+    /// (E407 class: Civil 3D's bounded volume on a polygon lying on a surface border).</summary>
+    public const double OhwmMargin = 20.0;
+
+    /// <summary>The OHWM surfaces' perimeter, counter-clockwise from the south-west: x -20 to 2020,
+    /// y -120 to 120.</summary>
+    public static readonly (double X, double Y)[] OhwmCorners =
     {
-        (ChannelFromX, -ChannelHalfWidth), (ChannelToX, -ChannelHalfWidth), (ChannelToX, ChannelHalfWidth), (ChannelFromX, ChannelHalfWidth),
+        (ChannelFromX - OhwmMargin, -ChannelHalfWidth - OhwmMargin), (ChannelToX + OhwmMargin, -ChannelHalfWidth - OhwmMargin),
+        (ChannelToX + OhwmMargin, ChannelHalfWidth + OhwmMargin), (ChannelFromX - OhwmMargin, ChannelHalfWidth + OhwmMargin),
     };
 
     public const int OhwmPoints = 4, OhwmTriangles = 2;
