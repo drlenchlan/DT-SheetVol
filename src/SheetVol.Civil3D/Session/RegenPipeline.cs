@@ -255,7 +255,7 @@ public sealed class RegenEngine
 
             // ---- Step 3: owned volume surfaces, volumes, integrator, reconcile ----------------
             var volumes = new Dictionary<Guid, MemoVolumeSource>();
-            var triangles = new Dictionary<Guid, (ITriangleSource Base, ITriangleSource Comparison)>();
+            var triangles = new Dictionary<Guid, IntegratorInput>();
             var newSources = new List<SourceHandle> { new(SourceKinds.Alignment, run.AlignmentName, alignmentSource.Handle) };
             newSources.AddRange(surfaces.Values.Select(x => new SourceHandle(SourceKinds.Surface, x.Name, x.Handle)));
             newSources.AddRange(userSurfaces.Select(kv => new SourceHandle(SourceKinds.UserVolumeSurface, kv.Key, kv.Value.Handle)));
@@ -279,17 +279,17 @@ public sealed class RegenEngine
                     var memo = new MemoVolumeSource(o.Value.Volumes);
                     foreach (var id in op.AnalysisIds) volumes[id] = memo;
                 }
-                foreach (var a in pairAnalyses) triangles[a.Id] = (surfaces[a.BaseSurface].Triangles, surfaces[a.ComparisonSurface].Triangles);
+                foreach (var a in pairAnalyses) triangles[a.Id] = IntegratorInput.Pair(surfaces[a.BaseSurface].Triangles, surfaces[a.ComparisonSurface].Triangles);
 
                 // Rev 3: no owned surface for a volume-surface analysis. Bounded volumes and Area2D come
-                // from the user's surface; the integrator reads its TIN as depth, with a flat zero plane
-                // as the comparison (rev 3 interim, Adapters/ZeroPlaneTriangles.cs: d = depth - 0).
+                // from the user's surface; the integrator reads its TIN as depth d = base - comparison
+                // through C5's one-source overloads.
                 var userMemos = userSurfaces.ToDictionary(kv => kv.Key, kv => new MemoVolumeSource(kv.Value.Volumes), StringComparer.Ordinal);
                 foreach (var a in run.Analyses.Where(a => a.VolumeSurface is not null))
                 {
                     var us = userSurfaces[a.VolumeSurface!];
                     volumes[a.Id] = userMemos[a.VolumeSurface!];
-                    triangles[a.Id] = (us.Depth, Adapters.ZeroPlaneTriangles.Instance);
+                    triangles[a.Id] = IntegratorInput.Depth(us.Depth);
                 }
 
                 // D4: a volume-surface source adds its name, handle and factors to its totals after the rebuild.
@@ -481,9 +481,23 @@ public sealed class RegenEngine
 
     // ---- Step 3 detail: C5 integrator, cross-check and impacts ------------------------------
 
+    /// <summary>
+    /// What the integrator reads for one analysis: a pair's base and comparison TINs (C5's two-source
+    /// overloads), or a volume surface's own TIN with Z = depth d = base - comparison (rev 3, Comparison
+    /// null: C5's one-source depth overloads).
+    /// </summary>
+    /// <param name="Triangles">The pair's base TIN, or the volume surface's depth TIN when Comparison is null.</param>
+    /// <param name="Comparison">The pair's comparison TIN; null for a volume-surface analysis.</param>
+    private readonly record struct IntegratorInput(ITriangleSource Triangles, ITriangleSource? Comparison)
+    {
+        public static IntegratorInput Pair(ITriangleSource baseSurface, ITriangleSource comparison) => new(baseSurface, comparison);
+
+        public static IntegratorInput Depth(ITriangleSource depth) => new(depth, null);
+    }
+
     private List<Problem> Integrate(
         RunDefinition run, IAlignmentGeometry alignment, List<SegmentDef> stationSegs, List<SegmentDef> manualSegs,
-        Dictionary<Guid, Boundary> boundaries, Dictionary<Guid, (ITriangleSource Base, ITriangleSource Comparison)> triangles, Dictionary<Guid, MemoVolumeSource> volumes,
+        Dictionary<Guid, Boundary> boundaries, Dictionary<Guid, IntegratorInput> triangles, Dictionary<Guid, MemoVolumeSource> volumes,
         Dictionary<Guid, Dictionary<Guid, ImpactResult>> impacts, double upf, CancelProbe probe, ProgressSpan bar, out double? maxRelative)
     {
         var s = _settings;
@@ -497,8 +511,8 @@ public sealed class RegenEngine
 
         foreach (var a in run.Analyses)
         {
-            // A pair: its base and comparison TINs. A volume surface (rev 3): its TIN as depth and the zero plane.
-            var (baseTri, compTri) = triangles[a.Id];
+            // A pair: its base and comparison TINs. A volume surface (rev 3): its TIN as depth alone.
+            var input = triangles[a.Id];
             var bySeg = new Dictionary<Guid, ImpactResult>();
             foreach (var seg in stationSegs.Concat(manualSegs))
             {
@@ -509,14 +523,18 @@ public sealed class RegenEngine
                 IReadOnlyList<Problem> found;
                 if (hcfcd && double.IsFinite(seg.StartStation))
                 {
-                    var r = OverlayIntegrator.IntegrateSegment(baseTri, compTri, alignment, seg, tess, a.Name, settings);
+                    var r = input.Comparison is { } comparison
+                        ? OverlayIntegrator.IntegrateSegment(input.Triangles, comparison, alignment, seg, tess, a.Name, settings)
+                        : OverlayIntegrator.IntegrateSegment(input.Triangles, alignment, seg, tess, a.Name, settings);
                     band = r.Band;
                     found = r.Problems;
                     if (r.Impact is { } impact) bySeg[seg.Id] = impact;
                 }
                 else
                 {
-                    var r = OverlayIntegrator.IntegrateBand(baseTri, compTri, tess, seg.Id);
+                    var r = input.Comparison is { } comparison
+                        ? OverlayIntegrator.IntegrateBand(input.Triangles, comparison, tess, seg.Id)
+                        : OverlayIntegrator.IntegrateBand(input.Triangles, tess, seg.Id);
                     band = r.Totals;
                     found = r.Problems;
                 }
