@@ -110,7 +110,11 @@ public sealed class Planner
         var boundaries = new List<Boundary>();
         var built = BoundaryBuilder.Build(alignment, buildable, g);
         boundaries.AddRange(built.Boundaries);
-        IReadOnlyList<BandPiece> band = built.Band;
+        // Rev 3: drop the straight-through vertex every interior break leaves on a piece's lateral
+        // edges before the partition check measures the piece (BandRing, MEASURED on T25).
+        IReadOnlyList<BandPiece> band = built.Band
+            .Select(p => p with { Tessellated = BandRing.DropStraightVertices(p.Tessellated, tol) })
+            .ToList();
         IReadOnlyList<double> stations = built.Stations;
         foreach (var p in built.Problems) (p.SegmentId is null ? runProblems : segmentProblems).Add(p);
 

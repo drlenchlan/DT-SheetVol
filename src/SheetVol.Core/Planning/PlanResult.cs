@@ -22,6 +22,9 @@ public sealed record ManualOutline(IReadOnlyList<PolyVertex> Vertices, bool Clos
 /// is the union of the segment polygons and these pieces partition it without overlap, so the
 /// partition check compares the sum of the segments with the sum of the pieces and the
 /// outside-limits row subtracts the sum of the pieces (see <see cref="BandPiece"/>).
+/// Each piece's ring has its repeated and straight-through vertices dropped
+/// (<see cref="BandRing.DropStraightVertices"/>, rev 3): a piece over several segments on a
+/// tangent is the same polygon as one segment over the same range.
 /// </param>
 /// <param name="Overlaps">Pairs of overlapping boundaries (E215, E312).</param>
 /// <param name="DroppedSegmentIds">Known segments with no successor; their outputs become orphans.</param>
