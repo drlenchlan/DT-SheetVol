@@ -17,8 +17,15 @@
 //      fail follows it; the export text is prepared before it.
 //   6. Write exports; a file failure is a warning (E506, E507).
 //
+// Rev 3 (X6, D21): an analysis may take a user TIN volume surface as its source. Step 1 resolves
+// and guards it (E422) and rebuilds it under RebuildSources (E404); step 3 creates no owned
+// surface for it, reads bounded volumes and Area2D from it, runs the integrator on its own TIN as
+// depth, and computes on an effective copy of the analysis carrying the surface's pair and
+// factors (rule 1); the stored run is never rewritten.
+//
 // Steps 1-4 write no output. The owned volume surface writes of step 3 (factors, the
-// always-Rebuild of P18) happen in the same transaction as step 5, so any failure before
+// always-Rebuild of P18) and the user volume surface rebuild of step 1 (D21) happen in the same
+// transaction as step 5, so any failure before
 // commit rolls them back with everything else: the drawing is untouched (E801, T20). P20
 // proved layout creation rolls back in an aborted transaction, so there is no two-phase
 // layout fallback. One transaction per run inside one command means one UNDO reverts one
@@ -143,7 +150,7 @@ public sealed class RegenEngine
         RunOutcome? committed = null;   // set at tr.Commit(): from then on nothing may report "nothing changed"
         try
         {
-            var sources = _bindings.Adapters.Open(db, tr, s);
+            var sources = AdapterPorts.Open(_bindings.Adapters, db, tr, s);
             var store = _bindings.Writers.Store(db, tr, s);
             var load = store.Load(requested.Name);
             if (load.Exists && !load.CanModify) return Fail(1, load.Problems);
@@ -153,10 +160,6 @@ public sealed class RegenEngine
                 KnownSegments = prior?.Run.KnownSegments ?? requested.KnownSegments,
                 SchemaVersion = RunPersistence.PluginSchemaVersion,
             };
-            // Rev 3 adoption: AnalysisDef.VolumeSurface is plumbed pair-only; the rev3-adapters package replaces this refusal.
-            if (run.Analyses.Any(a => a.VolumeSurface is not null))
-                return Fail(1, [Adapters.AdapterCodes.VolumeSurfaceNotYet()]);
-
             var unitsOutcome = sources.Units();
             if (!unitsOutcome.Succeeded) return Fail(1, unitsOutcome.Problems);
             var units = unitsOutcome.Value;
@@ -174,9 +177,12 @@ public sealed class RegenEngine
                     $"Alignment '{run.AlignmentName}' now has handle {alignmentSource.Handle} (was {priorAlignmentHandle}); it was matched by name.",
                     Fix: "Nothing to do if the alignment was re-referenced on purpose."));
 
+            // Pair analyses read their base and comparison TINs; a volume-surface analysis (rev 3) reads
+            // only its user volume surface, whose stored pair is display text (AnalysisDef note).
+            var pairAnalyses = run.Analyses.Where(a => a.VolumeSurface is null).ToList();
             var surfaces = new Dictionary<string, SurfaceSource>(StringComparer.Ordinal);
             var surfaceProblems = new List<Problem>();
-            foreach (string name in run.Analyses.SelectMany(a => new[] { a.BaseSurface, a.ComparisonSurface }).Where(n => !string.IsNullOrWhiteSpace(n)).Distinct(StringComparer.Ordinal))
+            foreach (string name in pairAnalyses.SelectMany(a => new[] { a.BaseSurface, a.ComparisonSurface }).Where(n => !string.IsNullOrWhiteSpace(n)).Distinct(StringComparer.Ordinal))
             {
                 string? priorHandle = prior?.SourceHandleOf(SourceKinds.Surface, name);
                 var o = sources.Surface(name, priorHandle, s.Adapters.RebuildSources);
@@ -193,6 +199,34 @@ public sealed class RegenEngine
             }
             if (surfaceProblems.Any(p => p.Severity == Severity.Error)) return Fail(1, surfaceProblems);
             problems.AddRange(surfaceProblems);
+
+            // Rev 3 (X6, D21): user volume surface sources. Each is guarded before any read (E422),
+            // its base and comparison fall under E404, and it is rebuilt under RebuildSources (Info
+            // naming it) or fails E404 naming it; its factors, pair and boundaries are never written.
+            // The pipeline computes on an effective copy of each such analysis (the surface's pair and
+            // factors, rule 1); the stored run is never rewritten.
+            var userSurfaces = new Dictionary<string, VolumeSurfaceSource>(StringComparer.Ordinal);
+            var userProblems = new List<Problem>();
+            foreach (var a in run.Analyses.Where(a => a.VolumeSurface is not null))
+            {
+                string vsName = a.VolumeSurface!;
+                if (userSurfaces.ContainsKey(vsName)) continue;   // analyses naming one surface share it (one rebuild)
+                if (sources.VolumeSurfaces is not { } vsPort)
+                    return Fail(1, [new Problem(PipelineCodes.NotWired, Severity.Error, $"Analysis '{a.Name}' takes volume surface '{vsName}' as its source, and these adapters cannot read volume surfaces.")]);
+                string? priorHandle = prior?.SourceHandleOf(SourceKinds.UserVolumeSurface, vsName);
+                var o = vsPort.Resolve(vsName, priorHandle, s.Adapters.RebuildSources, a);
+                userProblems.AddRange(o.Problems);
+                if (!o.Succeeded) continue;
+                userSurfaces[vsName] = o.Value;
+                if (priorHandle is not null && !string.Equals(priorHandle, o.Value.Handle, StringComparison.OrdinalIgnoreCase)
+                    && !o.Problems.Any(p => p.Code == PipelineCodes.MatchedByName))
+                    userProblems.Add(new Problem(PipelineCodes.MatchedByName, Severity.Warning,
+                        $"Volume surface '{vsName}' now has handle {o.Value.Handle} (was {priorHandle}); it was matched by name."));
+            }
+            if (userProblems.Any(p => p.Severity == Severity.Error)) return Fail(1, userProblems);
+            problems.AddRange(userProblems);
+            var effective = new Dictionary<Guid, AnalysisDef>();
+            foreach (var a in run.Analyses) effective[a.Id] = a.VolumeSurface is { } v ? userSurfaces[v].Effective(a) : a;
 
             var outlines = new Dictionary<Guid, ManualOutline>();
             foreach (var m in run.ManualSegments)
@@ -221,14 +255,16 @@ public sealed class RegenEngine
 
             // ---- Step 3: owned volume surfaces, volumes, integrator, reconcile ----------------
             var volumes = new Dictionary<Guid, MemoVolumeSource>();
+            var triangles = new Dictionary<Guid, (ITriangleSource Base, ITriangleSource Comparison)>();
             var newSources = new List<SourceHandle> { new(SourceKinds.Alignment, run.AlignmentName, alignmentSource.Handle) };
             newSources.AddRange(surfaces.Values.Select(x => new SourceHandle(SourceKinds.Surface, x.Name, x.Handle)));
+            newSources.AddRange(userSurfaces.Select(kv => new SourceHandle(SourceKinds.UserVolumeSurface, kv.Key, kv.Value.Handle)));
             var surfaceStates = new List<AnalysisSurfaceState>();
             if (run.Analyses.Count == 0)
                 problems.Add(new Problem(PipelineCodes.NoAnalyses, Severity.Info, $"Run '{run.Name}' has no analyses: boundaries and views only, no volumes or tables.", Fix: "Add one with SVANALYSIS."));
             else
             {
-                var ownedSurfaces = OwnedVolumeSurfaces.Plan(run.Analyses, s.Report.Volumes);
+                var ownedSurfaces = OwnedVolumeSurfaces.Plan(pairAnalyses, s.Report.Volumes);
                 if (!ownedSurfaces.Succeeded) return Fail(3, ownedSurfaces.Problems);
                 problems.AddRange(ownedSurfaces.Problems);
                 foreach (var op in ownedSurfaces.Value)
@@ -243,7 +279,25 @@ public sealed class RegenEngine
                     var memo = new MemoVolumeSource(o.Value.Volumes);
                     foreach (var id in op.AnalysisIds) volumes[id] = memo;
                 }
-                foreach (var a in run.Analyses) surfaceStates.Add(new AnalysisSurfaceState(a.Id, false, volumes[a.Id].SurfaceTotals));
+                foreach (var a in pairAnalyses) triangles[a.Id] = (surfaces[a.BaseSurface].Triangles, surfaces[a.ComparisonSurface].Triangles);
+
+                // Rev 3: no owned surface for a volume-surface analysis. Bounded volumes and Area2D come
+                // from the user's surface; the integrator reads its TIN as depth, with a flat zero plane
+                // as the comparison (rev 3 interim, Adapters/ZeroPlaneTriangles.cs: d = depth - 0).
+                var userMemos = userSurfaces.ToDictionary(kv => kv.Key, kv => new MemoVolumeSource(kv.Value.Volumes), StringComparer.Ordinal);
+                foreach (var a in run.Analyses.Where(a => a.VolumeSurface is not null))
+                {
+                    var us = userSurfaces[a.VolumeSurface!];
+                    volumes[a.Id] = userMemos[a.VolumeSurface!];
+                    triangles[a.Id] = (us.Depth, Adapters.ZeroPlaneTriangles.Instance);
+                }
+
+                // D4: a volume-surface source adds its name, handle and factors to its totals after the rebuild.
+                foreach (var a in run.Analyses)
+                    surfaceStates.Add(a.VolumeSurface is { } v
+                        ? new AnalysisSurfaceState(a.Id, false, volumes[a.Id].SurfaceTotals,
+                            new VolumeSurfaceSourceState(userSurfaces[v].Name, userSurfaces[v].Handle, userSurfaces[v].CutFactor, userSurfaces[v].FillFactor))
+                        : new AnalysisSurfaceState(a.Id, false, volumes[a.Id].SurfaceTotals));
             }
             bar.At(0.2);
 
@@ -251,7 +305,7 @@ public sealed class RegenEngine
             bool hcfcd = run.Preset == ReportPreset.HcfcdSegment;
             if (run.Analyses.Count > 0 && (s.Integrator.CrossCheck || hcfcd))
             {
-                var checkProblems = Integrate(run, alignment, stationSegs, manualSegs, boundaries, surfaces, volumes, impacts, upf, probe, bar, out crossCheck);
+                var checkProblems = Integrate(run, alignment, stationSegs, manualSegs, boundaries, triangles, volumes, impacts, upf, probe, bar, out crossCheck);
                 problems.AddRange(checkProblems.Where(p => p.Severity != Severity.Error));
                 if (checkProblems.Any(p => p.Severity == Severity.Error)) return Fail(3, checkProblems.Where(p => p.Severity == Severity.Error));
             }
@@ -259,7 +313,9 @@ public sealed class RegenEngine
 
             if (run.Analyses.Count > 0)
             {
-                var inputs = run.Analyses.Select(a => new AnalysisInput(a, volumes[a.Id],
+                // The effective definitions (rule 1): a volume-surface analysis carries its surface's pair,
+                // factors and name, which is what Core applies and what Output reads as the source kind.
+                var inputs = run.Analyses.Select(a => new AnalysisInput(effective[a.Id], volumes[a.Id],
                     impacts.TryGetValue(a.Id, out var bySeg) ? bySeg : null)).ToList();
                 var stationRequest = new ReconcileRequest(stationSegs, stationSegs.Select(x => boundaries[x.Id]).ToList(),
                     plan.Band.Select(b => b.Tessellated).ToList(), inputs, units, plan.PartitionCheckSkipReason);
@@ -427,7 +483,7 @@ public sealed class RegenEngine
 
     private List<Problem> Integrate(
         RunDefinition run, IAlignmentGeometry alignment, List<SegmentDef> stationSegs, List<SegmentDef> manualSegs,
-        Dictionary<Guid, Boundary> boundaries, Dictionary<string, SurfaceSource> surfaces, Dictionary<Guid, MemoVolumeSource> volumes,
+        Dictionary<Guid, Boundary> boundaries, Dictionary<Guid, (ITriangleSource Base, ITriangleSource Comparison)> triangles, Dictionary<Guid, MemoVolumeSource> volumes,
         Dictionary<Guid, Dictionary<Guid, ImpactResult>> impacts, double upf, CancelProbe probe, ProgressSpan bar, out double? maxRelative)
     {
         var s = _settings;
@@ -441,8 +497,8 @@ public sealed class RegenEngine
 
         foreach (var a in run.Analyses)
         {
-            var baseTri = surfaces[a.BaseSurface].Triangles;
-            var compTri = surfaces[a.ComparisonSurface].Triangles;
+            // A pair: its base and comparison TINs. A volume surface (rev 3): its TIN as depth and the zero plane.
+            var (baseTri, compTri) = triangles[a.Id];
             var bySeg = new Dictionary<Guid, ImpactResult>();
             foreach (var seg in stationSegs.Concat(manualSegs))
             {
@@ -478,7 +534,8 @@ public sealed class RegenEngine
                 }
                 if (band is null) continue;
 
-                // 6.15 check: integrator band cut and fill equal GetBoundedVolumes on the owned surface (E1012):
+                // 6.15 check: integrator band cut and fill equal GetBoundedVolumes on the owned surface, or on the
+                // user volume surface whose TIN the integrator read (rev 3) (E1012):
                 // max(absolute, relative x total), total = bounded cut + fill of this polygon. Project data:
                 // max(0.5 ft3, 1e-4 x total); SVSELFTEST on fixtures: 1e-9 relative over the adapters' 1e-6 noise floor.
                 var bounded = volumes[a.Id].Bounded(tess);

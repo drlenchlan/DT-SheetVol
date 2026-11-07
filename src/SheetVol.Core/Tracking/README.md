@@ -4,4 +4,4 @@ Owner: C3 (HANDOFF.md section 10). Fingerprints and the auto-update state machin
 
 ## Rev 3
 
-- Format `SVFP3`: the definition signature drops the ohwm section and hashes each analysis's `VolumeSurface` presence and name; the rest of D4 is rev3-tracking's.
+- Format `SVFP3`: the definition signature drops the ohwm section and hashes each analysis's `VolumeSurface` presence and name; the surfaces component adds, per volume-surface source (`AnalysisSurfaceState.VolumeSurface`, D4), its name, handle and factors after its post-rebuild totals (pair text unchanged, pins unchanged); `KnownSegments` and `AutoMode` stay out.

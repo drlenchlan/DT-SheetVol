@@ -94,8 +94,10 @@ public sealed record AnalysisBinding(AnalysisDef Analysis, OwnedSurface Owned)
 public static class AnalysisResolver
 {
     /// <summary>
-    /// Every analysis of a run bound to its owned volume surface: plans the pairs with C2's
+    /// Every pair analysis of a run bound to its owned volume surface: plans the pairs with C2's
     /// <see cref="OwnedVolumeSurfaces.Plan"/>, resolves each pair, ensures and rebuilds its surface.
+    /// Rev 3: an analysis with <see cref="AnalysisDef.VolumeSurface"/> set owns no surface and gets no
+    /// binding here; <see cref="UserVolumeSurfaces.Resolve"/> resolves it.
     /// </summary>
     /// <param name="tr">The caller's transaction (document locked).</param>
     /// <param name="db">The drawing.</param>
@@ -107,9 +109,7 @@ public static class AnalysisResolver
         IReadOnlyDictionary<Guid, StoredAnalysisRefs>? stored, AdapterConfig cfg, VolumeConfig volumeConfig)
     {
         ArgumentNullException.ThrowIfNull(analyses);
-        // Rev 3 adoption: pair-only; the rev3-adapters package resolves volume-surface sources.
-        if (analyses.Any(a => a.VolumeSurface is not null))
-            return Outcome<IReadOnlyList<AnalysisBinding>>.Fail(AdapterCodes.VolumeSurfaceNotYet());
+        analyses = analyses.Where(a => a.VolumeSurface is null).ToList();
         var cfgProblems = cfg.Validate();
         if (cfgProblems.Count > 0) return Outcome<IReadOnlyList<AnalysisBinding>>.Fail(cfgProblems);
         var plan = OwnedVolumeSurfaces.Plan(analyses, volumeConfig);
@@ -179,9 +179,50 @@ public static class AnalysisResolver
     /// <param name="cfg">Adapter settings (<see cref="AdapterConfig.RebuildSources"/>).</param>
     public static Outcome<ResolvedSource> ResolveSource(Transaction tr, Database db, string name, StoredRef? stored, string who, AdapterConfig cfg)
     {
-        string? storedHandle = stored is not null && string.Equals(stored.Name, name, StringComparison.OrdinalIgnoreCase) ? stored.Handle : null;
         var civ = CivilDocument.GetCivilDocument(db);
         if (civ is null) return Outcome<ResolvedSource>.Fail(new Problem(AdapterCodes.SourceNotFound, Severity.Error, "The drawing has no Civil 3D document."));
+        var found = FindSurface(tr, db, civ, name, stored, who, "Restore the surface or pick another one in SVANALYSIS; nothing was changed.");
+        if (!found.Succeeded) return Outcome<ResolvedSource>.Fail(found.Problems);
+        var notes = found.Problems.ToList();
+        ObjectId chosen = found.Value;
+
+        var obj = tr.GetObject(chosen, OpenMode.ForRead);
+        if (obj is not TinSurface tin)
+        {
+            string what = obj switch
+            {
+                TinVolumeSurface => "a TIN volume surface",
+                GridVolumeSurface => "a grid volume surface",
+                GridSurface => "a grid surface",
+                _ => $"a {obj.GetType().Name}",
+            };
+            return Outcome<ResolvedSource>.Fail(notes.Append(new Problem(AdapterCodes.NotTinSurface, Severity.Error,
+                $"{who} '{SurfaceName(obj)}' is {what}. Base and comparison must be TIN surfaces; SheetVol builds its own volume surface from them.",
+                Fix: "Pick a TIN surface in SVANALYSIS.")));
+        }
+
+        var current = CheckCurrent(tr, civ, tin, chosen, who, cfg);
+        notes.AddRange(current.Problems);
+        if (!current.Succeeded) return Outcome<ResolvedSource>.Fail(notes);
+
+        int triangles = TinTriangles(tin);
+        if (triangles == 0)
+            return Outcome<ResolvedSource>.Fail(notes.Append(new Problem(AdapterCodes.NoTriangles, Severity.Error,
+                $"{who} '{tin.Name}' has no triangles.", Fix: "Add data to the surface or pick another one.")));
+
+        return Outcome<ResolvedSource>.Ok(new ResolvedSource(chosen, tin.Name, tin.Handle.ToString(), current.Value.Origin, triangles, current.Value.Rebuilt), notes);
+    }
+
+    /// <summary>
+    /// Finds one surface by name (exact, then the only case-insensitive match), then by stored
+    /// handle, with the <see cref="StoredRef"/> rule: the handle counts only while it was stored for
+    /// the name asked for. Matched by name while that handle is gone or elsewhere: SV-E803 warning.
+    /// Matched only by handle: SV-E445 warning. Neither: SV-E442 error. Shared by the base and
+    /// comparison sources and (rev 3) by user volume surface sources.
+    /// </summary>
+    internal static Outcome<ObjectId> FindSurface(Transaction tr, Database db, CivilDocument civ, string name, StoredRef? stored, string who, string notFoundFix)
+    {
+        string? storedHandle = stored is not null && string.Equals(stored.Name, name, StringComparison.OrdinalIgnoreCase) ? stored.Handle : null;
         var notes = new List<Problem>();
 
         ObjectId byName = ObjectId.Null;
@@ -217,63 +258,49 @@ public static class AnalysisResolver
         }
         else
         {
-            return Outcome<ResolvedSource>.Fail(notes.Append(new Problem(AdapterCodes.SourceNotFound, Severity.Error,
+            return Outcome<ObjectId>.Fail(notes.Append(new Problem(AdapterCodes.SourceNotFound, Severity.Error,
                 $"{who} '{name}' is not in the drawing" + (hasStored ? $", by name or by stored handle {storedHandle}." : "."),
-                Fix: "Restore the surface or pick another one in SVANALYSIS; nothing was changed.")));
+                Fix: notFoundFix)));
         }
+        return Outcome<ObjectId>.Ok(chosen, notes);
+    }
 
-        var obj = tr.GetObject(chosen, OpenMode.ForRead);
-        if (obj is not TinSurface tin)
-        {
-            string what = obj switch
-            {
-                TinVolumeSurface => "a TIN volume surface",
-                GridVolumeSurface => "a grid volume surface",
-                GridSurface => "a grid surface",
-                _ => $"a {obj.GetType().Name}",
-            };
-            return Outcome<ResolvedSource>.Fail(notes.Append(new Problem(AdapterCodes.NotTinSurface, Severity.Error,
-                $"{who} '{SurfaceName(obj)}' is {what}. Base and comparison must be TIN surfaces; SheetVol builds its own volume surface from them.",
-                Fix: "Pick a TIN surface in SVANALYSIS.")));
-        }
-
+    /// <summary>
+    /// The E404 rule for one TIN source: a stale or out-of-date reference, or an out-of-date corridor
+    /// surface, always fails; an out-of-date native surface is rebuilt when
+    /// <see cref="AdapterConfig.RebuildSources"/> is on (Info naming it), otherwise fails naming it;
+    /// a surface on a locked layer is never rebuilt. Shared by the base and comparison sources and
+    /// (rev 3) by the base and comparison of a user volume surface source.
+    /// </summary>
+    internal static Outcome<(SurfaceOrigin Origin, bool Rebuilt)> CheckCurrent(Transaction tr, CivilDocument civ, TinSurface tin, ObjectId id, string who, AdapterConfig cfg)
+    {
         var origin = tin.IsReferenceObject ? SurfaceOrigin.Reference
-            : CorridorSurfaceIds(tr, civ).Contains(chosen) ? SurfaceOrigin.Corridor : SurfaceOrigin.Native;
-        bool rebuilt = false;
+            : CorridorSurfaceIds(tr, civ).Contains(id) ? SurfaceOrigin.Corridor : SurfaceOrigin.Native;
         if (origin == SurfaceOrigin.Reference && (!tin.IsReferenceValid || tin.IsReferenceStale || tin.IsOutOfDate))
         {
             string state = !tin.IsReferenceValid ? "a broken data-shortcut reference" : tin.IsReferenceStale ? "a stale data-shortcut reference" : "an out-of-date data-shortcut reference";
-            return Outcome<ResolvedSource>.Fail(notes.Append(new Problem(AdapterCodes.SourceOutOfDate, Severity.Error,
+            return Outcome<(SurfaceOrigin, bool)>.Fail(new Problem(AdapterCodes.SourceOutOfDate, Severity.Error,
                 $"{who} '{tin.Name}' is {state}. SheetVol never computes on stale data.",
-                Fix: "Synchronize the reference (or rebuild it in its source drawing), then regenerate.")));
+                Fix: "Synchronize the reference (or rebuild it in its source drawing), then regenerate."));
         }
+        if (!tin.IsOutOfDate) return Outcome<(SurfaceOrigin, bool)>.Ok((origin, false));
+        if (origin == SurfaceOrigin.Corridor)
+            return Outcome<(SurfaceOrigin, bool)>.Fail(new Problem(AdapterCodes.SourceOutOfDate, Severity.Error,
+                $"{who} '{tin.Name}' is a corridor surface that is out of date.", Fix: "Rebuild the corridor, then regenerate."));
+        if (!cfg.RebuildSources)
+            return Outcome<(SurfaceOrigin, bool)>.Fail(new Problem(AdapterCodes.SourceOutOfDate, Severity.Error,
+                $"{who} '{tin.Name}' is out of date and RebuildSources is off.", Fix: "Rebuild the surface, or turn RebuildSources on, then regenerate."));
+        if (tr.GetObject(tin.LayerId, OpenMode.ForRead) is LayerTableRecord { IsLocked: true } locked)
+            return Outcome<(SurfaceOrigin, bool)>.Fail(new Problem(AdapterCodes.SourceOutOfDate, Severity.Error,
+                $"{who} '{tin.Name}' is out of date and sits on locked layer '{locked.Name}'; SheetVol does not rebuild a surface it does not own on a locked layer.",
+                Fix: "Rebuild the surface, or unlock its layer, then regenerate."));
+        tin.UpgradeOpen();
+        tin.Rebuild();
         if (tin.IsOutOfDate)
-        {
-            if (origin == SurfaceOrigin.Corridor)
-                return Outcome<ResolvedSource>.Fail(notes.Append(new Problem(AdapterCodes.SourceOutOfDate, Severity.Error,
-                    $"{who} '{tin.Name}' is a corridor surface that is out of date.", Fix: "Rebuild the corridor, then regenerate.")));
-            if (!cfg.RebuildSources)
-                return Outcome<ResolvedSource>.Fail(notes.Append(new Problem(AdapterCodes.SourceOutOfDate, Severity.Error,
-                    $"{who} '{tin.Name}' is out of date and RebuildSources is off.", Fix: "Rebuild the surface, or turn RebuildSources on, then regenerate.")));
-            if (tr.GetObject(tin.LayerId, OpenMode.ForRead) is LayerTableRecord { IsLocked: true } locked)
-                return Outcome<ResolvedSource>.Fail(notes.Append(new Problem(AdapterCodes.SourceOutOfDate, Severity.Error,
-                    $"{who} '{tin.Name}' is out of date and sits on locked layer '{locked.Name}'; SheetVol does not rebuild a surface it does not own on a locked layer.",
-                    Fix: "Rebuild the surface, or unlock its layer, then regenerate.")));
-            tin.UpgradeOpen();
-            tin.Rebuild();
-            rebuilt = true;
-            if (tin.IsOutOfDate)
-                return Outcome<ResolvedSource>.Fail(notes.Append(new Problem(AdapterCodes.SourceOutOfDate, Severity.Error,
-                    $"{who} '{tin.Name}' is still out of date after a rebuild.", Fix: "Check the surface definition in Prospector.")));
-            notes.Add(new Problem(AdapterCodes.SourceOutOfDate, Severity.Info, $"{who} '{tin.Name}' was out of date and has been rebuilt (RebuildSources on)."));
-        }
-
-        int triangles = TinTriangles(tin);
-        if (triangles == 0)
-            return Outcome<ResolvedSource>.Fail(notes.Append(new Problem(AdapterCodes.NoTriangles, Severity.Error,
-                $"{who} '{tin.Name}' has no triangles.", Fix: "Add data to the surface or pick another one.")));
-
-        return Outcome<ResolvedSource>.Ok(new ResolvedSource(chosen, tin.Name, tin.Handle.ToString(), origin, triangles, rebuilt), notes);
+            return Outcome<(SurfaceOrigin, bool)>.Fail(new Problem(AdapterCodes.SourceOutOfDate, Severity.Error,
+                $"{who} '{tin.Name}' is still out of date after a rebuild.", Fix: "Check the surface definition in Prospector."));
+        return Outcome<(SurfaceOrigin, bool)>.Ok((origin, true),
+            [new Problem(AdapterCodes.SourceOutOfDate, Severity.Info, $"{who} '{tin.Name}' was out of date and has been rebuilt (RebuildSources on).")]);
     }
 
     /// <summary>

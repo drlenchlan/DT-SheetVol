@@ -42,6 +42,7 @@ public sealed record EngineBindings(IAdapterFactory Adapters, IWriterFactory Wri
     private sealed class UnwiredAdapterFactory : IAdapterFactory
     {
         public IDrawingSources Open(Database db, Transaction tr, SheetVolSettings settings) => throw new NotWiredException("The Civil 3D adapters (A1)");
+        public IVolumeSurfaceSources OpenVolumeSurfaces(Database db, Transaction tr, SheetVolSettings settings) => throw new NotWiredException("The Civil 3D adapters (A1)");
     }
 
     private sealed class UnwiredWriterFactory : IWriterFactory

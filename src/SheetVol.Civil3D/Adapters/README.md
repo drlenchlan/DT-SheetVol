@@ -32,4 +32,4 @@ Rollback (MEASURED with `SVADAPTERS_ABORT`, one case per script `tools/scripts/a
 
 ## Rev 3
 
-- `AnalysisResolver.EnsureAnalyses` refuses any analysis with `VolumeSurface` set with the single Error `AdapterCodes.VolumeSurfaceNotYet()` (SV-E423), which rev3-adapters replaces.
+- rev3-adapters: `UserVolumeSurfaces.Resolve` / `List` / `Read` / `OpenVolumes` take a user TIN volume surface as an analysis source (E422 guard before every read, E404 on its pair, rebuilt under `RebuildSources` per D21, never written otherwise); `TriangleSourceAdapter.ReadVolumeDepth` reads its own TIN through a `TinSurface` view with Z × `DepthPerTinZ` (−1, MEASURED: the TIN stores comparison − base, api-findings §E); `ZeroPlaneTriangles` is the rev 3 interim comparison for C5's two-source overloads; `EnsureAnalyses` binds pair analyses only; SV-E422 / SV-E423 in `AdapterCodes`. Checks: `SVADAPTERS` rows E1, E423, E1012, E422, then `SVADAPTERS_VS` and `SVADAPTERS_VS_ERASED` (adapters.scr).

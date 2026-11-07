@@ -48,6 +48,98 @@ public interface IAdapterFactory
 {
     /// <summary>Opens the sources of <paramref name="db"/> inside <paramref name="tr"/>.</summary>
     IDrawingSources Open(Database db, Transaction tr, SheetVolSettings settings);
+
+    /// <summary>
+    /// Rev 3 (X6): the drawing's user TIN volume surfaces as analysis sources, inside
+    /// <paramref name="tr"/>. The default is A1's reader (<see cref="VolumeSurfaceSources"/>) on the
+    /// real drawing, so factories written before rev 3 (Integration, the self-test fakes) get it
+    /// without a change; a fake world has no volume-surface analyses, so the fakes never resolve one.
+    /// Callers reach it through <see cref="IDrawingSources.VolumeSurfaces"/> on the sources
+    /// <see cref="AdapterPorts.Open"/> returns.
+    /// </summary>
+    IVolumeSurfaceSources OpenVolumeSurfaces(Database db, Transaction tr, SheetVolSettings settings) => new VolumeSurfaceSources(db, tr, settings);
+}
+
+/// <summary>Opens a factory's sources with the rev 3 volume-surface port attached (<see cref="IDrawingSources.VolumeSurfaces"/>).</summary>
+public static class AdapterPorts
+{
+    /// <summary>
+    /// <paramref name="factory"/>'s sources; when they do not carry <see cref="IDrawingSources.VolumeSurfaces"/>
+    /// themselves, a pass-through wrapper adds the factory's <see cref="IAdapterFactory.OpenVolumeSurfaces"/>.
+    /// The regen pipeline and <see cref="DrawingRead"/> open every source through here.
+    /// </summary>
+    public static IDrawingSources Open(IAdapterFactory factory, Database db, Transaction tr, SheetVolSettings settings)
+    {
+        var inner = factory.Open(db, tr, settings);
+        return inner.VolumeSurfaces is not null ? inner : new WithVolumeSurfaces(inner, factory.OpenVolumeSurfaces(db, tr, settings));
+    }
+
+    private sealed class WithVolumeSurfaces(IDrawingSources inner, IVolumeSurfaceSources volumeSurfaces) : IDrawingSources
+    {
+        public IVolumeSurfaceSources? VolumeSurfaces => volumeSurfaces;
+        public Outcome<DrawingUnits> Units() => inner.Units();
+        public IReadOnlyList<string> AlignmentNames() => inner.AlignmentNames();
+        public IReadOnlyList<string> TinSurfaceNames() => inner.TinSurfaceNames();
+        public Outcome<AlignmentSource> Alignment(string name, string? storedHandle) => inner.Alignment(name, storedHandle);
+        public Outcome<ManualOutline> ManualOutline(string polylineHandle) => inner.ManualOutline(polylineHandle);
+        public Outcome<SurfaceSource> Surface(string name, string? storedHandle, bool rebuildIfOutOfDate) => inner.Surface(name, storedHandle, rebuildIfOutOfDate);
+        public Outcome<OwnedVolumeSurface> EnsureVolumeSurface(OwnedSurfacePlan plan, string? storedHandle) => inner.EnsureVolumeSurface(plan, storedHandle);
+        public AnalysisSurfaceState? ReadVolumeSurfaceState(Guid analysisId, OwnedSurfacePlan plan, string? storedHandle) => inner.ReadVolumeSurfaceState(analysisId, plan, storedHandle);
+    }
+}
+
+/// <summary>
+/// Rev 3 (X6, D21): user TIN volume surfaces as analysis sources (A1). Lives for one transaction,
+/// like <see cref="IDrawingSources"/>, and so does everything it returns.
+/// </summary>
+public interface IVolumeSurfaceSources
+{
+    /// <summary>The drawing's user TIN volume surfaces, never SheetVol-owned ones; a surface whose base or comparison is erased is listed with SourcesIntact false (E422, E918). Read-only.</summary>
+    IReadOnlyList<VolumeSurfaceInfo> List();
+
+    /// <summary>
+    /// Resolves one analysis's volume surface by name, then by <paramref name="storedHandle"/>
+    /// (E442, E445, E803); guards it before any read (E422: still a TinVolumeSurface, base and
+    /// comparison alive, not SheetVol's own); applies E404 to its base and comparison; rebuilds it
+    /// when <paramref name="rebuildSources"/> is on (Info naming it, D21), else fails E404 naming it
+    /// when it is out of date. Its factors, pair and boundaries are never written. The returned
+    /// volume source is raw (P1-P3, as the owned surface); the depth source is its own TIN with Z
+    /// normalised to base − comparison.
+    /// </summary>
+    /// <param name="name">The volume surface name from the run.</param>
+    /// <param name="storedHandle">Its handle at the last successful regen, or null.</param>
+    /// <param name="rebuildSources">adapters.rebuildSources.</param>
+    /// <param name="analysis">The analysis, for messages; its stored BaseSurface and ComparisonSurface (the pair as last resolved) name a lost source once the surface has turned into a plain TIN.</param>
+    Outcome<VolumeSurfaceSource> Resolve(string name, string? storedHandle, bool rebuildSources, AnalysisDef analysis);
+
+    /// <summary>Read-only state for the status fingerprint (D4): no rebuild, no writes. Null when the surface is missing or fails the guard.</summary>
+    AnalysisSurfaceState? ReadState(Guid analysisId, string name, string? storedHandle);
+}
+
+/// <summary>A user volume surface resolved as an analysis source (rev 3).</summary>
+/// <param name="Name">Its name now (may differ from the run's when matched by handle, E445).</param>
+/// <param name="Handle">Its handle now.</param>
+/// <param name="BaseSurface">Its base surface's name now.</param>
+/// <param name="ComparisonSurface">Its comparison surface's name now.</param>
+/// <param name="CutFactor">Its own cut factor: governs (the analysis's stored factor is ignored).</param>
+/// <param name="FillFactor">Its own fill factor.</param>
+/// <param name="Volumes">Bounded volumes and datum-method 2D area on the surface (raw, P1-P3).</param>
+/// <param name="Depth">The surface's own TIN, Z = depth (base − comparison), visible triangles only (its boundaries honoured).</param>
+/// <param name="Rebuilt">True when it was rebuilt in this transaction (RebuildSources on).</param>
+public sealed record VolumeSurfaceSource(string Name, string Handle, string BaseSurface, string ComparisonSurface,
+    double CutFactor, double FillFactor, IVolumeSource Volumes, ITriangleSource Depth, bool Rebuilt)
+{
+    /// <summary>
+    /// The analysis as the pipeline computes it (rule 1): the surface's pair and factors, and its
+    /// current name in <see cref="AnalysisDef.VolumeSurface"/>. The stored run is never rewritten.
+    /// Output reads the source kind from this definition: <see cref="AnalysisDef.VolumeSurface"/>
+    /// non-null means a volume-surface source, and it names the surface.
+    /// </summary>
+    public AnalysisDef Effective(AnalysisDef stored) => stored with
+    {
+        BaseSurface = BaseSurface, ComparisonSurface = ComparisonSurface,
+        CutFactor = CutFactor, FillFactor = FillFactor, VolumeSurface = Name,
+    };
 }
 
 /// <summary>
@@ -98,6 +190,12 @@ public interface IDrawingSources
 
     /// <summary>Read-only state of an owned volume surface for the status fingerprint (6.11): no rebuild, no writes. Null when it does not exist.</summary>
     AnalysisSurfaceState? ReadVolumeSurfaceState(Guid analysisId, OwnedSurfacePlan plan, string? storedHandle);
+
+    /// <summary>
+    /// Rev 3: the user-volume-surface port for this transaction, or null when these sources do not
+    /// carry it. Sources opened through <see cref="AdapterPorts.Open"/> always carry it.
+    /// </summary>
+    IVolumeSurfaceSources? VolumeSurfaces => null;
 }
 
 /// <summary>A resolved alignment.</summary>
@@ -275,6 +373,9 @@ public static class SourceKinds
 
     /// <summary>An owned volume surface; Name is SV-base-comparison as planned (the stored handle finds a suffixed or renamed one, E412).</summary>
     public const string VolumeSurface = "VolumeSurface";
+
+    /// <summary>Rev 3: a user volume surface that is an analysis's source; Name is the name the run asks for (the stored handle finds it after a rename, E445).</summary>
+    public const string UserVolumeSurface = "UserVolumeSurface";
 }
 
 /// <summary>A layout whose segment no longer exists (E308, E612). Listed by SVSTATUS, deleted only by SVPURGE.</summary>

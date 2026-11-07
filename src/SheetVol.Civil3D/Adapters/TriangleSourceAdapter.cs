@@ -28,6 +28,8 @@ namespace SheetVol.Civil3D.Adapters;
 /// them and attaches an SV-E1021 warning; the integrator's band totals are cross-checked against
 /// <c>GetBoundedVolumes</c> on every regen (E1012), so a wrong read fails the run rather than
 /// reporting a wrong number. Stop condition 12.9 stays open until Dan's drawing shows it.</para>
+/// <para><b>Rev 3.</b> <see cref="ReadVolumeDepth"/> reads a user volume surface's own TIN with Z
+/// as depth (base − comparison), for the integrator on a volume-surface source.</para>
 /// </summary>
 public sealed class TriangleSourceAdapter : ITriangleSource
 {
@@ -154,7 +156,63 @@ public sealed class TriangleSourceAdapter : ITriangleSource
                     if (cs.SurfaceId == surfaceId) origin = SurfaceOrigin.Corridor;
             }
         }
+        return ReadTin(tin, tin.Name, surfaceId, origin, 1.0, cfg, readWindowMin, readWindowMax);
+    }
 
+    /// <summary>
+    /// Rev 3: the integrator's triangle source for a user volume surface analysis, read from the
+    /// volume surface's OWN TIN with Z normalised to depth d = base − comparison (d &gt; 0 is cut;
+    /// contract ITriangleSource note). Civil 3D stores comparison − base on that TIN
+    /// (<see cref="UserVolumeSurfaces.DepthPerTinZ"/>, MEASURED, docs/api-findings.md §E), so every Z
+    /// is multiplied by it here and the integrator never sees the raw sign. Visible triangles only,
+    /// so the user's boundaries on the volume surface clip the integrator exactly as they clip
+    /// <c>GetBoundedVolumes</c> (S4 D6). <c>TinVolumeSurface</c> has no triangle API (P23); the read
+    /// goes through a <c>TinSurface</c> view of the same object (<see cref="UserVolumeSurfaces.TinView"/>).
+    /// SV-E422 when the object is not a TIN volume surface, SV-E403 when it has no visible triangles.
+    /// The caller guards the surface (<see cref="UserVolumeSurfaces.Resolve"/>) before this read.
+    /// </summary>
+    /// <param name="tr">The caller's transaction; nothing is held after the call.</param>
+    /// <param name="volumeSurfaceId">A user <c>TinVolumeSurface</c>.</param>
+    /// <param name="cfg">Adapter settings.</param>
+    /// <param name="readWindowMin">Lower-left of the read window, or null to keep every triangle.</param>
+    /// <param name="readWindowMax">Upper-right of the read window, or null.</param>
+    public static Outcome<TriangleSourceAdapter> ReadVolumeDepth(Transaction tr, ObjectId volumeSurfaceId, AdapterConfig cfg, Pt? readWindowMin = null, Pt? readWindowMax = null)
+        => ReadVolumeTin(tr, volumeSurfaceId, cfg, UserVolumeSurfaces.DepthPerTinZ, readWindowMin, readWindowMax);
+
+    /// <summary>A volume surface's TIN with every Z multiplied by <paramref name="zScale"/>: 1 reads the stored values (the SVADAPTERS sign measurement), <see cref="UserVolumeSurfaces.DepthPerTinZ"/> gives depth.</summary>
+    internal static Outcome<TriangleSourceAdapter> ReadVolumeTin(Transaction tr, ObjectId volumeSurfaceId, AdapterConfig cfg, double zScale, Pt? readWindowMin = null, Pt? readWindowMax = null)
+    {
+        ArgumentNullException.ThrowIfNull(tr);
+        ArgumentNullException.ThrowIfNull(cfg);
+        if (volumeSurfaceId.IsNull || volumeSurfaceId.IsErased)
+            return Outcome<TriangleSourceAdapter>.Fail(new Problem(AdapterCodes.SourceNotFound, Severity.Error, "The volume surface to read triangles from has been erased."));
+        var obj = tr.GetObject(volumeSurfaceId, OpenMode.ForRead);
+        if (obj is not TinVolumeSurface vol)
+            return Outcome<TriangleSourceAdapter>.Fail(new Problem(AdapterCodes.VolumeSurfaceLost, Severity.Error,
+                $"'{(obj is Autodesk.Civil.DatabaseServices.Surface s ? s.Name : obj.GetType().Name)}' is not a TIN volume surface; its triangles cannot be read as depth."));
+        TinSurface? view = null;
+        try
+        {
+            view = UserVolumeSurfaces.TinView(vol);
+            return ReadTin(view, vol.Name, volumeSurfaceId, SurfaceOrigin.Native, zScale, cfg, readWindowMin, readWindowMax);
+        }
+        catch (System.Exception ex) when (ex is InvalidCastException or MissingMethodException or InvalidOperationException
+                                              or Autodesk.AutoCAD.Runtime.Exception or Autodesk.Civil.CivilException)
+        {
+            // MEASURED on 2026.2.3 only (api-findings §E): a host whose volume surface is not a TIN natively fails here, never with a number.
+            return Outcome<TriangleSourceAdapter>.Fail(new Problem(AdapterCodes.TriangleAccessUnverified, Severity.Error,
+                $"The TIN of volume surface '{vol.Name}' could not be read on this host ({ex.GetType().Name}: {ex.Message}); the integrator needs it for a volume-surface source.",
+                Fix: "Use a base and comparison pair for this analysis, and report the Civil 3D version."));
+        }
+        finally
+        {
+            if (view is not null) GC.SuppressFinalize(view);   // a second wrapper over a transaction-owned object: never disposed, never finalized (6.13)
+            GC.KeepAlive(vol);
+        }
+    }
+
+    private static Outcome<TriangleSourceAdapter> ReadTin(TinSurface tin, string name, ObjectId surfaceId, SurfaceOrigin origin, double zScale, AdapterConfig cfg, Pt? readWindowMin, Pt? readWindowMax)
+    {
         bool windowed = readWindowMin is not null && readWindowMax is not null;
         double wx0 = 0, wy0 = 0, wx1 = 0, wy1 = 0;
         if (windowed)
@@ -179,20 +237,20 @@ public sealed class TriangleSourceAdapter : ITriangleSource
                 t.Dispose();
                 if (windowed && (Math.Max(a.X, Math.Max(b.X, c.X)) < wx0 || Math.Min(a.X, Math.Min(b.X, c.X)) > wx1
                               || Math.Max(a.Y, Math.Max(b.Y, c.Y)) < wy0 || Math.Min(a.Y, Math.Min(b.Y, c.Y)) > wy1)) continue;
-                list.Add(new Tri3(new Pt3(a.X, a.Y, a.Z), new Pt3(b.X, b.Y, b.Z), new Pt3(c.X, c.Y, c.Z)));
+                list.Add(new Tri3(new Pt3(a.X, a.Y, a.Z * zScale), new Pt3(b.X, b.Y, b.Z * zScale), new Pt3(c.X, c.Y, c.Z * zScale)));
             }
         }
         double seconds = sw.Elapsed.TotalSeconds;
         if (total == 0)
             return Outcome<TriangleSourceAdapter>.Fail(new Problem(AdapterCodes.NoTriangles, Severity.Error,
-                $"Surface '{tin.Name}' has no visible triangles.", Fix: "Add data to the surface or pick another one."));
+                $"Surface '{name}' has no visible triangles.", Fix: "Add data to the surface or pick another one."));
 
         var problems = new List<Problem>();
         if (origin != SurfaceOrigin.Native)
             problems.Add(new Problem(AdapterCodes.TriangleAccessUnverified, Severity.Warning,
-                $"Surface '{tin.Name}' is a {(origin == SurfaceOrigin.Reference ? "data-shortcut reference" : "corridor")} surface. Reading its triangles was not verified headless (probe P23); the integrator is checked against Civil 3D's bounded volume on every regen, so a bad read fails the run.",
+                $"Surface '{name}' is a {(origin == SurfaceOrigin.Reference ? "data-shortcut reference" : "corridor")} surface. Reading its triangles was not verified headless (probe P23); the integrator is checked against Civil 3D's bounded volume on every regen, so a bad read fails the run.",
                 Fix: "Nothing to do unless the integrator check fails; then report the drawing."));
-        return Outcome<TriangleSourceAdapter>.Ok(new TriangleSourceAdapter(tin.Name, surfaceId, origin, list.ToArray(), total, seconds, problems,
+        return Outcome<TriangleSourceAdapter>.Ok(new TriangleSourceAdapter(name, surfaceId, origin, list.ToArray(), total, seconds, problems,
             cfg.TriangleIndexMaxCells, cfg.TriangleIndexOversizeCells), problems);
     }
 

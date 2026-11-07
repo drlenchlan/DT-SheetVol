@@ -303,4 +303,88 @@ public class FingerprintTests
     private const string PinnedBaselineValue = "5eab423dff27c3fb50fe64873ee942e006d998cf908152b87b09b0f18042e73d";
     private const string PinnedSchema1Value = "01061d44d365b2019e386cdee63b2a2d4553e181263957765b79543e234510a1";
     private const string PinnedRev2FieldsValue = "d7a084e0ad48562b7685ff3c3cd2c97d4958ca1d4b1442f522534c35ef0f7163";
+
+    // ---- Contract rev 3 (D4): a user volume surface source in the surfaces component -------
+
+    private static RunDefinition VolumeRun() => BaseRun() with { Analyses = [BaseRun().Analyses[0] with { VolumeSurface = "VOL1" }] };
+
+    private static AnalysisSurfaceState VolumeState(string name = "VOL1", string handle = "6EA", double cutFactor = 1.25, double fillFactor = 0.9,
+        double fillTotal = 200, bool outOfDate = false)
+        => new(AnalysisId, outOfDate, new RawVolume(200, fillTotal), new VolumeSurfaceSourceState(name, handle, cutFactor, fillFactor));
+
+    [Theory]
+    [InlineData("name")]          // renamed in the drawing; the run still asks for VOL1 and finds it by handle (E445)
+    [InlineData("handle")]        // replaced by another surface of the same name (E803)
+    [InlineData("cut factor")]
+    [InlineData("fill factor")]
+    [InlineData("totals")]        // post-rebuild totals
+    [InlineData("out of date")]
+    public void Changing_one_volume_surface_input_changes_the_surfaces_component_only(string change)
+    {
+        AnalysisSurfaceState changed = change switch
+        {
+            "name" => VolumeState(name: "VOL1-renamed"),
+            "handle" => VolumeState(handle: "7FF"),
+            "cut factor" => VolumeState(cutFactor: 1.3),
+            "fill factor" => VolumeState(fillFactor: 0.85),
+            "totals" => VolumeState(fillTotal: 200.5),
+            "out of date" => VolumeState(outOfDate: true),
+            _ => throw new ArgumentOutOfRangeException(nameof(change)),
+        };
+        RunFingerprint before = Fingerprints.Compute(Input(VolumeRun(), surface: VolumeState()));
+        RunFingerprint after = Fingerprints.Compute(Input(VolumeRun(), surface: changed));
+        Assert.NotEqual(before.Value, after.Value);
+        Assert.Equal([Fingerprints.SurfacesComponent], Fingerprints.Compare(before, after).ChangedComponents);
+    }
+
+    [Fact]
+    public void A_volume_surface_source_and_a_pair_with_equal_totals_differ_in_the_surfaces_component()
+    {
+        var pair = new AnalysisSurfaceState(AnalysisId, false, new RawVolume(200, 200));
+        Assert.NotEqual(
+            Fingerprints.SurfacesSignature(VolumeRun(), [pair]),
+            Fingerprints.SurfacesSignature(VolumeRun(), [VolumeState()]));
+    }
+
+    [Fact]
+    public void Same_volume_surface_inputs_give_the_same_fingerprint()
+    {
+        RunFingerprint a = Fingerprints.Compute(Input(VolumeRun(), surface: VolumeState()));
+        RunFingerprint b = Fingerprints.Compute(Input(VolumeRun(), surface: VolumeState()));
+        Assert.Equal(a, b);
+        Assert.False(Fingerprints.Compare(a, b).IsStale);
+    }
+
+    [Fact]
+    public void Auto_mode_and_known_segments_stay_out_with_a_volume_surface_source()
+    {
+        RunFingerprint a = Fingerprints.Compute(Input(VolumeRun(), surface: VolumeState()));
+        RunFingerprint b = Fingerprints.Compute(Input(VolumeRun() with
+        {
+            AutoMode = AutoMode.All,
+            KnownSegments = [new SegmentDef(SegA, "1", 0, 500, -100, 100)],
+        }, surface: VolumeState()));
+        Assert.Equal(a.Value, b.Value);
+    }
+
+    [Fact]
+    public void The_stored_factors_of_a_volume_surface_analysis_stay_in_the_definition_and_the_surface_factors_in_the_surfaces()
+    {
+        // Rule 1: the stored factors are ignored by the computation but remain part of the definition;
+        // the surface's own factors, which govern, are in the surfaces component.
+        RunFingerprint before = Fingerprints.Compute(Input(VolumeRun(), surface: VolumeState()));
+        RunFingerprint stored = Fingerprints.Compute(Input(VolumeRun() with { Analyses = [VolumeRun().Analyses[0] with { CutFactor = 2 }] }, surface: VolumeState()));
+        RunFingerprint surface = Fingerprints.Compute(Input(VolumeRun(), surface: VolumeState(cutFactor: 2)));
+        Assert.Equal([Fingerprints.DefinitionComponent], Fingerprints.Compare(before, stored).ChangedComponents);
+        Assert.Equal([Fingerprints.SurfacesComponent], Fingerprints.Compare(before, surface).ChangedComponents);
+    }
+
+    [Fact]
+    public void Volume_surface_fingerprint_is_stable_across_runs()
+    {
+        // Pinned at SVFP3 with the D4 "volumesurface" section. The pair pins above are unchanged by it.
+        Assert.Equal(PinnedVolumeSurfaceValue, Fingerprints.Compute(Input(VolumeRun(), surface: VolumeState())).Value);
+    }
+
+    private const string PinnedVolumeSurfaceValue = "9c653417b5e6378dffa760b651cd2cbe24295c3573fcf07f298260f561f5816c";
 }

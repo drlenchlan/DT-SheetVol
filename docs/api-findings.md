@@ -1926,3 +1926,103 @@ properties of `VolumeSurfaceProperties` only; `BoundariesDefinition` is on `Surf
 5. A boundary on the user's volume surface clips the result (item 6). The same
    Base + Comparison picked as a pair would give different numbers, so the source kind has
    to show in the report.
+
+## E. The sign on a TIN volume surface's TIN, and reading that TIN (rev3-adapters)
+
+**Question** (contract revision 3, ITriangleSource note; NOW.md rule 3): for a volume-surface
+analysis the integrator reads the volume surface's own TIN with Z normalised to depth
+d = base − comparison. What Z does Civil 3D store on that TIN, and how is the TIN read when
+`TinVolumeSurface` has no triangle API (A.17)? MEASURED 2026-11-06 in the Civil 3D 2026 Core
+Console (AeccDbMgd 13.8, plugin compiled against 13.7), SVADAPTERS rows E1, E423, E1012,
+E404 and E422.
+
+### E.0 How to rerun
+
+```powershell
+dotnet build .\SheetVol.slnx -c Debug
+.\tools\test-headless.ps1 -Script .\tools\scripts\adapters.scr
+```
+
+Code: `src/SheetVol.Civil3D/Adapters/AdapterCheckVolumeSurface.cs` (rows),
+`UserVolumeSurfaces.cs` (`DepthPerTinZ`, `TinView`, the guard), `TriangleSourceAdapter.ReadVolumeDepth`.
+The script saves the scratch drawing as `%TEMP%\sheetvol\adapters-<checkout>.dwg` first, so
+the pipeline rows' ExportOnly files land there and never beside the repo's blank drawing.
+
+### E.1 Summary
+
+| Item | Measured | Rule |
+|---|---|---|
+| Sign | Base flat 100, comparison flat 98 over one 10 × 10 square: both triangles of the volume surface's TIN carry Z = −2 on every vertex, and `FindElevationAtXY` gives −2. The TIN stores **comparison − base**; `UnadjustedCut` = 200 (base above comparison is cut, P1) | depth d = −Z: `UserVolumeSurfaces.DepthPerTinZ = −1`; SVADAPTERS fails if a host ever stores the other sign |
+| Triangle access | `TinVolumeSurface` derives from `Surface` and has no `GetTriangles` (A.17), but its native class is `AeccDbSurfaceTin` (S4 D5). A `TinSurface` wrapper over the same native pointer (`DisposableWrapper.Create(typeof(TinSurface), vol.UnmanagedObject, false)`) returns the volume surface's own visible triangles through `GetTriangles(false)` | the wrapper does not own the object: never disposed, finalizer suppressed, the `TinVolumeSurface` kept alive while it is read |
+| Integrator on that TIN | Depth source as base, a flat Z = 0 plane as comparison (rev 3 interim): integrator = `GetBoundedVolumes` on the same surface to 6.2e-16 relative on T2's four segments | E1012 holds; the zero plane goes when C5's one-source overloads land |
+| Factors | Factors 1.25 / 0.9 on the user surface, stored analysis factors 2 / 2: raw bounded volumes equal the pair's exactly (diff 0), factored values are raw × 1.25 / raw × 0.9 | rule 1: the surface's factors govern through the effective `AnalysisDef` |
+| User outer boundary | −150..800 × −250..250 on the user surface: seg 2 cut 2700 → 0 and seg 3 fill 4050 → 0 in both `GetBoundedVolumes` and the integrator; segs 3 and 4 have no triangles left (SV-E827, D10) | the boundary clips both alike (S4 D6) |
+| Boundary over a hidden comparison | By this row FG_A carries E1013's hide boundary (105..145 × −20..20). The pair and the unbounded user surface both leave that hole out (seg 1 cut 1574.07); the user surface **with** its outer boundary counts seg 1 cut 2462.96, so the hole is only partly honoured once the volume surface has its own boundary. Cause not isolated. The integrator reads the same TIN and agrees (4.8e-16) | reported, not corrected: the user's surface is the answer for a volume-surface source (E423); open item below |
+| Staleness, erase | FG_A apex lowered: the user surface reads `IsOutOfDate=False` in the same command, `True` two commands later; RebuildSources off fails E404 naming it, on rebuilds it (seg 2 cut 2700 → 5400, equal to the pair). EG erased: same command still a `TinVolumeSurface` with an erased base (E422 names EG); next command a plain `TinSurface` (`IsVolumeSurface=False`), E422 names it and the stored pair's missing base | S4's facts hold through the product path |
+
+### E.2 Output (verbatim, `adapters.log`)
+
+```text
+E1 'SV-A1-SIGN-VOL' (handle 751, wrapper TinVolumeSurface, ObjectClass AeccDbSurfaceTin): base 'SV-A1-SIGN-BASE' flat 100, comparison 'SV-A1-SIGN-CMP' flat 98 over [30000,30010] x [30000,30010]
+E1 GetVolumeProperties: UnadjustedCut=200 UnadjustedFill=0 UnadjustedNet=-200; FindElevationAtXY(centre)=-2; GetTinProperties().NumberOfTriangles=2
+E1 TIN triangle (raw Z): (30010, 30010, -2) (30000, 30010, -2) (30000, 30000, -2)
+E1 TIN triangle (raw Z): (30010, 30000, -2) (30010, 30010, -2) (30000, 30000, -2)
+E1 measured: 2 visible triangles, every vertex Z in {-2}; comparison - base = -2, base - comparison = 2
+CHECK E1 volume TIN sign: PASS the TIN stores comparison - base (-2) = True; DepthPerTinZ = -1; ReadVolumeDepth vertex Z in {2} = base - comparison: True
+user volume surface 'SV-A1-USERVOL' (handle 752, untagged, made with FX's API): EG vs FG_A, factors 1.25/0.9, boundaries 0, triangles 72
+E423 effective analysis (what Core applied and Output reads): VolumeSurface='SV-A1-USERVOL' base 'EG' comparison 'FG_A' factors 1.25/0.9; stored run factors 2/2 (ignored), stored VolumeSurface='SV-A1-USERVOL'
+E423 | segment     | pair raw cut / fill ft3 | volume raw cut / fill ft3 | diff       | volume cut / fill CY  | raw CY x 1.25 / x 0.9 | result
+E423 |    0-500    | 1574.074074074078 / 1350.0000000002588 | 1574.074074074078 / 1350.0000000002588 | 0.00E+00/0.00E+00 |   72.8738 / 45        |   72.8738 / 45        | PASS
+E423 |  500-1300   | 2700.0000000000023 / 0          | 2700.0000000000023 / 0           | 0.00E+00/0.00E+00 |       125 / 0         |       125 / 0         | PASS
+E423 | 1300-1800   |          0 / 4050       |           0 / 4050        | 0.00E+00/0.00E+00 |         0 / 135       |         0 / 135       | PASS
+E423 | 1800-2000   |          0 / 0          |           0 / 0           | 0.00E+00/0.00E+00 |         0 / 0         |         0 / 0         | PASS
+CHECK E423 same raw bounded volumes as the pair, factored by the surface's 1.25 / 0.9: PASS 4 segments; the stored factors 2 had no effect; effective factors 1.25/0.9
+CHECK E1012 integrator on the volume surface's TIN agrees with GetBoundedVolumes (pipeline, 4 segments): PASS largest relative difference 6.22E-16 (fixture tolerance 1.00E-09); no SV-E1012, no SV-E827
+CHECK E404 Info and E423 Info name the surface: PASS rebuilt under RebuildSources (D21); its factors govern
+E1012 direct | segment     | integrator cut / fill ft3   | bounded cut / fill ft3      | relative diff | coverage
+E1012 direct |    0-500    | 1574.0740740740764 / 1350.000000000257 | 1574.074074074078 / 1350.0000000002588 |      6.22E-16 | 0.984
+E1012 direct |  500-1300   | 2700.0000000000027 / 0            | 2700.0000000000023 / 0            |      1.68E-16 | 1
+E1012 direct | 1300-1800   |            0 / 4050.000000000001 |            0 / 4050         |      2.25E-16 | 1
+E1012 direct | 1800-2000   |            0 / 0            |            0 / 0            |      0.00E+00 | 1
+CHECK E1012 direct: integrator on the depth TIN = GetBoundedVolumes on every segment: PASS tolerance 1.00E-09 relative
+CHECK E1012 direct: D4 status state equals the regen state: PASS name 'SV-A1-USERVOL' handle 752 factors 1.25/0.9 totals 4274.07407407408/5400.000000000405 out of date False
+user volume surface 'SV-A1-USERVOL-OUTER' (handle 753, untagged, made with FX's API): EG vs FG_A, factors 1/1, boundaries 1, triangles 50
+E423 outer |    0-500    | pair raw 1574.074074074078 / 1350.0000000002588 | volume surface with outer boundary raw 2462.962962962981 / 1350.0000000002588 | coverage 1
+E423 outer |  500-1300   | pair raw 2700.0000000000023 / 0 | volume surface with outer boundary raw 0 / 0 | coverage 0.375
+E423 outer | 1300-1800   | pair raw 0 / 4050 | volume surface with outer boundary raw 0 / 0 | coverage 0
+E423 outer | 1800-2000   | pair raw 0 / 0 | volume surface with outer boundary raw 0 / 0 | coverage 0
+CHECK E423 user outer boundary clips the bounded volumes (seg 2 cut and seg 3 fill to 0): PASS seg 2 cut 2700.0000000000023 -> 0; seg 3 fill 4050 -> 0
+E423 outer seg 1 (inside the boundary; FG_A carries E1013's hide boundary): pair cut 1574.074074074078, bounded user surface cut 2462.962962962981, fill 1350.0000000002588 / 1350.0000000002588
+CHECK E1012 with the boundary: pipeline cross-check passes where the TIN has triangles: PASS largest relative difference 4.77E-16; segments with no triangles left report SV-E827 (D10): 2
+E423 outer direct | segment     | integrator cut / fill ft3   | bounded cut / fill ft3      | relative diff | coverage
+E423 outer direct |    0-500    | 2462.96296296298 / 1350.000000000257 | 2462.962962962981 / 1350.0000000002588 |      4.77E-16 | 1
+E423 outer direct |  500-1300   |            0 / 0            |            0 / 0            |      0.00E+00 | 0.375
+E423 outer direct | 1300-1800   | no triangles in the window   |            0 / 0            | -             | -  (both empty)
+E423 outer direct | 1800-2000   | no triangles in the window   |            0 / 0            | -             | -  (both empty)
+CHECK E423 outer direct: integrator on the depth TIN = GetBoundedVolumes on every segment: PASS tolerance 1.00E-09 relative
+E404 setup: FG_A vertex (1125, 0) z 99 -> 98; 'SV-A1-USERVOL' IsOutOfDate=False in the same command (S4: flags in the next); SVADAPTERS_VS reads it
+E404 'SV-A1-USERVOL': IsOutOfDate=True at the start of this command
+CHECK E404 RebuildSources off with the surface out of date fails naming it: PASS Error: Analysis 'volume SV-A1-USERVOL': volume surface 'SV-A1-USERVOL' is out of date and RebuildSources is off.
+CHECK E404 RebuildSources on rebuilds it (Info naming it) and the numbers follow the edit: PASS seg 2 raw cut now 5400.000000000005 (pair 5400.000000000005; 2700 before the edit)
+E422 setup: EG.Erase() IsErased=True; 'SV-A1-USERVOL' is still a TinVolumeSurface in this command (S4)
+CHECK E422 erasing EG then regenerating fails naming EG: PASS Analysis 'volume SV-A1-USERVOL': volume surface 'SV-A1-USERVOL': its base surface 'EG' was erased. Civil 3D reports nothing (S4); SheetVol never computes on it.
+E422 'SV-A1-USERVOL' now opens as TinSurface, IsVolumeSurface=False
+CHECK E422 next command: no longer a TIN volume surface, the lost base named: PASS Analysis 'volume SV-A1-USERVOL': volume surface 'SV-A1-USERVOL' is no longer a TIN volume surface: Civil 3D turns a volume surface into a plain TIN surface once its base or comparison is erased (last resolved pair: base 'EG', comparison 'FG_A'; not in the drawing now: base 'EG'). SheetVol never computes on it.
+```
+
+Seg 1's cut is 1574.07 rather than T2's 2700 for the pair and the user surface alike: by these
+rows FG_A carries E1013's hide boundary, which `GetBoundedVolumes` and the visible triangles
+both leave out.
+
+### E.3 Open items
+
+- **Boundary over a hidden comparison** (E.1, row 6): a user boundary on a volume surface whose
+  comparison has a hide boundary partly drops the hide (seg 1 cut 1574.07 unbounded,
+  2462.96 bounded). Not isolated: whether Civil 3D rebuilds the bounded volume surface from
+  the comparison's hidden triangles is unprobed. SheetVol reports what the user's surface
+  says and both of its numbers agree; whether a permit table should ever see that number is
+  a question for Dan's data, not the engine.
+- The `TinSurface` view relies on the volume surface's native class staying `AeccDbSurfaceTin`
+  (2026.2.3 measured; 2025.2.7 and 2027 not run). On a host that changes it,
+  `ReadVolumeDepth` fails the run with SV-E1021 (Error) naming the surface, never with a
+  number, and E1012 still compares every segment it can read.

@@ -1,10 +1,18 @@
 namespace SheetVol.Core.Tracking;
 
-/// <summary>State of one analysis's owned volume surface at fingerprint time (6.11).</summary>
+/// <summary>State of one analysis's volume surface at fingerprint time (6.11): the owned surface of a pair analysis, or (rev 3) the user volume surface that is the analysis's source.</summary>
 /// <param name="AnalysisId">The analysis.</param>
-/// <param name="IsOutOfDate">The owned TinVolumeSurface reports out of date.</param>
-/// <param name="LastTotals">Its whole-surface totals as last read, cubic drawing units, unadjusted.</param>
-public sealed record AnalysisSurfaceState(Guid AnalysisId, bool IsOutOfDate, RawVolume LastTotals);
+/// <param name="IsOutOfDate">The TinVolumeSurface reports out of date.</param>
+/// <param name="LastTotals">Its whole-surface totals as last read, cubic drawing units, unadjusted (after the rebuild, in a regen).</param>
+/// <param name="VolumeSurface">Rev 3 (D4): the user volume surface's identity and factors when the analysis takes one as its source; null for a pair analysis.</param>
+public sealed record AnalysisSurfaceState(Guid AnalysisId, bool IsOutOfDate, RawVolume LastTotals, VolumeSurfaceSourceState? VolumeSurface = null);
+
+/// <summary>Rev 3 (D4): what the fingerprint adds for a user volume surface source, besides its out-of-date flag and totals.</summary>
+/// <param name="Name">The surface's name now.</param>
+/// <param name="Handle">Its handle now (hexadecimal, as AutoCAD prints it).</param>
+/// <param name="CutFactor">Its own cut factor (governs the analysis).</param>
+/// <param name="FillFactor">Its own fill factor.</param>
+public sealed record VolumeSurfaceSourceState(string Name, string Handle, double CutFactor, double FillFactor);
 
 /// <summary>Everything a run's outputs are derived from, read at one moment.</summary>
 /// <param name="Run">The run definition as stored.</param>
@@ -30,7 +38,7 @@ public sealed record FingerprintInput(
 /// <param name="Alignment">Alignment geometry and displayed stationing.</param>
 /// <param name="Definition">Run definition parts that shape outputs: break spec, offsets, analyses (volume-surface source included, rev 3), views, draw options, per-segment overrides (offsets included), preset, area unit.</param>
 /// <param name="Frames">View frame stations and corners.</param>
-/// <param name="Surfaces">Owned volume surface out-of-date state and last totals, per analysis.</param>
+/// <param name="Surfaces">Volume surface out-of-date state and last totals, per analysis; for a volume-surface source (rev 3, D4) also its name, handle and factors.</param>
 /// <param name="ManualSegments">Manual segment polyline geometry.</param>
 public sealed record RunFingerprint(
     string Format, string Value,
@@ -60,7 +68,10 @@ public static class Fingerprints
     /// (contract rev 2): the definition signature adds <see cref="RunDefinition.Draw"/> and the
     /// per-segment offset overrides, so every SVFP1 fingerprint compares stale once. SVFP3
     /// (contract rev 3): the ohwm section is gone and each analysis adds its
-    /// <see cref="AnalysisDef.VolumeSurface"/> presence and name.
+    /// <see cref="AnalysisDef.VolumeSurface"/> presence and name; in the surfaces component a
+    /// volume-surface source (D4) adds a "volumesurface" section with its name, handle and factors
+    /// after its totals. A pair analysis's surfaces text is the same as before that addition, and
+    /// no SVFP3 fingerprint with a volume-surface source predates it (the adoption refused them).
     /// </summary>
     public const string FormatVersion = "SVFP3";
 
@@ -168,7 +179,7 @@ public static class Fingerprints
         w.Section("analyses").Add(analyses.Count);
         foreach (AnalysisDef a in analyses)
             w.Add(a.Id).Add(a.Name).Add(a.BaseSurface).Add(a.ComparisonSurface).Add(a.CutFactor).Add(a.FillFactor)
-             .Add(a.VolumeSurface is not null).Add(a.VolumeSurface);   // rev 3: presence and name; the rest of D4 is rev3-tracking's
+             .Add(a.VolumeSurface is not null).Add(a.VolumeSurface);   // rev 3: presence and name; the surface's handle, factors and totals are in the surfaces component (D4)
 
         IReadOnlyList<ManualSegmentDef> manual = run.ManualSegments ?? [];
         w.Section("manualdefs").Add(manual.Count);
@@ -234,7 +245,13 @@ public static class Fingerprints
         return [Corner(-hw, -hh), Corner(hw, -hh), Corner(hw, hh), Corner(-hw, hh)];
     }
 
-    /// <summary>Signature of the owned volume surfaces, in the run's analysis order; an analysis with no state is written as missing.</summary>
+    /// <summary>
+    /// Signature of the analyses' volume surfaces, in the run's analysis order; an analysis with no
+    /// state is written as missing. A volume-surface source (rev 3, D4) adds its name, handle and
+    /// factors after its out-of-date flag and totals, so a renamed, replaced or re-factored source
+    /// surface compares stale. <see cref="RunDefinition.KnownSegments"/> and
+    /// <see cref="RunDefinition.AutoMode"/> stay out, as everywhere.
+    /// </summary>
     public static string SurfacesSignature(RunDefinition run, IReadOnlyList<AnalysisSurfaceState> surfaces)
     {
         ArgumentNullException.ThrowIfNull(run);
@@ -245,8 +262,10 @@ public static class Fingerprints
         {
             AnalysisSurfaceState? state = surfaces.FirstOrDefault(s => s.AnalysisId == a.Id);
             w.Add(a.Id).Add(state is not null);
-            if (state is not null)
-                w.Add(state.IsOutOfDate).Add(state.LastTotals.Cut).Add(state.LastTotals.Fill);
+            if (state is null) continue;
+            w.Add(state.IsOutOfDate).Add(state.LastTotals.Cut).Add(state.LastTotals.Fill);
+            if (state.VolumeSurface is { } vs)
+                w.Section("volumesurface").Add(vs.Name).Add(vs.Handle).Add(vs.CutFactor).Add(vs.FillFactor);
         }
         return w.Sha256Hex();
     }

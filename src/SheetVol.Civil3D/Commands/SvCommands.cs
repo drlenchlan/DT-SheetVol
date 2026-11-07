@@ -8,7 +8,8 @@
 //
 //   SVDEFINE    create or edit a run: alignment, breaks, offsets, views, preset, area unit,
 //               auto mode, draw options, per-segment overrides (rev 3: no OHWM keyword, X5)
-//   SVANALYSIS  add, remove or re-factor an analysis (base, comparison, factors)
+//   SVANALYSIS  add, remove or re-factor an analysis (base, comparison, factors); rev 3:
+//               Volume adds one whose source is a user TIN volume surface (X6)
 //   SVBREAK     add, move or remove a break by typed station or pick; convert a segment to manual
 //   SVREGEN     regenerate every run (no prompts); one transaction per run (E801)
 //   SVSTATUS    clean or stale per run, warnings, coverage flags, orphaned layouts
@@ -394,14 +395,40 @@ public static class SvCommands
         var run = LoadForEdit(c, "SVANALYSIS");
         if (run is null) return;
         var surfaces = DrawingRead.Run(c.Doc, c.Engine, (src, _) => src.TinSurfaceNames());
-        string kw = c.Keyword("SVANALYSIS", ["Add", "Remove", "Factors", "List"], "List");
+        string kw = c.Keyword("SVANALYSIS", ["Add", "Volume", "Remove", "Factors", "List"], "List");
         var analyses = run.Analyses.ToList();
         switch (kw)
         {
             case "List":
                 if (analyses.Count == 0) c.Say("No analyses.");
-                foreach (var a in analyses) c.Say($"  {a.Name}: {a.BaseSurface} vs {a.ComparisonSurface}, cut factor {Cmd.Num(a.CutFactor)}, fill factor {Cmd.Num(a.FillFactor)}");
+                foreach (var a in analyses)
+                    c.Say(a.VolumeSurface is { } vs
+                        ? $"  {a.Name}: volume surface '{vs}' ({a.BaseSurface} vs {a.ComparisonSurface} when last resolved); the surface's own factors govern"
+                        : $"  {a.Name}: {a.BaseSurface} vs {a.ComparisonSurface}, cut factor {Cmd.Num(a.CutFactor)}, fill factor {Cmd.Num(a.FillFactor)}");
                 return;
+            case "Volume":
+            {
+                // Rev 3 (X6): an existing user TIN volume surface as the source; its pair and factors are read from it every regen.
+                var volumes = DrawingRead.Run<IReadOnlyList<VolumeSurfaceInfo>>(c.Doc, c.Engine, (src, _) => src.VolumeSurfaces?.List() ?? []);
+                if (volumes.Count == 0) { c.Say("SVANALYSIS: this drawing has no user TIN volume surfaces (SheetVol's own are never offered). Nothing changed."); return; }
+                foreach (var v in volumes)
+                    c.Say(v.SourcesIntact
+                        ? $"  {v.Name}: {v.BaseSurface} vs {v.ComparisonSurface}, cut factor {Cmd.Num(v.CutFactor)}, fill factor {Cmd.Num(v.FillFactor)}"
+                        : $"  {v.Name}: unavailable, its base or comparison was erased ({Adapters.AdapterCodes.VolumeSurfaceLost})");
+                string name = c.String("Analysis name (the material row label for HCFCD)", allowSpaces: true);
+                string pick = c.String($"Volume surface ({string.Join(", ", volumes.Where(v => v.SourcesIntact).Select(v => v.Name))})", allowSpaces: true);
+                var info = volumes.FirstOrDefault(v => string.Equals(v.Name, pick, StringComparison.Ordinal))
+                    ?? (volumes.Count(v => string.Equals(v.Name, pick, StringComparison.OrdinalIgnoreCase)) == 1 ? volumes.First(v => string.Equals(v.Name, pick, StringComparison.OrdinalIgnoreCase)) : null);
+                if (info is null) { c.Say($"{Adapters.AdapterCodes.SourceNotFound} '{pick}' is not a user TIN volume surface in this drawing. Nothing changed."); return; }
+                if (!info.SourcesIntact) { c.Say($"{Adapters.AdapterCodes.VolumeSurfaceLost} volume surface '{info.Name}': its base or comparison was erased. Nothing changed."); return; }
+                if (analyses.Any(a => string.Equals(a.Name, name, StringComparison.OrdinalIgnoreCase)))
+                { c.Say($"{PipelineCodes.BadInput} an analysis named '{name}' already exists. Nothing changed."); return; }
+                // BaseSurface and ComparisonSurface hold the pair as resolved now (display only); the stored
+                // factors stay 1.0 and are ignored while the surface is the source (contract AnalysisDef note).
+                analyses.Add(new AnalysisDef(Guid.NewGuid(), name, info.BaseSurface, info.ComparisonSurface, 1.0, 1.0, info.Name));
+                c.Say($"{Adapters.AdapterCodes.VolumeSurfaceSource} analysis '{name}' takes volume surface '{info.Name}' as its source: its factors (cut {Cmd.Num(info.CutFactor)}, fill {Cmd.Num(info.FillFactor)}) and any boundary on it govern; SVREGEN rebuilds it when adapters.rebuildSources is on.");
+                break;
+            }
             case "Add":
             {
                 string name = c.String("Analysis name (the material row label for HCFCD)", allowSpaces: true);
@@ -428,6 +455,8 @@ public static class SvCommands
                 string name = c.String($"Analysis ({string.Join(", ", analyses.Select(a => a.Name))})", allowSpaces: true);
                 int i = analyses.FindIndex(a => string.Equals(a.Name, name, StringComparison.OrdinalIgnoreCase));
                 if (i < 0) { c.Say($"{PipelineCodes.BadInput} no analysis named '{name}'."); return; }
+                if (analyses[i].VolumeSurface is { } vs)
+                { c.Say($"{Adapters.AdapterCodes.VolumeSurfaceSource} analysis '{analyses[i].Name}' takes volume surface '{vs}' as its source, whose own factors govern; change them on the surface in Civil 3D. Nothing changed."); return; }
                 analyses[i] = analyses[i] with { CutFactor = c.Number("Cut factor", analyses[i].CutFactor), FillFactor = c.Number("Fill factor", analyses[i].FillFactor) };
                 break;
             }
